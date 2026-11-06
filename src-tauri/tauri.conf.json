@@ -1,0 +1,90 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "edgeshell",
+  "version": "0.1.0",
+  "identifier": "com.example.edgeshell",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "bar",
+        "title": "edgeshell-bar",
+        "width": 72,
+        "height": 800,
+        "x": 0,
+        "y": 0,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
+      },
+      {
+        "label": "notch",
+        "title": "edgeshell-notch",
+        "width": 820,
+        "height": 380,
+        "x": 0,
+        "y": 0,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
+      },
+      {
+        "label": "launcher",
+        "title": "edgeshell-launcher",
+        "width": 640,
+        "height": 520,
+        "x": 0,
+        "y": 0,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
+      },
+      {
+        "label": "overlay",
+        "title": "edgeshell-overlay",
+        "width": 150,
+        "height": 440,
+        "x": 0,
+        "y": 0,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

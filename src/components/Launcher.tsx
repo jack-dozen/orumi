@@ -1,0 +1,252 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEdgeVisible } from "../useEdgeVisible";
+import Icon from "./Icon";
+
+type AppEntry = { name: string; id: string };
+type WinEntry = { hwnd: number; title: string; exe: string; minimized: boolean };
+
+/** Satu baris di daftar hasil, baik app maupun aksi. */
+type Item = {
+  key: string;
+  name: string;
+  hint?: string;
+  glyph: string;
+  dangerous?: boolean;
+  run: () => void;
+  /** true = glyph adalah nama ikon Material Symbols, bukan huruf. */
+  symbol?: boolean;
+};
+
+type ActionDef = {
+  id: string;
+  name: string;
+  hint: string;
+  glyph: string;
+  dangerous?: boolean;
+};
+
+const ACTIONS: ActionDef[] = [
+  { id: "lock", name: "Lock", hint: "Kunci layar", glyph: "lock" },
+  { id: "sleep", name: "Sleep", hint: "Tidurkan PC", glyph: "bedtime" },
+  { id: "hibernate", name: "Hibernate", hint: "Simpan sesi ke disk lalu mati", glyph: "schedule" },
+  { id: "display_off", name: "Display off", hint: "Matikan layar saja", glyph: "desktop_access_disabled" },
+  { id: "logout", name: "Sign out", hint: "Keluar dari akun", glyph: "logout", dangerous: true },
+  { id: "restart", name: "Restart", hint: "Mulai ulang PC", glyph: "restart_alt", dangerous: true },
+  { id: "shutdown", name: "Shutdown", hint: "Matikan PC", glyph: "power_settings_new", dangerous: true },
+  { id: "reload_apps", name: "Reload apps", hint: "Muat ulang daftar aplikasi", glyph: "refresh" },
+];
+
+const MAX_SHOWN = 8;
+
+/** Skor kecocokan nama dengan query. 0 = tidak cocok. */
+function score(name: string, q: string): number {
+  const n = name.toLowerCase();
+  if (n === q) return 100;
+  if (n.startsWith(q)) return 80;
+  if (n.split(/[\s\-_.]+/).some((w) => w.startsWith(q))) return 60;
+  if (n.includes(q)) return 40;
+  let i = 0;
+  for (const c of n) {
+    if (c === q[i]) i++;
+    if (i === q.length) return 20;
+  }
+  return 0;
+}
+
+const close = () => invoke("set_panel", { label: "launcher", open: false });
+
+export default function Launcher() {
+  const visible = useEdgeVisible("launcher");
+  const [apps, setApps] = useState<AppEntry[]>([]);
+  const [wins, setWins] = useState<WinEntry[]>([]);
+  const [query, setQuery] = useState("");
+  const [index, setIndex] = useState(0);
+  const [armed, setArmed] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const openedAt = useRef(0);
+
+  // Muat daftar app sekali saat app mulai (butuh 1-2 detik).
+  useEffect(() => {
+    invoke<AppEntry[]>("list_apps", { refresh: false })
+      .then(setApps)
+      .catch(() => {});
+  }, []);
+
+  // Reset dan fokus ke kotak pencarian setiap kali launcher dibuka.
+  useEffect(() => {
+    if (!visible) return;
+    openedAt.current = Date.now();
+    setQuery("");
+    setIndex(0);
+    const id = setTimeout(() => inputRef.current?.focus(), 60);
+    return () => clearTimeout(id);
+  }, [visible]);
+
+  // Klik di luar launcher (window kehilangan fokus) = tutup.
+  useEffect(() => {
+    const onBlur = () => {
+      if (Date.now() - openedAt.current > 400) close();
+    };
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, []);
+
+  // Konfirmasi batal kalau pilihan atau teks berubah.
+  useEffect(() => {
+    setArmed(null);
+  }, [query, index, visible]);
+
+  const mode = query.startsWith(">") ? "actions" : query.startsWith("@") ? "windows" : "apps";
+
+  // Muat daftar window setiap kali masuk mode "@".
+  useEffect(() => {
+    if (!visible || mode !== "windows") return;
+    invoke<WinEntry[]>("list_windows")
+      .then(setWins)
+      .catch(() => setWins([]));
+  }, [visible, mode]);
+
+  const results: Item[] = useMemo(() => {
+    if (mode === "windows") {
+      const q = query.slice(1).trim().toLowerCase();
+      const list = q
+        ? wins
+            .map((w) => ({ w, s: Math.max(score(w.title, q), score(w.exe, q)) }))
+            .filter((x) => x.s > 0)
+            .sort((x, y) => y.s - x.s)
+            .map((x) => x.w)
+        : wins;
+      return list.slice(0, MAX_SHOWN).map((w) => ({
+        key: String(w.hwnd),
+        name: w.title,
+        hint: [w.exe, w.minimized ? "diperkecil" : ""].filter(Boolean).join(" · "),
+        glyph: (w.exe || w.title).charAt(0).toUpperCase(),
+        run: () => {
+          invoke("focus_window", { hwnd: w.hwnd }).catch(() => {});
+        },
+      }));
+    }
+
+    if (mode === "actions") {
+      const q = query.slice(1).trim().toLowerCase();
+      const list = q
+        ? ACTIONS.map((a) => ({ a, s: Math.max(score(a.name, q), score(a.id, q)) }))
+            .filter((x) => x.s > 0)
+            .sort((x, y) => y.s - x.s)
+            .map((x) => x.a)
+        : ACTIONS;
+      return list.slice(0, MAX_SHOWN).map((a) => ({
+        key: a.id,
+        name: a.name,
+        hint: a.hint,
+        glyph: a.glyph,
+        symbol: true,
+        dangerous: a.dangerous,
+        run: () => {
+          if (a.id === "reload_apps") {
+            invoke<AppEntry[]>("list_apps", { refresh: true })
+              .then(setApps)
+              .catch(() => {});
+          } else {
+            invoke("run_action", { id: a.id }).catch(() => {});
+          }
+        },
+      }));
+    }
+
+    const q = query.trim().toLowerCase();
+    const list = q
+      ? apps
+          .map((a) => ({ a, s: score(a.name, q) }))
+          .filter((x) => x.s > 0)
+          .sort((x, y) => y.s - x.s || x.a.name.localeCompare(y.a.name))
+          .map((x) => x.a)
+      : apps;
+    return list.slice(0, MAX_SHOWN).map((a) => ({
+      key: a.id,
+      name: a.name,
+      glyph: a.name.charAt(0).toUpperCase(),
+      run: () => {
+        invoke("launch_app", { id: a.id }).catch(() => {});
+      },
+    }));
+  }, [apps, wins, query, mode]);
+
+  /** Jalankan item; aksi berbahaya butuh dua kali konfirmasi. */
+  const activate = (item?: Item) => {
+    if (!item) return;
+    if (item.dangerous && armed !== item.key) {
+      setArmed(item.key);
+      return;
+    }
+    close();
+    item.run();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setIndex((i) => Math.min(i + 1, results.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      activate(results[index]);
+    } else if (e.key === "Escape") {
+      close();
+    }
+  };
+
+  const emptyText =
+    mode === "windows"
+    ? wins.length === 0
+      ? "Tidak ada window terbuka"
+      : "Tidak ada hasil"
+      : mode === "actions"
+        ? "Tidak ada aksi yang cocok"
+        : apps.length === 0
+          ? "Memuat daftar aplikasi…"
+          : "Tidak ada hasil";
+
+  return (
+    <div className={`launcher ${visible ? "launcher--visible" : ""}`}>
+      <div className="launcher__list">
+        {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
+        {results.map((item, i) => (
+          <div
+            key={item.key}
+            className={`litem ${i === index ? "litem--active" : ""}`}
+            onMouseMove={() => setIndex(i)}
+            onClick={() => activate(item)}
+          >
+            <div className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}>
+              {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
+            </div>
+            <div className="litem__text">
+              <span className="litem__name">{item.name}</span>
+              {(item.hint || armed === item.key) && (
+                <span className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}>
+                  {armed === item.key ? "Tekan Enter lagi untuk konfirmasi" : item.hint}
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <input
+        ref={inputRef}
+        className="lsearch"
+        placeholder="Cari aplikasi…  (> aksi sistem,  @ pindah window)"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setIndex(0);
+        }}
+        onKeyDown={onKeyDown}
+        spellCheck={false}
+      />
+    </div>
+  );
+}
