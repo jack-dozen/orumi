@@ -89,6 +89,36 @@ static TRANSIENT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 /// Panel yang sedang dipakai mengetik: jangan ditutup otomatis.
 static HELD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
+/// Ukuran window sementara yang menggantikan PanelSpec.size (mis. launcher saat pengalih wallpaper).
+static SIZE_OVERRIDE: Mutex<Vec<(&'static str, (f64, f64))>> = Mutex::new(Vec::new());
+
+/// Ukuran launcher (satuan desain) saat menampilkan pengalih wallpaper: lebar dan pendek.
+const WALLPAPER_VIEW_SIZE: (f64, f64) = (1040.0, 300.0);
+
+fn size_override(label: &str) -> Option<(f64, f64)> {
+    SIZE_OVERRIDE
+        .lock()
+        .ok()
+        .and_then(|l| l.iter().find(|(k, _)| *k == label).map(|(_, s)| *s))
+}
+
+fn set_size_override(label: &'static str, size: Option<(f64, f64)>) {
+    if let Ok(mut l) = SIZE_OVERRIDE.lock() {
+        l.retain(|(k, _)| *k != label);
+        if let Some(s) = size {
+            l.push((label, s));
+        }
+    }
+}
+
+/// Launcher berganti tampilan: "wallpaper" melebar, selain itu kembali ke ukuran biasa.
+#[tauri::command]
+pub fn launcher_view(view: String, app: AppHandle) {
+    set_size_override("launcher", (view == "wallpaper").then_some(WALLPAPER_VIEW_SIZE));
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || crate::place_panel(&a, "launcher"));
+}
+
 /// Flag "dibuka paksa" per panel (hotkey, tray, atau klik tombol).
 pub struct Panels(pub HashMap<&'static str, Arc<AtomicBool>>);
 
@@ -192,17 +222,18 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
     let (mx, my, mw, mh, scale) = m;
     // 1 satuan desain = u pixel fisik (skala DPI monitor dikali skala UI).
     let u = scale * ui_scale();
+    let size = size_override(spec.label).unwrap_or(spec.size);
 
     match spec.edge {
         Edge::Left => {
             let inset = BAR_INSET_DIP * u;
-            let win = Rect { x: mx, y: my + inset, w: spec.size.0 * u, h: mh - 2.0 * inset };
+            let win = Rect { x: mx, y: my + inset, w: size.0 * u, h: mh - 2.0 * inset };
             let trig = Rect { x: mx, y: my, w: EDGE_TRIGGER_DIP * scale, h: mh };
             (win, trig)
         }
         Edge::Top => {
-            let w = spec.size.0 * u;
-            let h = spec.size.1 * u;
+            let w = size.0 * u;
+            let h = size.1 * u;
             let win = Rect { x: mx + (mw - w) / 2.0, y: my, w, h };
             let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
             let trig = Rect {
@@ -214,8 +245,8 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
             (win, trig)
         }
         Edge::Bottom => {
-            let w = spec.size.0 * u;
-            let h = spec.size.1 * u;
+            let w = size.0 * u;
+            let h = size.1 * u;
             let win = Rect { x: mx + (mw - w) / 2.0, y: my + mh - h, w, h };
             let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
             let trig = Rect {
@@ -227,8 +258,8 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
             (win, trig)
         }
         Edge::Right => {
-            let w = spec.size.0 * u;
-            let h = spec.size.1 * u;
+            let w = size.0 * u;
+            let h = size.1 * u;
             let win = Rect { x: mx + mw - w, y: my + (mh - h) / 2.0, w, h };
             let trig = Rect {
                 x: mx + mw - EDGE_TRIGGER_DIP * scale,
@@ -293,6 +324,11 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
     let spec = *spec;
     let _ = app.run_on_main_thread(move || {
         if show {
+            // Launcher selalu dibuka dengan ukuran biasa (tampilan wallpaper melebarkannya sendiri).
+            if spec.label == "launcher" {
+                set_size_override("launcher", None);
+            }
+
             // Layar bisa berubah (mati/nyala, resolusi, dock), jadi atur ulang tiap kali muncul.
             let _ = place(&window, &spec);
             let _ = window.set_always_on_top(true);

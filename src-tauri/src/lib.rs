@@ -12,6 +12,7 @@ mod stats;
 mod theme;
 mod wifi;
 mod winlist;
+mod wallpaper;
 
 use std::{
     collections::HashMap,
@@ -71,6 +72,15 @@ pub fn apply_layout(app: &AppHandle) {
     }
 }
 
+/// Taruh ulang satu panel (misalnya setelah ukurannya berubah).
+pub fn place_panel(app: &AppHandle, label: &str) {
+    if let Some(spec) = PANELS.iter().find(|s| s.label == label) {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = edge::place(&window, spec);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -80,6 +90,7 @@ pub fn run() {
             edge::toggle_panel,
             edge::set_panel,
             edge::panel_activation,
+            edge::launcher_view,
             config::get_config,
             config::set_config,
             stats::get_stats,
@@ -92,6 +103,9 @@ pub fn run() {
             theme::wallpaper_image,
             theme::set_theme,
             theme::get_theme,
+            wallpaper::list_wallpapers,
+            wallpaper::set_wallpaper,
+            wallpaper::run_wallpaper_command,
             media::get_media,
             media::media_control,
             media::media_seek,
@@ -145,6 +159,7 @@ pub fn run() {
             osd::start();
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
+            wallpaper::warm(app.handle().clone());
 
             // --- Hotkey global (dari config) ---
             config::init_hotkeys(app.handle(), &cfg.hotkeys)?;

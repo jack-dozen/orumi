@@ -76,6 +76,13 @@ pub struct Config {
     /// 0-100: seberapa kuat warna wallpaper terlihat di latar dan teks mode "auto".
     pub bg_tint: u8,
     pub colors: Colors,
+    /// Folder wallpaper untuk pengalih bawaan. Kosong = folder Pictures.
+    pub wallpaper_dir: String,
+    /// "builtin" (pengalih di launcher) atau "external" (jalankan perintah di bawah).
+    pub wallpaper_switcher: String,
+    pub wallpaper_command: String,
+    /// Wallpaper terakhir yang diterapkan lewat app ini. Hanya diisi backend.
+    pub last_wallpaper: String,
     pub hotkeys: Hotkeys,
 }
 
@@ -86,6 +93,10 @@ impl Default for Config {
             weather_city: "Bandung".into(),
             bg_tint: 35,
             colors: Colors::default(),
+            wallpaper_dir: String::new(),
+            wallpaper_switcher: "builtin".into(),
+            wallpaper_command: String::new(),
+            last_wallpaper: String::new(),
             hotkeys: Hotkeys::default(),
         }
     }
@@ -135,6 +146,11 @@ fn sanitize(mut c: Config) -> Config {
         c.weather_city = d.weather_city;
     }
     c.bg_tint = c.bg_tint.min(100);
+    c.wallpaper_dir = c.wallpaper_dir.trim().trim_matches('"').to_string();
+    c.wallpaper_command = c.wallpaper_command.trim().to_string();
+    if c.wallpaper_switcher != "external" {
+        c.wallpaper_switcher = "builtin".into();
+    }
     sanitize_slot(&mut c.colors.bg0, &d.colors.bg0);
     sanitize_slot(&mut c.colors.bg1, &d.colors.bg1);
     sanitize_slot(&mut c.colors.fg, &d.colors.fg);
@@ -286,6 +302,25 @@ pub fn init_hotkeys(app: &AppHandle, hk: &Hotkeys) -> tauri::Result<()> {
 }
 
 // ---------- Command ----------
+/// Simpan wallpaper terakhir yang diterapkan. Backend-only, jadi tidak lewat set_config.
+pub fn remember_wallpaper(app: &AppHandle, path: &str) {
+    let state = app.state::<ConfigState>();
+    let snapshot = {
+        let Ok(mut c) = state.0.lock() else { return };
+        c.last_wallpaper = path.to_string();
+        c.clone()
+    };
+    let _ = save(app, &snapshot);
+}
+
+/// Config terkini untuk modul Rust lain.
+pub fn current(app: &AppHandle) -> Config {
+    app.state::<ConfigState>()
+        .0
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or_default()
+}
 
 #[tauri::command]
 pub fn get_config(state: State<'_, ConfigState>) -> Config {
@@ -300,6 +335,8 @@ pub fn set_config(
 ) -> Result<SaveResult, String> {
     let old = state.0.lock().map_err(|e| e.to_string())?.clone();
     let mut new = sanitize(config);
+    // Field milik backend: jangan sampai tertimpa salinan lama dari UI.
+    new.last_wallpaper = old.last_wallpaper.clone();
     let mut warnings = Vec::new();
 
     // Hotkey baru yang gagal terdaftar: pertahankan yang lama.
@@ -314,6 +351,9 @@ pub fn set_config(
 
     save(&app, &new)?;
     *state.0.lock().map_err(|e| e.to_string())? = new.clone();
+    if new.wallpaper_dir != old.wallpaper_dir {
+        crate::wallpaper::warm(app.clone());
+    }
 
     if (new.ui_scale - old.ui_scale).abs() > f64::EPSILON {
         crate::edge::set_ui_scale(new.ui_scale);

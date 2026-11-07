@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
 import Icon from "./Icon";
+import { useConfig } from "../useConfig";
+import WallpaperPicker from "./WallpaperPicker";
 
 type AppEntry = { name: string; id: string };
 type WinEntry = { hwnd: number; title: string; exe: string; minimized: boolean };
@@ -37,6 +39,7 @@ const ACTIONS: ActionDef[] = [
   { id: "shutdown", name: "Shutdown", hint: "Matikan PC", glyph: "power_settings_new", dangerous: true },
   { id: "reload_apps", name: "Reload apps", hint: "Muat ulang daftar aplikasi", glyph: "refresh" },
   { id: "settings", name: "Settings", hint: "Pengaturan edgeshell", glyph: "tune" },
+  { id: "wallpaper", name: "Wallpaper", hint: "Ganti wallpaper desktop", glyph: "wallpaper" },
 ];
 
 const MAX_SHOWN = 8;
@@ -65,6 +68,8 @@ export default function Launcher() {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
+  const cfg = useConfig();
+  const [view, setView] = useState<"list" | "wallpaper">("list");
   const inputRef = useRef<HTMLInputElement>(null);
   const openedAt = useRef(0);
 
@@ -81,6 +86,7 @@ export default function Launcher() {
     openedAt.current = Date.now();
     setQuery("");
     setIndex(0);
+    setView("list");
     const id = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(id);
   }, [visible]);
@@ -186,6 +192,18 @@ export default function Launcher() {
       setArmed(item.key);
       return;
     }
+    // Wallpaper: pengalih bawaan membuka tampilan thumbnail di dalam launcher;
+    // mode "perintah luar" menjalankan perintah dari config lalu menutup launcher.
+    if (mode === "actions" && item.key === "wallpaper") {
+      if (cfg?.wallpaper_switcher === "external") {
+        close();
+        invoke("run_wallpaper_command").catch(() => {});
+      } else {
+        // Lebarkan panel dulu, baru tampilkan carousel.
+        invoke("launcher_view", { view: "wallpaper" }).finally(() => setView("wallpaper"));
+      }
+      return;
+    }
     close();
     item.run();
   };
@@ -214,6 +232,17 @@ export default function Launcher() {
         : apps.length === 0
           ? "Memuat daftar aplikasi…"
           : "Tidak ada hasil";
+
+          if (view === "wallpaper") {
+            return (
+              <div className={`launcher ${visible ? "launcher--visible" : ""}`}>
+                <WallpaperPicker
+                  onBack={() => invoke("launcher_view", { view: "list" }).finally(() => setView("list"))}
+                  onDone={close}
+                  />
+              </div>
+            );
+          }
 
   return (
     <div className={`launcher ${visible ? "launcher--visible" : ""}`}>

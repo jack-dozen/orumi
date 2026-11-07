@@ -19,6 +19,9 @@ export type Config = {
   weather_city: string;
   bg_tint: number;
   colors: Colors;
+  wallpaper_dir: string;
+  wallpaper_switcher: "builtin" | "external";
+  wallpaper_command: string;
   hotkeys: Hotkeys;
 };
 

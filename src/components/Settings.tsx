@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { saveConfig, useConfig, type ColorSlot, type Config } from "../useConfig";
 import Icon from "./Icon";
+import WallpaperSettings from "./WallpaperSettings";
 
 /** Notch normalnya tidak mengambil fokus; untuk mengetik ia perlu diizinkan sementara. */
 const activate = (enable: boolean) =>
@@ -182,6 +183,9 @@ export default function AppSettings() {
             }}
           />
         </Row>
+
+        <div className="appset__title">Wallpaper</div>
+        <WallpaperSettings />
       </div>
 
       <div className="appset__col">

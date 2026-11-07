@@ -28,6 +28,11 @@ fn wallpaper_path() -> Option<String> {
     (!path.is_empty()).then_some(path)
 }
 
+/// Path wallpaper aktif menurut Windows (untuk modul lain).
+pub fn current_wallpaper_path() -> Option<String> {
+    wallpaper_path()
+}
+
 /// Penanda murah untuk mendeteksi wallpaper berganti (path + waktu ubah + ukuran).
 #[tauri::command]
 pub fn wallpaper_stamp() -> Option<String> {
