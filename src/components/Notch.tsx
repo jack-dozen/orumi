@@ -13,6 +13,8 @@ import Gauge from "./Gauge";
 import Icon from "./Icon";
 import { MediaTab, MiniPlayer } from "./Media";
 import WeatherCard from "./Weather";
+import { useConfig } from "../useConfig";
+import AppSettings, { ColorSettings } from "./Settings";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -175,7 +177,7 @@ function SystemTab({
   );
 }
 
-function SettingsTab({ wifi }: { wifi: WifiStatus | null }) {
+function QuickSettings({ wifi }: { wifi: WifiStatus | null }) {
   const openPage = (page: string) => invoke("open_settings_page", { page });
   const wifiOn = !!wifi?.adapter && wifi.connected;
 
@@ -209,6 +211,42 @@ function SettingsTab({ wifi }: { wifi: WifiStatus | null }) {
   );
 }
 
+type SettingsSection = "quick" | "app" | "color";
+
+function SettingsTab({
+  wifi,
+  section,
+  onSection,
+}: {
+  wifi: WifiStatus | null;
+  section: SettingsSection;
+  onSection: (s: SettingsSection) => void;
+}) {
+  const sections: [SettingsSection, string][] = [
+    ["quick", "Cepat"],
+    ["app", "Aplikasi"],
+    ["color", "Warna"],
+  ];
+  return (
+    <div className="settingsroot">
+      <div className="segmented">
+        {sections.map(([id, label]) => (
+          <button
+            key={id}
+            className={section === id ? "segmented__on" : ""}
+            onClick={() => onSection(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {section === "quick" && <QuickSettings wifi={wifi} />}
+      {section === "app" && <AppSettings />}
+      {section === "color" && <ColorSettings />}
+    </div>
+  );
+}
+
 export default function Notch() {
   const visible = useEdgeVisible("notch");
   const [tab, setTab] = useState<TabId>("dashboard");
@@ -219,12 +257,35 @@ export default function Notch() {
   const procs = useProcesses(visible && tab === "system");
   const gpu = useGpu(visible && (tab === "dashboard" || tab === "system"));
   const wifi = useWifi(visible && (tab === "system" || tab === "settings"));
-  const weather = useWeather();
+  const cfg = useConfig();
+  const weather = useWeather(cfg?.weather_city ?? "Bandung");
+  const [section, setSection] = useState<SettingsSection>("quick");
+
+  // Notch ditutup: kembalikan ke mode "tidak merebut fokus" (kalau sempat dipakai mengetik).
+  useEffect(() => {
+    if (!visible) invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+  }, [visible]);
+
+  // Window kehilangan fokus (klik ke app lain): lepas penahan "sedang mengetik".
+  useEffect(() => {
+    const onBlur = () => {
+      // Dialog warna native membuat window kehilangan fokus; jangan lepas penahan selama itu.
+      const el = document.activeElement as HTMLInputElement | null;
+      if (el?.tagName === "INPUT" && el.type === "color") return;
+      invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+    };
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, []);
 
   // Bar bisa meminta notch pindah ke tab tertentu (klik jam atau ikon WiFi).
   useEffect(() => {
     const unlisten = listen<string>("notch-tab", (e) => {
-      if (TABS.some((t) => t.id === e.payload)) setTab(e.payload as TabId);
+      const [t, sub] = e.payload.split("/");
+      if (TABS.some((x) => x.id === t)) setTab(t as TabId);
+      if (t === "settings" && (sub === "quick" || sub === "app" || sub === "color")) {
+        setSection(sub);
+      }
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -252,7 +313,9 @@ export default function Notch() {
         )}
         {tab === "media" && <MediaTab media={media} />}
         {tab === "system" && <SystemTab stats={stats} procs={procs} gpu={gpu} wifi={wifi} />}
-        {tab === "settings" && <SettingsTab wifi={wifi} />}
+        {tab === "settings" && (
+          <SettingsTab wifi={wifi} section={section} onSection={setSection} />
+        )}
       </div>
     </div>
   );

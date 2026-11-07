@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { WEATHER_CITY } from "./config";
 
 export type Weather = {
   city: string;
@@ -104,7 +103,7 @@ async function fetchCurrent(geo: Geo): Promise<Weather> {
 }
 
 /** Cuaca kota di config. Diperbarui tiap 30 menit, dicoba ulang 2 menit setelah gagal. */
-export function useWeather(): Weather | null {
+export function useWeather(city: string): Weather | null {
   const [weather, setWeather] = useState<Weather | null>(() => readCache<Weather>(WEATHER_KEY));
 
   useEffect(() => {
@@ -114,7 +113,7 @@ export function useWeather(): Weather | null {
     const run = async () => {
       let next = REFRESH_MS;
       try {
-        const geo = await geocode(WEATHER_CITY);
+        const geo = await geocode(city);
         const current = await fetchCurrent(geo);
         if (!cancelled) {
           setWeather(current);
@@ -131,7 +130,7 @@ export function useWeather(): Weather | null {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [city]);
 
   return weather;
 }

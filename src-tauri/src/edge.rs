@@ -1,13 +1,14 @@
 use std::{
     collections::HashMap,
+    ffi::c_void,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 
 /// Seberapa tipis zona pemicu di tepi layar (DIP).
 const EDGE_TRIGGER_DIP: f64 = 2.0;
@@ -16,15 +17,32 @@ const HIDE_DELAY: Duration = Duration::from_millis(400);
 /// Kursor harus diam di tepi selama ini sebelum panel muncul (mencegah muncul tidak sengaja).
 const EDGE_DWELL: Duration = Duration::from_millis(200);
 /// Panel yang dibuka lewat klik tapi tidak pernah dimasuki kursor ditutup setelah ini.
-const PIN_GRACE: Duration = Duration::from_secs(4);
-/// Skala seluruh UI: ukuran window dan isinya. 1.0 = ukuran desain asli.
-/// Kecilkan kalau terasa terlalu besar, besarkan kalau terlalu kecil.
-pub const UI_SCALE: f64 = 0.8;
-/// Jarak bar dari tepi atas dan bawah layar (dalam satuan desain, sebelum UI_SCALE).
-const BAR_INSET_DIP: f64 = 12.0;
+const PIN_GRACE: Duration = Duration::from_secs(6);
 const POLL_INTERVAL: Duration = Duration::from_millis(30);
 /// Seberapa sering ukuran monitor dibaca ulang.
 const METRICS_REFRESH: Duration = Duration::from_secs(5);
+/// Jarak bar dari tepi atas dan bawah layar (satuan desain, sebelum skala UI).
+const BAR_INSET_DIP: f64 = 12.0;
+
+// ---------- Skala UI (bisa diubah saat berjalan) ----------
+
+static UI_SCALE_BITS: AtomicU64 = AtomicU64::new(0);
+
+/// Skala seluruh UI: ukuran window dan isinya. 1.0 = ukuran desain asli.
+pub fn ui_scale() -> f64 {
+    let bits = UI_SCALE_BITS.load(Ordering::Relaxed);
+    if bits == 0 {
+        0.8
+    } else {
+        f64::from_bits(bits)
+    }
+}
+
+pub fn set_ui_scale(v: f64) {
+    UI_SCALE_BITS.store(v.to_bits(), Ordering::Relaxed);
+}
+
+// ---------- Panel ----------
 
 #[derive(Clone, Copy)]
 pub enum Edge {
@@ -39,11 +57,10 @@ pub enum Edge {
 pub struct PanelSpec {
     pub label: &'static str,
     pub edge: Edge,
-    /// Ukuran window dalam DIP (lebar, tinggi).
+    /// Ukuran window dalam satuan desain (lebar, tinggi).
     /// Untuk Edge::Left tinggi diabaikan (setinggi layar).
     pub size: (f64, f64),
-    /// Panjang zona pemicu di tepi, dalam DIP, di tengah tepi.
-    /// None = sepanjang sisi/lebar window.
+    /// Panjang zona pemicu di tepi, di tengah tepi. None = sepanjang sisi/lebar window.
     pub trigger_len: Option<f64>,
     /// true = muncul saat kursor menyentuh tepi dan hilang saat kursor menjauh.
     /// false = hanya mengikuti flag (hotkey, tombol, atau perintah dari React).
@@ -52,24 +69,25 @@ pub struct PanelSpec {
     pub focus: bool,
 }
 
-/// Panel yang dibuka lewat klik di UI (bukan hotkey/tray): menutup sendiri saat kursor menjauh.
-static TRANSIENT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
-
-fn is_transient(label: &str) -> bool {
-    TRANSIENT
-        .lock()
-        .map(|t| t.iter().any(|l| *l == label))
-        .unwrap_or(false)
-}
-
-fn set_transient_flag(label: &'static str, on: bool) {
-    if let Ok(mut t) = TRANSIENT.lock() {
-        t.retain(|l| *l != label);
+fn flag_set(list: &Mutex<Vec<&'static str>>, label: &'static str, on: bool) {
+    if let Ok(mut l) = list.lock() {
+        l.retain(|x| *x != label);
         if on {
-            t.push(label);
+            l.push(label);
         }
     }
 }
+
+fn flag_has(list: &Mutex<Vec<&'static str>>, label: &str) -> bool {
+    list.lock()
+        .map(|l| l.iter().any(|x| *x == label))
+        .unwrap_or(false)
+}
+
+/// Panel yang dibuka lewat klik di UI (bukan hotkey/tray): menutup sendiri saat kursor menjauh.
+static TRANSIENT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+/// Panel yang sedang dipakai mengetik: jangan ditutup otomatis.
+static HELD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
 /// Flag "dibuka paksa" per panel (hotkey, tray, atau klik tombol).
 pub struct Panels(pub HashMap<&'static str, Arc<AtomicBool>>);
@@ -78,7 +96,8 @@ impl Panels {
     /// Hotkey dan tray: terbuka menetap sampai ditutup lagi.
     pub fn toggle(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
-            set_transient_flag(*key, false);
+            flag_set(&TRANSIENT, key, false);
+            flag_set(&HELD, key, false);
             flag.fetch_xor(true, Ordering::Relaxed);
         }
     }
@@ -86,7 +105,8 @@ impl Panels {
     pub fn set(&self, label: &str, open: bool) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
             if !open {
-                set_transient_flag(*key, false);
+                flag_set(&TRANSIENT, key, false);
+                flag_set(&HELD, key, false);
             }
             flag.store(open, Ordering::Relaxed);
         }
@@ -95,7 +115,7 @@ impl Panels {
     /// Klik di UI: terbuka, lalu menutup sendiri saat kursor menjauh.
     pub fn set_transient(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
-            set_transient_flag(*key, true);
+            flag_set(&TRANSIENT, key, true);
             flag.store(true, Ordering::Relaxed);
         }
     }
@@ -128,6 +148,29 @@ pub fn set_panel(label: String, open: bool, panels: State<'_, Panels>) {
     }
 }
 
+/// Izinkan bar/notch mengambil fokus keyboard sementara (untuk mengetik di dalamnya).
+/// enable = false mengembalikannya ke mode "tidak merebut fokus".
+#[tauri::command]
+pub fn panel_activation(
+    label: String,
+    enable: bool,
+    app: AppHandle,
+    panels: State<'_, Panels>,
+) {
+    if label != "bar" && label != "notch" {
+        return;
+    }
+    if let Some((key, _)) = panels.0.get_key_value(label.as_str()) {
+        flag_set(&HELD, key, enable);
+    }
+    if let Some(window) = app.get_webview_window(&label) {
+        set_activatable(&window, enable);
+        if enable {
+            let _ = window.set_focus();
+        }
+    }
+}
+
 struct Rect {
     x: f64,
     y: f64,
@@ -147,8 +190,8 @@ type Metrics = (f64, f64, f64, f64, f64);
 /// Hitung (rect window, rect zona pemicu) dalam pixel fisik.
 fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
     let (mx, my, mw, mh, scale) = m;
-    // 1 satuan desain = u pixel fisik (skala DPI monitor dikali UI_SCALE).
-    let u = scale * UI_SCALE;
+    // 1 satuan desain = u pixel fisik (skala DPI monitor dikali skala UI).
+    let u = scale * ui_scale();
 
     match spec.edge {
         Edge::Left => {
@@ -219,10 +262,9 @@ pub fn place(window: &WebviewWindow, spec: &PanelSpec) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Window tidak mengambil fokus saat diklik, jadi mengklik bar atau notch
-/// tidak memutus ketikan di aplikasi yang sedang aktif.
-pub fn set_no_activate(window: &WebviewWindow) {
-    use std::ffi::c_void;
+/// activatable = false: window tidak mengambil fokus saat diklik (bar dan notch),
+/// jadi mengklik bar atau notch tidak memutus ketikan di aplikasi yang sedang aktif.
+pub fn set_activatable(window: &WebviewWindow, activatable: bool) {
     use windows::Win32::{
         Foundation::HWND,
         UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, GWL_EXSTYLE, WS_EX_NOACTIVATE},
@@ -234,7 +276,12 @@ pub fn set_no_activate(window: &WebviewWindow) {
         let hwnd = HWND(h.0 as isize as *mut c_void);
         unsafe {
             let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            SetWindowLongW(hwnd, GWL_EXSTYLE, (ex | WS_EX_NOACTIVATE.0) as i32);
+            let new = if activatable {
+                ex & !WS_EX_NOACTIVATE.0
+            } else {
+                ex | WS_EX_NOACTIVATE.0
+            };
+            SetWindowLongW(hwnd, GWL_EXSTYLE, new as i32);
         }
     }
 }
@@ -326,7 +373,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         p.outside_since = None;
                         set_visible(&app, &p.window, &p.event, true, &p.spec);
                     }
-                    if is_transient(p.spec.label) {
+                    if flag_has(&TRANSIENT, p.spec.label) && !flag_has(&HELD, p.spec.label) {
                         let (win_rect, _) = layout(&p.spec, m);
                         if win_rect.contains(cursor.x, cursor.y) {
                             p.pin_entered = true;
@@ -337,7 +384,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                             if since.elapsed() >= limit {
                                 // Lepas kuncinya; iterasi berikutnya menyembunyikan panel.
                                 p.pinned.store(false, Ordering::Relaxed);
-                                set_transient_flag(p.spec.label, false);
+                                flag_set(&TRANSIENT, p.spec.label, false);
                             }
                         }
                     } else {
@@ -360,7 +407,8 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     } else {
                         p.inside_since = None;
                     }
-                } else if win_rect.contains(cursor.x, cursor.y) {
+                } else if win_rect.contains(cursor.x, cursor.y) || flag_has(&HELD, p.spec.label) {
+                    // Kursor di dalam, atau panel sedang dipakai mengetik: jangan ditutup.
                     p.outside_since = None;
                 } else {
                     let since = *p.outside_since.get_or_insert_with(Instant::now);

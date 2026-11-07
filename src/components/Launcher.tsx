@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emitTo } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
 import Icon from "./Icon";
 
@@ -35,6 +36,7 @@ const ACTIONS: ActionDef[] = [
   { id: "restart", name: "Restart", hint: "Mulai ulang PC", glyph: "restart_alt", dangerous: true },
   { id: "shutdown", name: "Shutdown", hint: "Matikan PC", glyph: "power_settings_new", dangerous: true },
   { id: "reload_apps", name: "Reload apps", hint: "Muat ulang daftar aplikasi", glyph: "refresh" },
+  { id: "settings", name: "Settings", hint: "Pengaturan edgeshell", glyph: "tune" },
 ];
 
 const MAX_SHOWN = 8;
@@ -148,6 +150,10 @@ export default function Launcher() {
             invoke<AppEntry[]>("list_apps", { refresh: true })
               .then(setApps)
               .catch(() => {});
+          } else if (a.id === "settings") {
+            emitTo("notch", "notch-tab", "settings/app").then(() =>
+              invoke("set_panel", { label: "notch", open: true }),
+            );
           } else {
             invoke("run_action", { id: a.id }).catch(() => {});
           }

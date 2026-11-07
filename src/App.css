@@ -891,3 +891,266 @@ button {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ---------- Settings: aplikasi ---------- */
+
+.settingsroot {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settingsroot > .card {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.segmented {
+  align-self: flex-start;
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 16px;
+  background: var(--surface-container-high);
+}
+
+.segmented button {
+  padding: 4px 14px;
+  border-radius: 13px;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+}
+
+.segmented__on {
+  background: var(--primary-container);
+  color: var(--on-primary-container) !important;
+  font-weight: 600;
+}
+
+.segmented--small button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.appset {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  padding: 14px 22px;
+}
+
+.appset__col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+.appset__title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.srow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.srow__label {
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.srow__ctl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.srow input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.sinput {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--outline-variant);
+  border-radius: 12px;
+  outline: none;
+  background: var(--surface-container);
+  color: var(--on-surface);
+  font: inherit;
+  font-size: 13px;
+}
+
+.sinput:focus {
+  border-color: var(--primary);
+}
+
+.scolor {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
+.hotkey {
+  width: 100%;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--surface-container);
+  border: 1px solid var(--outline-variant);
+  font-size: 13px;
+  text-align: left;
+}
+
+.hotkey:hover {
+  border-color: var(--outline);
+}
+
+.hotkey--on {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.hotkeyfield {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.hotkey__cap {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: var(--on-surface-variant);
+  background: var(--surface-container);
+  border: 1px solid var(--outline-variant);
+}
+
+.hotkey__cap:hover {
+  color: var(--on-surface);
+}
+
+.hotkey__cap--on {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.appset__col {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  justify-content: center;
+  justify-content: safe center;
+}
+
+.hotkeynote {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--on-surface-variant);
+}
+
+.hotkeynote--ok {
+  color: var(--primary);
+}
+
+/* ---------- Settings: warna ---------- */
+
+.colorset {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px;
+}
+
+.colorgrid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.colorcard {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--surface-container-highest);
+}
+
+.colorcard__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.colorcard__note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--on-surface-variant);
+}
+
+.colorcard__ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--outline);
+}
+
+.hexinput {
+  width: 74px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.colorfoot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.colorfoot input[type="range"] {
+  flex: 1;
+  accent-color: var(--primary);
+}
+
+.colorfoot--off {
+  opacity: 0.5;
+}
+
+.linkbtn {
+  flex-shrink: 0;
+  color: var(--primary);
+  text-decoration: underline;
+  font-size: 12px;
+}
