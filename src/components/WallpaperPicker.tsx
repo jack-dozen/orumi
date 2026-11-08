@@ -12,6 +12,9 @@ const GAP = 8;
 const WHEEL_COOLDOWN_MS = 90;
 const PRELOAD = 3;
 
+/** Modulo yang selalu non-negatif, supaya indeks berputar di kedua arah. */
+const mod = (n: number, m: number) => ((n % m) + m) % m;
+
 /** Posisi tengah slot (px) relatif ke tengah panggung. */
 function slotX(offset: number): number {
   if (offset === 0) return 0;
@@ -21,9 +24,10 @@ function slotX(offset: number): number {
 }
 
 /**
- * Pengalih wallpaper bergaya carousel. Thumbnail berupa file di disk yang dimuat lewat
- * asset protocol (bukan base64 lewat IPC), dan slot memakai key indeks mutlak sehingga
- * berpindah dengan meluncur, bukan dibuat ulang.
+ * Pengalih wallpaper bergaya carousel yang berputar tanpa ujung. Thumbnail berupa file
+ * di disk yang dimuat lewat asset protocol. Posisi disimpan sebagai angka "virtual" yang
+ * bebas bertambah/berkurang, dan slot memakai posisi virtual itu sebagai key, jadi
+ * saat berputar melewati ujung daftar slot tetap meluncur, bukan dibuat ulang.
  */
 export default function WallpaperPicker({
   onBack,
@@ -33,7 +37,7 @@ export default function WallpaperPicker({
   onDone: () => void;
 }) {
   const [list, setList] = useState<List | null>(null);
-  const [index, setIndex] = useState(0);
+  const [virtual, setVirtual] = useState(0);
   const lastWheel = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -41,7 +45,7 @@ export default function WallpaperPicker({
     invoke<List>("list_wallpapers", { thumbs: true })
       .then((r) => {
         setList(r);
-        setIndex(r.start ?? 0); // mulai di wallpaper yang sedang aktif
+        setVirtual(r.start ?? 0); // mulai di wallpaper yang sedang aktif
       })
       .catch(() =>
         setList({ dir: "", items: [], start: null, error: "Gagal membaca folder wallpaper" }),
@@ -50,7 +54,7 @@ export default function WallpaperPicker({
   }, []);
 
   const count = list?.items.length ?? 0;
-  const clamp = (i: number) => Math.max(0, Math.min(count - 1, i));
+  const active = count > 0 ? mod(virtual, count) : 0;
 
   const apply = (i: number) => {
     const item = list?.items[i];
@@ -61,14 +65,14 @@ export default function WallpaperPicker({
 
   // Muat lebih dulu thumbnail yang sebentar lagi masuk ke layar.
   useEffect(() => {
-    if (!list) return;
+    if (!list || count === 0) return;
     for (let d = RADIUS + 1; d <= RADIUS + PRELOAD; d++) {
-      for (const i of [index - d, index + d]) {
-        const t = list.items[i]?.thumb;
+      for (const v of [virtual - d, virtual + d]) {
+        const t = list.items[mod(v, count)]?.thumb;
         if (t) new Image().src = convertFileSrc(t);
       }
     }
-  }, [list, index]);
+  }, [list, count, virtual]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -77,23 +81,25 @@ export default function WallpaperPicker({
         onBack();
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setIndex((i) => clamp(i + 1));
+        setVirtual((v) => v + 1);
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setIndex((i) => clamp(i - 1));
+        setVirtual((v) => v - 1);
       } else if (e.key === "PageDown") {
         e.preventDefault();
-        setIndex((i) => clamp(i + RADIUS));
+        setVirtual((v) => v + RADIUS);
       } else if (e.key === "PageUp") {
         e.preventDefault();
-        setIndex((i) => clamp(i - RADIUS));
+        setVirtual((v) => v - RADIUS);
       } else if (e.key === "Home") {
-        setIndex(0);
+        e.preventDefault();
+        setVirtual(0);
       } else if (e.key === "End") {
-        setIndex(Math.max(count - 1, 0));
+        e.preventDefault();
+        setVirtual(Math.max(count - 1, 0));
       } else if (e.key === "Enter") {
         e.preventDefault();
-        apply(index);
+        apply(active);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -118,21 +124,24 @@ export default function WallpaperPicker({
     );
   }
 
+  // Folder kecil: batasi jumlah slot supaya gambar yang sama tidak tampil dua kali.
+  const radius = Math.min(RADIUS, Math.floor((count - 1) / 2));
+
   const slots = [];
-  for (let o = -RADIUS; o <= RADIUS; o++) {
-    const i = index + o;
-    if (i < 0 || i >= count) continue;
-    const item = list.items[i];
+  for (let o = -radius; o <= radius; o++) {
+    const v = virtual + o;
+    const actual = mod(v, count);
+    const item = list.items[actual];
     slots.push(
       <div
-        key={i}
+        key={v}
         className={`cw-slot ${o === 0 ? "cw-slot--active" : ""}`}
         style={{
           width: o === 0 ? CENTER_W : STRIP_W,
           transform: `translate3d(calc(-50% + ${slotX(o)}px), -50%, 0)`,
           zIndex: o === 0 ? 30 : 20 - Math.abs(o),
         }}
-        onClick={() => (o === 0 ? apply(i) : setIndex(i))}
+        onClick={() => (o === 0 ? apply(actual) : setVirtual(v))}
       >
         {item.thumb && (
           <img src={convertFileSrc(item.thumb)} alt="" decoding="async" draggable={false} />
@@ -152,16 +161,13 @@ export default function WallpaperPicker({
         const dy = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
         if (Math.abs(dy) < 10) return;
         lastWheel.current = now;
-        setIndex((i) => clamp(i + (dy > 0 ? 1 : -1)));
+        setVirtual((v) => v + (dy > 0 ? 1 : -1));
       }}
     >
       <div className="cw-stage">{slots}</div>
       <div className="wpick__title">
-        {list.items[index].name}
-        {list.start === index && " · wallpaper saat ini"}
-      </div>
-      <div className="wpick__hint">
-        {index + 1} / {count} · ← → pilih · Enter terapkan · Esc kembali
+        {list.items[active].name}
+        {list.start === active && " · wallpaper saat ini"}
       </div>
     </div>
   );
