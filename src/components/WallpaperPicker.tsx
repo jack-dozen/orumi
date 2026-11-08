@@ -23,6 +23,15 @@ function slotX(offset: number): number {
   return dir * (CENTER_W / 2 + GAP + (n - 1) * (STRIP_W + GAP) + STRIP_W / 2);
 }
 
+/** Jumlah slot di tiap sisi untuk sejumlah gambar (folder kecil: lebih sedikit). */
+const radiusFor = (count: number) => Math.min(RADIUS, Math.floor((count - 1) / 2));
+
+/** Lebar panel (satuan desain) yang pas untuk sejumlah gambar. */
+function panelWidth(count: number): number {
+  const span = CENTER_W + 2 * radiusFor(count) * (STRIP_W + GAP);
+  return Math.max(span + 64, 380);
+}
+
 /**
  * Pengalih wallpaper bergaya carousel yang berputar tanpa ujung. Thumbnail berupa file
  * di disk yang dimuat lewat asset protocol. Posisi disimpan sebagai angka "virtual" yang
@@ -32,9 +41,12 @@ function slotX(offset: number): number {
 export default function WallpaperPicker({
   onBack,
   onDone,
+  onWidth,
 }: {
   onBack: () => void;
   onDone: () => void;
+  /** Melaporkan lebar panel yang pas (null = pakai lebar daftar biasa). */
+  onWidth?: (w: number | null) => void;
 }) {
   const [list, setList] = useState<List | null>(null);
   const [virtual, setVirtual] = useState(0);
@@ -55,6 +67,13 @@ export default function WallpaperPicker({
 
   const count = list?.items.length ?? 0;
   const active = count > 0 ? mod(virtual, count) : 0;
+
+
+  // Lebar panel mengikuti jumlah slot yang tampil.
+  useEffect(() => {
+    onWidth?.(list && !list.error && count > 0 ? panelWidth(count) : null);
+  }, [list, count, onWidth]);
+  useEffect(() => () => onWidth?.(null), [onWidth]);
 
   const apply = (i: number) => {
     const item = list?.items[i];
@@ -125,7 +144,7 @@ export default function WallpaperPicker({
   }
 
   // Folder kecil: batasi jumlah slot supaya gambar yang sama tidak tampil dua kali.
-  const radius = Math.min(RADIUS, Math.floor((count - 1) / 2));
+  const radius = radiusFor(count);
 
   const slots = [];
   for (let o = -radius; o <= radius; o++) {

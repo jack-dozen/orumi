@@ -47,7 +47,7 @@ const PANELS: [PanelSpec; 4] = [
     PanelSpec {
         label: "launcher",
         edge: Edge::Bottom,
-        size: (640.0, 520.0),
+        size: (1040.0, 520.0),
         trigger_len: None,
         hover: false,
         focus: true,

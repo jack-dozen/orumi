@@ -1,24 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
+import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
 import Icon from "./Icon";
-import { useConfig } from "../useConfig";
 import WallpaperPicker from "./WallpaperPicker";
 
 type AppEntry = { name: string; id: string };
 type WinEntry = { hwnd: number; title: string; exe: string; minimized: boolean };
 
-/** Satu baris di daftar hasil, baik app maupun aksi. */
+/** Satu baris di daftar hasil, baik app, aksi, maupun window. */
 type Item = {
   key: string;
   name: string;
   hint?: string;
   glyph: string;
-  dangerous?: boolean;
-  run: () => void;
   /** true = glyph adalah nama ikon Material Symbols, bukan huruf. */
   symbol?: boolean;
+  dangerous?: boolean;
+  run: () => void;
 };
 
 type ActionDef = {
@@ -43,6 +43,8 @@ const ACTIONS: ActionDef[] = [
 ];
 
 const MAX_SHOWN = 8;
+/** Lebar panel saat menampilkan daftar (satuan desain). */
+const LIST_WIDTH = 640;
 
 /** Skor kecocokan nama dengan query. 0 = tidak cocok. */
 function score(name: string, q: string): number {
@@ -63,15 +65,29 @@ const close = () => invoke("set_panel", { label: "launcher", open: false });
 
 export default function Launcher() {
   const visible = useEdgeVisible("launcher");
+  const cfg = useConfig();
   const [apps, setApps] = useState<AppEntry[]>([]);
   const [wins, setWins] = useState<WinEntry[]>([]);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
-  const cfg = useConfig();
   const [view, setView] = useState<"list" | "wallpaper">("list");
+  const [pickerWidth, setPickerWidth] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const openedAt = useRef(0);
+
+  // Panel mengikuti ukuran isinya: tinggi diukur dari konten, lebar ditentukan tampilan.
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+    const measure = () => setHeight(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Muat daftar app sekali saat app mulai (butuh 1-2 detik).
   useEffect(() => {
@@ -90,6 +106,13 @@ export default function Launcher() {
     const id = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(id);
   }, [visible]);
+
+  // Kembali dari carousel wallpaper: kotak cari dimuat ulang, jadi fokuskan lagi.
+  useEffect(() => {
+    if (view !== "list") return;
+    const id = setTimeout(() => inputRef.current?.focus(), 30);
+    return () => clearTimeout(id);
+  }, [view]);
 
   // Klik di luar launcher (window kehilangan fokus) = tutup.
   useEffect(() => {
@@ -192,15 +215,14 @@ export default function Launcher() {
       setArmed(item.key);
       return;
     }
-    // Wallpaper: pengalih bawaan membuka tampilan thumbnail di dalam launcher;
+    // Wallpaper: pengalih bawaan membuka carousel di dalam launcher;
     // mode "perintah luar" menjalankan perintah dari config lalu menutup launcher.
     if (mode === "actions" && item.key === "wallpaper") {
       if (cfg?.wallpaper_switcher === "external") {
         close();
         invoke("run_wallpaper_command").catch(() => {});
       } else {
-        // Lebarkan panel dulu, baru tampilkan carousel.
-        invoke("launcher_view", { view: "wallpaper" }).finally(() => setView("wallpaper"));
+        setView("wallpaper");
       }
       return;
     }
@@ -224,64 +246,82 @@ export default function Launcher() {
 
   const emptyText =
     mode === "windows"
-    ? wins.length === 0
-      ? "Tidak ada window terbuka"
-      : "Tidak ada hasil"
+      ? wins.length === 0
+        ? "Tidak ada window terbuka"
+        : "Tidak ada hasil"
       : mode === "actions"
         ? "Tidak ada aksi yang cocok"
         : apps.length === 0
           ? "Memuat daftar aplikasi…"
           : "Tidak ada hasil";
 
-          if (view === "wallpaper") {
-            return (
-              <div className={`launcher ${visible ? "launcher--visible" : ""}`}>
-                <WallpaperPicker
-                  onBack={() => invoke("launcher_view", { view: "list" }).finally(() => setView("list"))}
-                  onDone={close}
-                  />
-              </div>
-            );
-          }
+  const width = view === "wallpaper" && pickerWidth ? pickerWidth : LIST_WIDTH;
 
   return (
-    <div className={`launcher ${visible ? "launcher--visible" : ""}`}>
-      <div className="launcher__list">
-        {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
-        {results.map((item, i) => (
-          <div
-            key={item.key}
-            className={`litem ${i === index ? "litem--active" : ""}`}
-            onMouseMove={() => setIndex(i)}
-            onClick={() => activate(item)}
-          >
-            <div className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}>
-              {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
-            </div>
-            <div className="litem__text">
-              <span className="litem__name">{item.name}</span>
-              {(item.hint || armed === item.key) && (
-                <span className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}>
-                  {armed === item.key ? "Tekan Enter lagi untuk konfirmasi" : item.hint}
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+    <div
+      className="lroot"
+      onPointerDown={(e) => {
+        // Klik di area transparan di luar panel = klik di luar: tutup.
+        if (e.target === e.currentTarget) close();
+      }}
+    >
+      <div
+        className={`lpanel ${visible ? "lpanel--visible" : ""}`}
+        style={{ width, height: height ?? undefined }}
+      >
+        <div className="lpanel__inner" ref={innerRef}>
+          {view === "wallpaper" ? (
+            <WallpaperPicker
+              onBack={() => setView("list")}
+              onDone={close}
+              onWidth={setPickerWidth}
+            />
+          ) : (
+            <>
+              <div className="launcher__list">
+                {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
+                {results.map((item, i) => (
+                  <div
+                    key={item.key}
+                    className={`litem ${i === index ? "litem--active" : ""}`}
+                    onMouseMove={() => setIndex(i)}
+                    onClick={() => activate(item)}
+                  >
+                    <div
+                      className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}
+                    >
+                      {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
+                    </div>
+                    <div className="litem__text">
+                      <span className="litem__name">{item.name}</span>
+                      {(item.hint || armed === item.key) && (
+                        <span
+                          className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}
+                        >
+                          {armed === item.key ? "Tekan Enter lagi untuk konfirmasi" : item.hint}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-      <input
-        ref={inputRef}
-        className="lsearch"
-        placeholder="Cari aplikasi…  (> aksi sistem,  @ pindah window)"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setIndex(0);
-        }}
-        onKeyDown={onKeyDown}
-        spellCheck={false}
-      />
+              <input
+                ref={inputRef}
+                className="lsearch"
+                placeholder="Cari aplikasi…  (> aksi sistem,  @ pindah window)"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setIndex(0);
+                }}
+                onKeyDown={onKeyDown}
+                spellCheck={false}
+              />
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
