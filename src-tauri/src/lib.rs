@@ -13,6 +13,7 @@ mod theme;
 mod wifi;
 mod winlist;
 mod wallpaper;
+mod altswitch;
 
 use std::{
     collections::HashMap,
@@ -27,7 +28,7 @@ use tauri::{
 };
 
 /// Daftar semua panel.
-const PANELS: [PanelSpec; 4] = [
+const PANELS: [PanelSpec; 5] = [
     PanelSpec {
         label: "bar",
         edge: Edge::Left,
@@ -56,6 +57,14 @@ const PANELS: [PanelSpec; 4] = [
         label: "overlay",
         edge: Edge::Right,
         size: (150.0, 440.0),
+        trigger_len: None,
+        hover: false,
+        focus: false,
+    },
+    PanelSpec {
+        label: "switcher",
+        edge: Edge::Bottom,
+        size: (1200.0, 260.0),
         trigger_len: None,
         hover: false,
         focus: false,
@@ -91,6 +100,7 @@ pub fn run() {
             edge::set_panel,
             edge::panel_activation,
             edge::launcher_view,
+            altswitch::switcher_pick,
             config::get_config,
             config::set_config,
             stats::get_stats,
@@ -145,8 +155,8 @@ pub fn run() {
 
                 edge::place(&window, &spec)?;
                 window.set_zoom(edge::ui_scale())?;
-                if spec.hover && !spec.focus {
-                    edge::set_activatable(&window, false); // bar dan notch
+                if (spec.hover && !spec.focus) || spec.label == "switcher" {
+                    edge::set_activatable(&window, false); // bar, notch, dan switcher
                 }
                 window.set_ignore_cursor_events(true)?; // awalnya click-through
                 watched.push((window, spec, pinned));
@@ -160,6 +170,8 @@ pub fn run() {
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
             wallpaper::warm(app.handle().clone());
+            altswitch::set_enabled(cfg.alt_tab);
+            altswitch::start(app.handle().clone());
 
             // --- Hotkey global (dari config) ---
             config::init_hotkeys(app.handle(), &cfg.hotkeys)?;
@@ -173,10 +185,17 @@ pub fn run() {
                 MenuItem::with_id(app, "toggle_launcher", "Buka launcher", true, None::<&str>)?;
             let settings_item =
                 MenuItem::with_id(app, "settings", "Pengaturan", true, None::<&str>)?;
+            let alt_item = MenuItem::with_id(
+                app,
+                "toggle_alt_tab",
+                "Nyalakan/matikan Alt+Tab kustom",
+                true,
+                None::<&str>,
+            )?;
             let quit_item = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
-                &[&bar_item, &notch_item, &launcher_item, &settings_item, &quit_item],
+                &[&bar_item, &notch_item, &launcher_item, &settings_item, &alt_item, &quit_item],
             )?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("ikon app tidak ada").clone())
@@ -190,6 +209,7 @@ pub fn run() {
                         let _ = app.emit_to("notch", "notch-tab", "settings/app");
                         app.state::<Panels>().set_transient("notch");
                     }
+                    "toggle_alt_tab" => config::toggle_alt_tab(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })

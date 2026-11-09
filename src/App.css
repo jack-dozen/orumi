@@ -1358,3 +1358,95 @@ button {
   flex-direction: column;
   gap: 10px;
 }
+
+/* ---------- Alt+Tab ---------- */
+
+.swroot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+}
+
+.swpanel {
+  box-sizing: border-box;
+  max-width: calc(100% - 24px);
+  padding: 14px;
+  background: var(--surface);
+  border-radius: 28px 28px 0 0;
+
+  transform: translateY(100%);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.swpanel--visible {
+  transform: translateY(0);
+}
+
+.swrow {
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.switem {
+  flex: none;
+  width: 118px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px 10px;
+  border-radius: 18px;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.switem:hover {
+  background: var(--surface-container-high);
+}
+
+.switem--min {
+  opacity: 0.6;
+}
+
+.switem--active,
+.switem--active:hover {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  opacity: 1;
+}
+
+.swtile {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.swname {
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.swtitle {
+  max-width: 100%;
+  font-size: 11px;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

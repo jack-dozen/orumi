@@ -70,6 +70,21 @@
         "skipTaskbar": true,
         "resizable": false,
         "focus": false
+      },
+      {
+        "label": "switcher",
+        "title": "edgeshell-switcher",
+        "width": 1200,
+        "height": 260,
+        "x": 0,
+        "y": 0,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
       }
     ],
     "security": {

@@ -83,6 +83,8 @@ pub struct Config {
     pub wallpaper_command: String,
     /// Wallpaper terakhir yang diterapkan lewat app ini. Hanya diisi backend.
     pub last_wallpaper: String,
+    /// true = Alt+Tab diganti switcher kustom; false = Alt+Tab bawaan Windows.
+    pub alt_tab: bool,
     pub hotkeys: Hotkeys,
 }
 
@@ -97,6 +99,7 @@ impl Default for Config {
             wallpaper_switcher: "builtin".into(),
             wallpaper_command: String::new(),
             last_wallpaper: String::new(),
+            alt_tab: true,
             hotkeys: Hotkeys::default(),
         }
     }
@@ -313,6 +316,19 @@ pub fn remember_wallpaper(app: &AppHandle, path: &str) {
     let _ = save(app, &snapshot);
 }
 
+/// Menu tray: nyalakan atau matikan Alt+Tab kustom.
+pub fn toggle_alt_tab(app: &AppHandle) {
+    let state = app.state::<ConfigState>();
+    let snapshot = {
+        let Ok(mut c) = state.0.lock() else { return };
+        c.alt_tab = !c.alt_tab;
+        c.clone()
+    };
+    crate::altswitch::set_enabled(snapshot.alt_tab);
+    let _ = save(app, &snapshot);
+    let _ = app.emit("config-changed", &snapshot);
+}
+
 /// Config terkini untuk modul Rust lain.
 pub fn current(app: &AppHandle) -> Config {
     app.state::<ConfigState>()
@@ -351,6 +367,9 @@ pub fn set_config(
 
     save(&app, &new)?;
     *state.0.lock().map_err(|e| e.to_string())? = new.clone();
+
+    crate::altswitch::set_enabled(new.alt_tab);
+
     if new.wallpaper_dir != old.wallpaper_dir {
         crate::wallpaper::warm(app.clone());
     }

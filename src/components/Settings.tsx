@@ -183,7 +183,22 @@ export default function AppSettings() {
             }}
           />
         </Row>
-
+        <Row label="Alt+Tab">
+          <div className="segmented segmented--small">
+            <button
+              className={cfg.alt_tab ? "segmented__on" : ""}
+              onClick={() => save({ alt_tab: true })}
+            >
+              Kustom
+            </button>
+            <button
+              className={!cfg.alt_tab ? "segmented__on" : ""}
+              onClick={() => save({ alt_tab: false })}
+            >
+              Bawaan Windows
+            </button>
+          </div>
+        </Row>
         <div className="appset__title">Wallpaper</div>
         <WallpaperSettings />
       </div>

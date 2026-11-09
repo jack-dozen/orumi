@@ -1,0 +1,66 @@
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { useEdgeVisible } from "../useEdgeVisible";
+
+type Item = {
+  hwnd: number;
+  title: string;
+  exe: string;
+  minimized: boolean;
+  focused: boolean;
+};
+
+/**
+ * Tampilan Alt+Tab. Seluruh logika (urutan, tombol, pemilihan) ada di Rust; komponen ini
+ * hanya menggambar daftar yang dikirim dan indeks yang sedang dipilih.
+ */
+export default function Switcher() {
+  const visible = useEdgeVisible("switcher");
+  const [items, setItems] = useState<Item[]>([]);
+  const [index, setIndex] = useState(0);
+  const activeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const a = listen<{ items: Item[]; index: number }>("switcher-items", (e) => {
+      setItems(e.payload.items);
+      setIndex(e.payload.index);
+    });
+    const b = listen<number>("switcher-select", (e) => setIndex(e.payload));
+    return () => {
+      a.then((fn) => fn());
+      b.then((fn) => fn());
+    };
+  }, []);
+
+  // Jaga item terpilih tetap terlihat saat daftarnya lebih panjang dari panel.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [index, items]);
+
+  return (
+    <div className="swroot">
+      <div className={`swpanel ${visible ? "swpanel--visible" : ""}`}>
+        <div className="swrow">
+          {items.map((it, i) => {
+            const name = it.exe || it.title;
+            return (
+              <div
+                key={it.hwnd}
+                ref={i === index ? activeRef : undefined}
+                className={`switem ${i === index ? "switem--active" : ""} ${
+                  it.minimized ? "switem--min" : ""
+                }`}
+                onClick={() => invoke("switcher_pick", { index: i })}
+              >
+                <div className="swtile">{name.charAt(0).toUpperCase()}</div>
+                <div className="swname">{name}</div>
+                <div className="swtitle">{it.title}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}

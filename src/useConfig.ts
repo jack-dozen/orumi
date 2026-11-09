@@ -22,6 +22,7 @@ export type Config = {
   wallpaper_dir: string;
   wallpaper_switcher: "builtin" | "external";
   wallpaper_command: string;
+  alt_tab: boolean;
   hotkeys: Hotkeys;
 };
 

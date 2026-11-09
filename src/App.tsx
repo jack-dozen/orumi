@@ -4,6 +4,7 @@ import Bar from "./components/Bar";
 import Launcher from "./components/Launcher";
 import Notch from "./components/Notch";
 import Overlay from "./components/Overlay";
+import Switcher from "./components/Switcher";
 import { useTheme } from "./theme";
 import "./App.css";
 
@@ -16,5 +17,6 @@ export default function App() {
   if (label === "notch") return <Notch />;
   if (label === "launcher") return <Launcher />;
   if (label === "overlay") return <Overlay />;
+  if (label === "switcher") return <Switcher />;
   return <Bar />;
 }

@@ -27,7 +27,7 @@ use windows::{
             WindowsAndMessaging::{
                 DispatchMessageW, EnumWindows, GetClassNameW, GetForegroundWindow, GetMessageW,
                 GetWindow, GetWindowLongW, GetWindowTextLengthW, GetWindowTextW,
-                GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow,
+                GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SwitchToThisWindow,
                 ShowWindow, TranslateMessage, GWL_EXSTYLE, GW_OWNER, MSG, SW_MINIMIZE,
                 SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
             },
@@ -37,13 +37,13 @@ use windows::{
 
 #[derive(Serialize)]
 pub struct WindowEntry {
-    hwnd: i64,
-    title: String,
+    pub hwnd: i64,
+    pub title: String,
     /// Nama program tanpa .exe. Kosong untuk app Store (dibungkus ApplicationFrameHost).
-    exe: String,
-    minimized: bool,
+    pub exe: String,
+    pub minimized: bool,
     /// Window ini sedang di depan (foreground).
-    focused: bool,
+    pub focused: bool,
 }
 
 /// Nama file program (misalnya "chrome.exe"), atau kosong kalau tidak bisa dibaca.
@@ -186,22 +186,37 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     true.into()
 }
 
-/// Daftar window terbuka, urut dari yang paling atas di layar.
+/// Daftar window terbuka, urut dari yang paling atas di layar. Sinkron; juga dipakai Alt+Tab.
+pub fn collect_windows() -> Vec<WindowEntry> {
+    let mut ctx = Ctx {
+        list: Vec::new(),
+        my_pid: std::process::id(),
+        foreground: unsafe { GetForegroundWindow() },
+    };
+    unsafe {
+        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut Ctx as isize));
+    }
+    ctx.list
+}
+
 #[tauri::command]
 pub async fn list_windows() -> Result<Vec<WindowEntry>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let mut ctx = Ctx {
-            list: Vec::new(),
-            my_pid: std::process::id(),
-            foreground: unsafe { GetForegroundWindow() },
-        };
-        unsafe {
-            let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut Ctx as isize));
+    tauri::async_runtime::spawn_blocking(collect_windows)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Pindah ke window seperti Alt+Tab asli: pulihkan kalau diperkecil, lalu bawa ke depan.
+/// SwitchToThisWindow dipakai Windows sendiri untuk Alt+Tab dan tidak ditolak aturan fokus
+/// (SetForegroundWindow ditolak kalau proses kita bukan yang sedang aktif).
+pub fn activate_window(hwnd: i64) {
+    unsafe {
+        let h = to_hwnd(hwnd);
+        if IsIconic(h).as_bool() {
+            let _ = ShowWindow(h, SW_RESTORE);
         }
-        ctx.list
-    })
-    .await
-    .map_err(|e| e.to_string())
+        SwitchToThisWindow(h, true);
+    }
 }
 
 fn to_hwnd(hwnd: i64) -> HWND {
