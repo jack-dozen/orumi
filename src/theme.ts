@@ -5,7 +5,7 @@ import {
   argbFromHex,
   Hct,
   hexFromArgb,
-  sourceColorFromImage,
+  sourceColorFromImageBytes,
   themeFromSourceColor,
   TonalPalette,
 } from "@material/material-color-utilities";
@@ -105,12 +105,14 @@ function applyTokens(tokens: Tokens) {
 
 async function seedFromWallpaper(): Promise<number> {
   try {
-    const url = await invoke<string | null>("wallpaper_image");
-    if (!url) return FALLBACK_SEED;
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    return await sourceColorFromImage(img);
+    const px = await invoke<{ width: number; height: number; data: string } | null>(
+      "wallpaper_pixels",
+    );
+    if (!px) return FALLBACK_SEED;
+    const bin = atob(px.data);
+    const bytes = new Uint8ClampedArray(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return sourceColorFromImageBytes(bytes);
   } catch {
     return FALLBACK_SEED;
   }

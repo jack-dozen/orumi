@@ -431,7 +431,7 @@ fn worker(app: AppHandle, rx: Receiver<Msg>) {
 fn watchdog() {
     let mut last_reinstall: u64 = 0;
     loop {
-        thread::sleep(Duration::from_millis(150));
+        thread::sleep(Duration::from_millis(300));
         if !ENABLED.load(Ordering::Relaxed) {
             continue;
         }

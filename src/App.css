@@ -2,6 +2,31 @@
    Token warna: palet Material 3 gelap (sementara).
    Langkah berikutnya mengganti nilai ini dari wallpaper.
    ========================================================= */
+
+   /* Font ikon hasil subset (scripts/make-icon-font.ps1): hanya ikon yang dipakai. */
+   @font-face {
+     font-family: "Material Symbols Rounded";
+     font-style: normal;
+     font-weight: 400;
+     font-display: block;
+     src: url("./assets/material-symbols-rounded.woff2") format("woff2");
+   }
+
+   .material-symbols-rounded {
+     font-family: "Material Symbols Rounded";
+     font-weight: normal;
+     font-style: normal;
+     letter-spacing: normal;
+     text-transform: none;
+     display: inline-block;
+     white-space: nowrap;
+     word-wrap: normal;
+     direction: ltr;
+     font-feature-settings: "liga";
+     -webkit-font-feature-settings: "liga";
+     -webkit-font-smoothing: antialiased;
+   }
+   
 :root {
   --surface: #101418;
   --surface-container: #1c2024;

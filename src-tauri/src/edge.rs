@@ -18,7 +18,11 @@ const HIDE_DELAY: Duration = Duration::from_millis(400);
 const EDGE_DWELL: Duration = Duration::from_millis(200);
 /// Panel yang dibuka lewat klik tapi tidak pernah dimasuki kursor ditutup setelah ini.
 const PIN_GRACE: Duration = Duration::from_secs(6);
-const POLL_INTERVAL: Duration = Duration::from_millis(30);
+/// Interval pemantau kursor: cepat saat kursor dekat tepi atau ada panel terlihat, lambat saat idle.
+const POLL_FAST: Duration = Duration::from_millis(30);
+const POLL_IDLE: Duration = Duration::from_millis(150);
+/// "Dekat tepi" = dalam jarak ini dari tepi layar (satuan desain).
+const NEAR_EDGE_DIP: f64 = 96.0;
 /// Seberapa sering ukuran monitor dibaca ulang.
 const METRICS_REFRESH: Duration = Duration::from_secs(5);
 /// Jarak bar dari tepi atas dan bawah layar (satuan desain, sebelum skala UI).
@@ -378,9 +382,10 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
         let probe = panels[0].window.clone();
         let mut metrics = monitor_metrics(&probe);
         let mut last_refresh = Instant::now();
+        let mut interval = POLL_FAST;
 
         loop {
-            thread::sleep(POLL_INTERVAL);
+            thread::sleep(interval);
 
             if last_refresh.elapsed() >= METRICS_REFRESH {
                 metrics = monitor_metrics(&probe).or(metrics);
@@ -388,6 +393,18 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             }
             let Some(m) = metrics else { continue };
             let Ok(cursor) = probe.cursor_position() else { continue };
+
+
+            // Pilih seberapa cepat memantau pada putaran berikutnya.
+            let margin = NEAR_EDGE_DIP * m.4;
+            let near_edge = cursor.x < m.0 + margin
+                || cursor.x > m.0 + m.2 - margin
+                || cursor.y < m.1 + margin
+                || cursor.y > m.1 + m.3 - margin;
+            let busy = panels
+                .iter()
+                .any(|p| p.visible || p.pinned.load(Ordering::Relaxed));
+            interval = if near_edge || busy { POLL_FAST } else { POLL_IDLE };
 
             for p in panels.iter_mut() {
                 let pinned = p.pinned.load(Ordering::Relaxed);

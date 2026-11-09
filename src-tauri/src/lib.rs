@@ -110,7 +110,7 @@ pub fn run() {
             wifi::open_settings_page,
             battery::get_battery,
             theme::wallpaper_stamp,
-            theme::wallpaper_image,
+            theme::wallpaper_pixels,
             theme::set_theme,
             theme::get_theme,
             wallpaper::list_wallpapers,

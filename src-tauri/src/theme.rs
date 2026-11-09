@@ -80,3 +80,38 @@ pub fn set_theme(json: String, app: AppHandle) {
 pub fn get_theme() -> Option<String> {
     THEME.lock().ok().and_then(|t| t.clone())
 }
+
+/// Piksel kecil wallpaper aktif (RGBA, base64) untuk mengambil warna dominan.
+/// Gambar diperkecil di sini, bukan di WebView: mendekode dan memproses wallpaper 4K
+/// di JavaScript memakai ratusan MB sesaat.
+#[derive(serde::Serialize)]
+pub struct SmallImage {
+    width: u32,
+    height: u32,
+    data: String,
+}
+
+#[tauri::command]
+pub async fn wallpaper_pixels() -> Result<Option<SmallImage>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = wallpaper_path()?;
+        let meta = fs::metadata(&path).ok()?;
+        if meta.len() == 0 || meta.len() > 80_000_000 {
+            return None;
+        }
+        let img = image::ImageReader::open(&path)
+            .ok()?
+            .with_guessed_format()
+            .ok()?
+            .decode()
+            .ok()?;
+        let small = img.thumbnail(128, 128).to_rgba8();
+        Some(SmallImage {
+            width: small.width(),
+            height: small.height(),
+            data: STANDARD.encode(small.as_raw()),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}

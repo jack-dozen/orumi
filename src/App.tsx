@@ -1,5 +1,4 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import "material-symbols/rounded.css";
 import Bar from "./components/Bar";
 import Launcher from "./components/Launcher";
 import Notch from "./components/Notch";
