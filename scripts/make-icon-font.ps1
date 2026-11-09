@@ -11,7 +11,8 @@ $icons = @(
   "monitoring", "more_vert", "music_note", "partly_cloudy_day", "partly_cloudy_night",
   "pause", "play_arrow", "power_settings_new", "radio", "rainy", "refresh", "restart_alt",
   "schedule", "settings", "skip_next", "skip_previous", "sunny", "thunderstorm", "tune",
-  "volume_down", "volume_off", "volume_up", "wallpaper", "weather_snowy", "wifi", "wifi_off"
+  "volume_down", "volume_off", "volume_up", "wallpaper", "weather_snowy", "wifi", "wifi_off",
+  "chevron_right"
 )
 
 # Google mewajibkan daftar nama terurut abjad.

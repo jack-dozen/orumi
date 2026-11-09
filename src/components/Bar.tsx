@@ -92,6 +92,13 @@ export default function Bar() {
       </div>
 
       <div className="bar__group">
+        <div
+          className="bar__item"
+          title="Ikon tray (ikon tersembunyi)"
+          onClick={() => invoke("tray_toggle").catch(() => {})}
+        >
+          <Icon name="chevron_right" size={22} />
+        </div>
         <div className="bar__item bar__clock" onClick={() => notchTab("dashboard", true)}>
           {pad(now.getHours())}
           <br />

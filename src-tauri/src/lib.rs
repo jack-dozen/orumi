@@ -14,6 +14,7 @@ mod wifi;
 mod winlist;
 mod wallpaper;
 mod altswitch;
+mod tray_flyout;
 
 use std::{
     collections::HashMap,
@@ -101,6 +102,7 @@ pub fn run() {
             edge::panel_activation,
             edge::launcher_view,
             altswitch::switcher_pick,
+            tray_flyout::tray_toggle,
             config::get_config,
             config::set_config,
             stats::get_stats,
