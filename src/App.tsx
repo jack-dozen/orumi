@@ -6,6 +6,7 @@ import Overlay from "./components/Overlay";
 import Switcher from "./components/Switcher";
 import { useTheme } from "./theme";
 import "./App.css";
+import Activities from "./activities/Activities";
 
 /** Semua window memuat frontend yang sama; labelnya menentukan isinya. */
 export default function App() {
@@ -17,5 +18,6 @@ export default function App() {
   if (label === "launcher") return <Launcher />;
   if (label === "overlay") return <Overlay />;
   if (label === "switcher") return <Switcher />;
+  if (label === "activities") return <Activities />;
   return <Bar />;
 }

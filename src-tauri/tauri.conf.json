@@ -90,6 +90,24 @@
         "skipTaskbar": true,
         "resizable": false,
         "focus": false
+      },
+      {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
+        "label": "activities",
+        "title": "edgeshell-activities",
+        "width": 1280,
+        "height": 720,
+        "x": 0,
+        "y": 0,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {

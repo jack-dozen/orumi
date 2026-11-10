@@ -15,6 +15,7 @@ mod winlist;
 mod wallpaper;
 mod altswitch;
 mod tray_flyout;
+mod activities;
 
 use std::{
     collections::HashMap,
@@ -101,6 +102,11 @@ pub fn run() {
             edge::set_panel,
             edge::panel_activation,
             edge::launcher_view,
+            activities::activities_toggle,
+            activities::activities_close,
+            activities::ws_list,
+            activities::ws_switch,
+            activities::ws_move_window,
             altswitch::switcher_pick,
             tray_flyout::tray_toggle,
             config::get_config,
@@ -174,6 +180,7 @@ pub fn run() {
             wallpaper::warm(app.handle().clone());
             altswitch::set_enabled(cfg.alt_tab);
             altswitch::start(app.handle().clone());
+            activities::init(app.handle())?;
 
             // --- Hotkey global (dari config) ---
             config::init_hotkeys(app.handle(), &cfg.hotkeys)?;
