@@ -10,6 +10,9 @@ export type SnapWindow = {
   exe: string;
   minimized: boolean;
   focused: boolean;
+  /** AppUserModelID (app Store) dan jalur program, untuk mengambil ikon. */
+  aumid: string;
+  path: string;
   /** JPEG base64 tanpa prefix; null kalau window tidak bisa ditangkap. */
   thumb: string | null;
 };
@@ -20,6 +23,10 @@ export type Workspace = {
   active: boolean;
   windows: number[];
 };
+
+/** Alamat ikon untuk sebuah window, dalam format yang dimengerti `AppIcon`. */
+export const iconTarget = (w: { aumid: string; path: string }) =>
+  w.aumid ? `aumid:${w.aumid}` : w.path ? `path:${w.path}` : null;
 
 export const closeActivities = () => invoke("activities_close").catch(() => {});
 

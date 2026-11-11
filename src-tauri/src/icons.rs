@@ -32,10 +32,10 @@ use windows::{
     },
 };
 
-/// Ukuran ikon yang diminta (px). Cukup tajam untuk ikon hingga ~48 px di layar DPI tinggi.
-const ICON_SIZE: i32 = 64;
+/// Ukuran ikon yang diminta (px). 128 cukup tajam untuk ikon hingga ~64 px (CSS) di layar DPI tinggi.
+const ICON_SIZE: i32 = 128;
 /// Naikkan untuk membuang cache lama (mis. kalau cara konversi warna berubah).
-const ICON_VERSION: u32 = 1;
+const ICON_VERSION: u32 = 2;
 
 type Reply = mpsc::Sender<Option<PathBuf>>;
 static TX: OnceLock<Mutex<mpsc::Sender<(String, Reply)>>> = OnceLock::new();

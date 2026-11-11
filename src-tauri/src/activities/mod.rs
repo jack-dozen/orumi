@@ -1,4 +1,4 @@
-//! Activities: overlay layar penuh berisi workspace dan app grid (pengganti start menu).
+//! Activities: panel dari tepi bawah berisi workspace dan app grid (pengganti start menu).
 //!
 //! Seluruh logikanya hidup di folder ini supaya tidak bercampur dengan kode panel lain.
 //! File lama hanya perlu tahu tiga hal (lihat CHANGES.md): `mod activities;`, daftar command
@@ -17,15 +17,22 @@ use std::{
     time::Duration,
 };
 
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
-use crate::winlist;
+use crate::{
+    edge::{Edge, PanelSpec},
+    winlist,
+};
 use workspaces::{Workspace, WorkspaceState};
 
 /// Label window di tauri.conf.json.
 const LABEL: &str = "activities";
 /// Lamanya animasi tutup di sisi React sebelum window benar-benar disembunyikan.
-const CLOSE_ANIM: Duration = Duration::from_millis(220);
+const CLOSE_ANIM: Duration = Duration::from_millis(320);
+/// Ukuran panel (satuan desain, sama dengan PanelSpec.size panel lain): paling besar segini,
+/// dan tidak melebihi bagian layar berikut (lebar, tinggi).
+const PANEL_MAX: (f64, f64) = (1600.0, 860.0);
+const PANEL_FRACTION: (f64, f64) = (0.92, 0.84);
 
 /// true = Activities sedang terbuka (atau sedang menyiapkan snapshot untuk dibuka).
 static OPEN: AtomicBool = AtomicBool::new(false);
@@ -51,22 +58,11 @@ pub fn is_open() -> bool {
     OPEN.load(Ordering::SeqCst)
 }
 
-/// Tutup SEKARANG tanpa animasi: dipakai saat Win ditekan selagi Activities terbuka, agar
-/// fokus sudah pindah sebelum Win dilepas (lihat winkey.rs).
+/// Tutup karena Win ditekan selagi Activities terbuka (lihat winkey.rs). Memakai animasi yang
+/// sama dengan `hide`. Kalau Start menu kembali lolos saat Win ditekan beruntun, ganti isinya
+/// dengan penyembunyian langsung tanpa menunggu `CLOSE_ANIM`.
 pub fn dismiss(app: &AppHandle) {
-    if !OPEN.swap(false, Ordering::SeqCst) {
-        return;
-    }
-    let _ = app.emit_to(LABEL, "activities-close", ());
-    let a = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        if OPEN.load(Ordering::SeqCst) {
-            return;
-        }
-        if let Some(window) = a.get_webview_window(LABEL) {
-            let _ = window.hide();
-        }
-    });
+    hide(app);
 }
 
 pub fn toggle(app: &AppHandle) {
@@ -98,7 +94,7 @@ pub fn show(app: &AppHandle) {
                 OPEN.store(false, Ordering::SeqCst);
                 return;
             };
-            fit_to_monitor(&window);
+            place_panel(&window);
             let _ = window.show();
             let _ = window.set_always_on_top(true);
             let _ = window.set_focus();
@@ -129,12 +125,30 @@ pub fn hide(app: &AppHandle) {
     });
 }
 
-/// Window memenuhi monitor utama. Dihitung ulang tiap dibuka (resolusi/dock bisa berubah).
-fn fit_to_monitor(window: &WebviewWindow) {
-    if let Ok(Some(m)) = window.primary_monitor() {
-        let _ = window.set_position(PhysicalPosition::new(m.position().x, m.position().y));
-        let _ = window.set_size(PhysicalSize::new(m.size().width, m.size().height));
-    }
+/// Taruh window sebagai panel di tepi bawah, di tengah, dengan cara yang sama seperti panel
+/// lain (`edge::place`) dan mengikuti skala UI utama. Dihitung ulang tiap dibuka (resolusi,
+/// DPI, atau skala bisa berubah), jadi perubahan skala berlaku pada pembukaan berikutnya.
+fn place_panel(window: &WebviewWindow) {
+    let scale = crate::edge::ui_scale();
+    let _ = window.set_zoom(scale);
+    let Ok(Some(m)) = window.primary_monitor() else {
+        return;
+    };
+    // 1 satuan desain = u pixel fisik.
+    let u = m.scale_factor() * scale;
+    let (mw, mh) = (m.size().width as f64 / u, m.size().height as f64 / u);
+    let spec = PanelSpec {
+        label: LABEL,
+        edge: Edge::Bottom,
+        size: (
+            (mw * PANEL_FRACTION.0).min(PANEL_MAX.0),
+            (mh * PANEL_FRACTION.1).min(PANEL_MAX.1),
+        ),
+        trigger_len: None,
+        hover: false,
+        focus: true,
+    };
+    let _ = crate::edge::place(window, &spec);
 }
 
 // ---------- Command untuk React ----------
