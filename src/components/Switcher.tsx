@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
+import { windowIconTarget } from "../useWindows";
+import AppIcon from "./AppIcon";
 
 type Item = {
   hwnd: number;
@@ -9,6 +11,8 @@ type Item = {
   exe: string;
   minimized: boolean;
   focused: boolean;
+  path: string;
+  aumid: string;
 };
 
 /**
@@ -53,7 +57,11 @@ export default function Switcher() {
                 }`}
                 onClick={() => invoke("switcher_pick", { index: i })}
               >
-                <div className="swtile">{name.charAt(0).toUpperCase()}</div>
+                <AppIcon
+                  target={windowIconTarget(it)}
+                  fallback={name.charAt(0).toUpperCase()}
+                  size={48}
+                />
                 <div className="swname">{name}</div>
                 <div className="swtitle">{it.title}</div>
               </div>

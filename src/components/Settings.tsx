@@ -199,6 +199,38 @@ export default function AppSettings() {
             </button>
           </div>
         </Row>
+        <Row label="Taskbar Windows">
+          <div className="segmented segmented--small">
+            <button
+              className={cfg.taskbar_autohide ? "segmented__on" : ""}
+              onClick={() => save({ taskbar_autohide: true })}
+            >
+              Auto-hide
+            </button>
+            <button
+              className={!cfg.taskbar_autohide ? "segmented__on" : ""}
+              onClick={() => save({ taskbar_autohide: false })}
+            >
+              Biarkan
+            </button>
+          </div>
+        </Row>
+        <Row label="Daftar app di bar">
+          <div className="segmented segmented--small">
+            <button
+              className={cfg.bar_app_style === "icons" ? "segmented__on" : ""}
+              onClick={() => save({ bar_app_style: "icons" })}
+            >
+              Ikon
+            </button>
+            <button
+              className={cfg.bar_app_style === "dots" ? "segmented__on" : ""}
+              onClick={() => save({ bar_app_style: "dots" })}
+            >
+              Titik
+            </button>
+          </div>
+        </Row>
         <div className="appset__title">Wallpaper</div>
         <WallpaperSettings />
       </div>

@@ -35,6 +35,19 @@ use windows::{
     },
 };
 
+use windows::{
+    core::GUID,
+    Win32::{
+        Foundation::PROPERTYKEY,
+        System::Com::{
+            CoInitializeEx, CoTaskMemFree, CoUninitialize,
+            StructuredStorage::{PropVariantClear, PropVariantToStringAlloc},
+            COINIT_MULTITHREADED,
+        },
+        UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow},
+    },
+};
+
 #[derive(Serialize)]
 pub struct WindowEntry {
     pub hwnd: i64,
@@ -44,10 +57,14 @@ pub struct WindowEntry {
     pub minimized: bool,
     /// Window ini sedang di depan (foreground).
     pub focused: bool,
+    /// Jalur lengkap program (kosong untuk app Store). Dipakai untuk mengambil ikon.
+    pub path: String,
+    /// AppUserModelID, hanya untuk app Store. Dipakai untuk mengambil ikon.
+    pub aumid: String,
 }
 
-/// Nama file program (misalnya "chrome.exe"), atau kosong kalau tidak bisa dibaca.
-unsafe fn process_file_name(pid: u32) -> String {
+/// Jalur lengkap program (mis. C:\...\chrome.exe), atau kosong kalau tidak bisa dibaca.
+unsafe fn process_path(pid: u32) -> String {
     let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
         return String::new();
     };
@@ -64,11 +81,40 @@ unsafe fn process_file_name(pid: u32) -> String {
     if !ok {
         return String::new();
     }
-    let path = String::from_utf16_lossy(&buf[..len as usize]);
-    Path::new(&path)
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default()
+    String::from_utf16_lossy(&buf[..len as usize])
+}
+
+/// AppUserModelID window (identitas yang dipakai taskbar). Untuk app Store ini satu-satunya cara
+/// mendapat ikonnya, karena window-nya dimiliki ApplicationFrameHost.
+unsafe fn window_aumid_inner(hwnd: HWND) -> Option<String> {
+    // System.AppUserModel.ID = {9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5
+    let key = PROPERTYKEY {
+        fmtid: GUID {
+            data1: 0x9F4C2855,
+            data2: 0x9F79,
+            data3: 0x4B39,
+            data4: [0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3],
+        },
+        pid: 5,
+    };
+    let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd).ok()?;
+    let mut prop = store.GetValue(&key).ok()?;
+    let text = PropVariantToStringAlloc(&prop).ok().map(|pwstr| {
+        let value = String::from_utf16_lossy(pwstr.as_wide()).trim().to_string();
+        CoTaskMemFree(Some(pwstr.0 as _));
+        value
+    });
+    let _ = PropVariantClear(&mut prop);
+    text.filter(|s| !s.is_empty())
+}
+
+unsafe fn window_aumid(hwnd: HWND) -> Option<String> {
+    let com = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+    let result = window_aumid_inner(hwnd);
+    if com {
+        CoUninitialize();
+    }
+    result
 }
 
 unsafe fn class_name(hwnd: HWND) -> String {
@@ -139,7 +185,11 @@ unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEnt
         return None;
     }
 
-    let file = process_file_name(pid);
+    let path = process_path(pid);
+    let file = Path::new(&path)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let lower = file.to_lowercase();
     let is_explorer_window = class == "CabinetWClass" || class == "ExploreWClass";
 
@@ -163,12 +213,19 @@ unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEnt
             .unwrap_or_default()
     };
 
+    let is_store_frame = exe.is_empty();
     Some(WindowEntry {
         hwnd: hwnd.0 as isize as i64,
         title,
-        exe,
         minimized: IsIconic(hwnd).as_bool(),
         focused: hwnd == foreground,
+        aumid: if is_store_frame {
+            window_aumid(hwnd).unwrap_or_default()
+        } else {
+            String::new()
+        },
+        path: if is_store_frame { String::new() } else { path },
+        exe,
     })
 }
 

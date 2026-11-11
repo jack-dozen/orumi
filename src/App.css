@@ -26,7 +26,7 @@
      -webkit-font-feature-settings: "liga";
      -webkit-font-smoothing: antialiased;
    }
-   
+
 :root {
   --surface: #101418;
   --surface-container: #1c2024;
@@ -1474,4 +1474,61 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---------- Ikon aplikasi ---------- */
+
+.appimg {
+  flex: none;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* Cadangan saat ikon belum ada: huruf di atas kotak berwarna. */
+.appimg--letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 28%;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  font-weight: 700;
+}
+
+.appicon {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    background 150ms,
+    opacity 200ms;
+}
+
+.appicon:hover {
+  background: var(--surface-container-high);
+}
+
+.appicon--focus {
+  background: var(--secondary-container);
+}
+
+.appicon--focus::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 11px;
+  bottom: 11px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.appicon--min {
+  opacity: 0.5;
 }

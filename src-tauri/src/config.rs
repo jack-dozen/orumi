@@ -85,6 +85,10 @@ pub struct Config {
     pub last_wallpaper: String,
     /// true = Alt+Tab diganti switcher kustom; false = Alt+Tab bawaan Windows.
     pub alt_tab: bool,
+    /// true = taskbar Windows diset auto-hide selama edgeshell berjalan (dipulihkan saat keluar).
+    pub taskbar_autohide: bool,
+    /// "icons" atau "dots": tampilan daftar app terbuka di bar.
+    pub bar_app_style: String,
     pub hotkeys: Hotkeys,
 }
 
@@ -100,6 +104,8 @@ impl Default for Config {
             wallpaper_command: String::new(),
             last_wallpaper: String::new(),
             alt_tab: true,
+            taskbar_autohide: true,
+            bar_app_style: "icons".into(),
             hotkeys: Hotkeys::default(),
         }
     }
@@ -149,6 +155,9 @@ fn sanitize(mut c: Config) -> Config {
         c.weather_city = d.weather_city;
     }
     c.bg_tint = c.bg_tint.min(100);
+    if c.bar_app_style != "dots" {
+        c.bar_app_style = "icons".into();
+    }
     c.wallpaper_dir = c.wallpaper_dir.trim().trim_matches('"').to_string();
     c.wallpaper_command = c.wallpaper_command.trim().to_string();
     if c.wallpaper_switcher != "external" {
@@ -369,6 +378,9 @@ pub fn set_config(
     *state.0.lock().map_err(|e| e.to_string())? = new.clone();
 
     crate::altswitch::set_enabled(new.alt_tab);
+    if new.taskbar_autohide != old.taskbar_autohide {
+        crate::taskbar::apply(&app, new.taskbar_autohide);
+    }
 
     if new.wallpaper_dir != old.wallpaper_dir {
         crate::wallpaper::warm(app.clone());

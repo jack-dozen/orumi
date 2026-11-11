@@ -5,9 +5,18 @@ import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
 import Icon from "./Icon";
 import WallpaperPicker from "./WallpaperPicker";
+import AppIcon from "./AppIcon";
+import { windowIconTarget } from "../useWindows";
 
 type AppEntry = { name: string; id: string };
-type WinEntry = { hwnd: number; title: string; exe: string; minimized: boolean };
+type WinEntry = {
+  hwnd: number;
+  title: string;
+  exe: string;
+  minimized: boolean;
+  path: string;
+  aumid: string;
+};
 
 /** Satu baris di daftar hasil, baik app, aksi, maupun window. */
 type Item = {
@@ -15,6 +24,8 @@ type Item = {
   name: string;
   hint?: string;
   glyph: string;
+  /** Alamat ikon app ("aumid:..." atau "path:..."); kalau ada, dipakai menggantikan glyph. */
+  icon?: string;
   /** true = glyph adalah nama ikon Material Symbols, bukan huruf. */
   symbol?: boolean;
   dangerous?: boolean;
@@ -153,6 +164,7 @@ export default function Launcher() {
         name: w.title,
         hint: [w.exe, w.minimized ? "diperkecil" : ""].filter(Boolean).join(" · "),
         glyph: (w.exe || w.title).charAt(0).toUpperCase(),
+        icon: windowIconTarget(w) ?? undefined,
         run: () => {
           invoke("focus_window", { hwnd: w.hwnd }).catch(() => {});
         },
@@ -202,6 +214,7 @@ export default function Launcher() {
       key: a.id,
       name: a.name,
       glyph: a.name.charAt(0).toUpperCase(),
+      icon: `aumid:${a.id}`,
       run: () => {
         invoke("launch_app", { id: a.id }).catch(() => {});
       },
@@ -287,11 +300,15 @@ export default function Launcher() {
                     onMouseMove={() => setIndex(i)}
                     onClick={() => activate(item)}
                   >
-                    <div
-                      className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}
-                    >
-                      {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
-                    </div>
+                    {item.icon ? (
+                      <AppIcon target={item.icon} fallback={item.glyph} size={36} />
+                    ) : (
+                      <div
+                        className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}
+                      >
+                        {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
+                      </div>
+                    )}
                     <div className="litem__text">
                       <span className="litem__name">{item.name}</span>
                       {(item.hint || armed === item.key) && (

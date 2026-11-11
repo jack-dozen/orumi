@@ -8,7 +8,16 @@ export type WinEntry = {
   exe: string;
   minimized: boolean;
   focused: boolean;
+  path: string;
+  aumid: string;
 };
+
+/** Alamat ikon untuk sebuah window: AppUserModelID (app Store) atau jalur program. */
+export function windowIconTarget(w: { aumid: string; path: string }): string | null {
+  if (w.aumid) return `aumid:${w.aumid}`;
+  if (w.path) return `path:${w.path}`;
+  return null;
+}
 
 /** Satu aplikasi = satu titik di bar, berapa pun jumlah window-nya. */
 export type AppGroup = {
@@ -17,6 +26,7 @@ export type AppGroup = {
   windows: WinEntry[];
   focused: boolean;
   allMinimized: boolean;
+  icon: string | null;
 };
 
 /** App yang sedang terbuka. Diperbarui saat Windows melaporkan perubahan window. */
@@ -59,6 +69,7 @@ export function useWindows(active: boolean): AppGroup[] {
             return {
               key,
               name: windows[0].exe || windows[0].title,
+              icon: windowIconTarget(windows[0]),
               windows,
               focused: windows.some((w) => w.focused),
               allMinimized: windows.every((w) => w.minimized),

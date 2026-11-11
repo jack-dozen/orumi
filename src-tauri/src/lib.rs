@@ -16,6 +16,8 @@ mod wallpaper;
 mod altswitch;
 mod tray_flyout;
 mod activities;
+mod taskbar;
+mod icons;
 
 use std::{
     collections::HashMap,
@@ -94,6 +96,13 @@ pub fn place_panel(app: &AppHandle, label: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Peluncuran sebagai penjaga pemulih (lihat taskbar.rs): tanpa UI, tanpa Tauri.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--guard") {
+        taskbar::run_guard(&args);
+        return;
+    }
+
     tauri::Builder::default()
         // Harus plugin pertama. Instance kedua langsung keluar; instance pertama diam saja.
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
@@ -109,6 +118,7 @@ pub fn run() {
             activities::ws_move_window,
             altswitch::switcher_pick,
             tray_flyout::tray_toggle,
+            icons::app_icon,
             config::get_config,
             config::set_config,
             stats::get_stats,
@@ -144,6 +154,8 @@ pub fn run() {
         .setup(|app| {
             let cfg = config::load(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
+            taskbar::spawn_guard(app.handle());
+            taskbar::apply(app.handle(), cfg.taskbar_autohide);
             app.manage(config::ConfigState::new(cfg.clone()));
 
             app.manage(stats::StatsState::new());
@@ -228,10 +240,11 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
-            // Kembalikan flyout Windows di jalur keluar mana pun (termasuk menu tray).
+        .run(|app, event| {
+            // Pulihkan flyout Windows dan taskbar di jalur keluar normal (termasuk menu tray).
             if let tauri::RunEvent::Exit = event {
                 osd::restore();
+                taskbar::restore(app);
             }
         });
 }

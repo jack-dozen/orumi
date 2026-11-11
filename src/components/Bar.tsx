@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
 import { useBattery, type BatteryStatus } from "../useBattery";
+import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useNow } from "../useNow";
 import { useWifi } from "../useWifi";
 import { useWindows, type AppGroup } from "../useWindows";
+import AppIcon from "./AppIcon";
 import Icon from "./Icon";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -16,7 +18,7 @@ async function notchTab(tab: string, toggle: boolean) {
   else invoke("set_panel", { label: "notch", open: true });
 }
 
-/** Klik titik app: pindah ke app itu; kalau sudah fokus, minimalkan atau ganti window. */
+/** Klik app: pindah ke app itu; kalau sudah fokus, minimalkan atau ganti window. */
 function onAppClick(g: AppGroup) {
   if (!g.focused) {
     invoke("focus_window", { hwnd: g.windows[0].hwnd }).catch(() => {});
@@ -47,9 +49,11 @@ function batteryIcon(b: BatteryStatus): string {
 export default function Bar() {
   const visible = useEdgeVisible("bar");
   const now = useNow();
+  const cfg = useConfig();
   const wifi = useWifi(visible);
   const battery = useBattery(visible);
   const groups = useWindows(visible);
+  const asIcons = (cfg?.bar_app_style ?? "icons") === "icons";
 
   const wifiOn = !!wifi?.adapter && wifi.connected;
   const wifiTitle = !wifi
@@ -78,13 +82,25 @@ export default function Bar() {
       <div className="bar__apps">
         {groups.map((g) => {
           const shown = g.windows.find((w) => w.focused) ?? g.windows[0];
-          return (
+          const title = `${g.name}${g.windows.length > 1 ? ` (${g.windows.length})` : ""} — ${shown.title}`;
+          return asIcons ? (
+            <div
+              key={g.key}
+              className={`appicon ${g.focused ? "appicon--focus" : ""} ${
+                g.allMinimized ? "appicon--min" : ""
+              }`}
+              title={title}
+              onClick={() => onAppClick(g)}
+            >
+              <AppIcon target={g.icon} fallback={g.name.charAt(0).toUpperCase()} size={24} />
+            </div>
+          ) : (
             <div
               key={g.key}
               className={`appdot ${g.focused ? "appdot--focus" : ""} ${
                 g.allMinimized ? "appdot--min" : ""
               }`}
-              title={`${g.name}${g.windows.length > 1 ? ` (${g.windows.length})` : ""} — ${shown.title}`}
+              title={title}
               onClick={() => onAppClick(g)}
             />
           );

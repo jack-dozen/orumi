@@ -23,6 +23,8 @@ export type Config = {
   wallpaper_switcher: "builtin" | "external";
   wallpaper_command: string;
   alt_tab: boolean;
+  taskbar_autohide: boolean;
+  bar_app_style: "icons" | "dots";
   hotkeys: Hotkeys;
 };
 
