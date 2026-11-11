@@ -54,6 +54,8 @@ pub enum Edge {
     Top,
     Bottom,
     Right,
+    /// Posisi dan ukuran ditentukan kode lewat set_free_rect (mis. pratinjau thumbnail).
+    Free,
 }
 
 /// Deskripsi satu panel. Menambah panel baru = menambah satu spec.
@@ -111,6 +113,25 @@ fn set_size_override(label: &'static str, size: Option<(f64, f64)>) {
         l.retain(|(k, _)| *k != label);
         if let Some(s) = size {
             l.push((label, s));
+        }
+    }
+}
+
+/// Posisi dan ukuran window "bebas" dalam pixel fisik: (x, y, lebar, tinggi).
+static FREE_RECT: Mutex<Vec<(&'static str, (f64, f64, f64, f64))>> = Mutex::new(Vec::new());
+
+fn free_rect(label: &str) -> Option<(f64, f64, f64, f64)> {
+    FREE_RECT
+        .lock()
+        .ok()
+        .and_then(|l| l.iter().find(|(k, _)| *k == label).map(|(_, r)| *r))
+}
+
+pub fn set_free_rect(label: &'static str, rect: Option<(f64, f64, f64, f64)>) {
+    if let Ok(mut l) = FREE_RECT.lock() {
+        l.retain(|(k, _)| *k != label);
+        if let Some(r) = rect {
+            l.push((label, r));
         }
     }
 }
@@ -273,6 +294,10 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
             };
             (win, trig)
         }
+        Edge::Free => {
+            let (x, y, w, h) = free_rect(spec.label).unwrap_or((mx, my, 300.0 * u, 176.0 * u));
+            (Rect { x, y, w, h }, Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 })
+        }
     }
 }
 
@@ -406,6 +431,14 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 .any(|p| p.visible || p.pinned.load(Ordering::Relaxed));
             interval = if near_edge || busy { POLL_FAST } else { POLL_IDLE };
 
+            // Pratinjau thumbnail adalah perpanjangan bar: selama kursor di atasnya, bar tetap terbuka.
+            let over_preview = panels
+                .iter()
+                .any(|q| q.spec.label == "preview" && q.visible)
+                && free_rect("preview")
+                    .map(|(x, y, w, h)| Rect { x, y, w, h }.contains(cursor.x, cursor.y))
+                    .unwrap_or(false);
+
             for p in panels.iter_mut() {
                 let pinned = p.pinned.load(Ordering::Relaxed);
 
@@ -460,7 +493,10 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     } else {
                         p.inside_since = None;
                     }
-                } else if win_rect.contains(cursor.x, cursor.y) || flag_has(&HELD, p.spec.label) {
+                } else if win_rect.contains(cursor.x, cursor.y)
+                    || flag_has(&HELD, p.spec.label)
+                    || (p.spec.label == "bar" && over_preview)
+                {
                     // Kursor di dalam, atau panel sedang dipakai mengetik: jangan ditutup.
                     p.outside_since = None;
                 } else {

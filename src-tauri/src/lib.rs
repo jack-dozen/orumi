@@ -18,6 +18,7 @@ mod tray_flyout;
 mod activities;
 mod taskbar;
 mod icons;
+mod previews;
 
 use std::{
     collections::HashMap,
@@ -32,7 +33,7 @@ use tauri::{
 };
 
 /// Daftar semua panel.
-const PANELS: [PanelSpec; 5] = [
+const PANELS: [PanelSpec; 6] = [
     PanelSpec {
         label: "bar",
         edge: Edge::Left,
@@ -71,6 +72,14 @@ const PANELS: [PanelSpec; 5] = [
         size: (1200.0, 260.0),
         trigger_len: None,
         hover: false,
+        focus: false,
+    },
+    PanelSpec {
+        label: "preview",
+        edge: Edge::Free,
+        size: (0.0, 0.0),
+        trigger_len: None,
+        hover: true, // memakai aturan tutup-otomatis panel yang dibuka lewat klik
         focus: false,
     },
 ];
@@ -119,6 +128,10 @@ pub fn run() {
             altswitch::switcher_pick,
             tray_flyout::tray_toggle,
             icons::app_icon,
+            previews::preview_open,
+            previews::preview_keep,
+            previews::preview_close_soon,
+            previews::preview_close,
             config::get_config,
             config::set_config,
             stats::get_stats,
@@ -154,6 +167,7 @@ pub fn run() {
         .setup(|app| {
             let cfg = config::load(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
+            previews::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
             taskbar::apply(app.handle(), cfg.taskbar_autohide);
             app.manage(config::ConfigState::new(cfg.clone()));

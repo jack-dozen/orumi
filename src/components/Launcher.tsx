@@ -244,10 +244,11 @@ export default function Launcher() {
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") {
+    if (e.key === "ArrowUp") {
+      // Daftar ditampilkan terbalik: ke atas = hasil yang kurang relevan.
       e.preventDefault();
       setIndex((i) => Math.min(i + 1, results.length - 1));
-    } else if (e.key === "ArrowUp") {
+    } else if (e.key === "ArrowDown") {
       e.preventDefault();
       setIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter") {

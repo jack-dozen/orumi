@@ -1,3 +1,4 @@
+import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
 import { useBattery, type BatteryStatus } from "../useBattery";
@@ -5,7 +6,7 @@ import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useNow } from "../useNow";
 import { useWifi } from "../useWifi";
-import { useWindows, type AppGroup } from "../useWindows";
+import { useWindows, windowIconTarget, type AppGroup } from "../useWindows";
 import AppIcon from "./AppIcon";
 import Icon from "./Icon";
 
@@ -54,6 +55,37 @@ export default function Bar() {
   const battery = useBattery(visible);
   const groups = useWindows(visible);
   const asIcons = (cfg?.bar_app_style ?? "icons") === "icons";
+  const previewOpen = useEdgeVisible("preview");
+  const hoverTimer = useRef<number | undefined>(undefined);
+
+  // Bar tersembunyi: tutup pratinjau thumbnail.
+  useEffect(() => {
+    if (!visible) invoke("preview_close").catch(() => {});
+  }, [visible]);
+
+  const hoverApp = (g: AppGroup) => (e: ReactMouseEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    window.clearTimeout(hoverTimer.current);
+    // Niat hover: tunggu sebentar; kalau pratinjau sudah terbuka, ganti isinya hampir seketika.
+    hoverTimer.current = window.setTimeout(
+      () => {
+        const r = el.getBoundingClientRect();
+        invoke("preview_open", {
+          items: g.windows.slice(0, 4).map((w) => ({
+            hwnd: w.hwnd,
+            title: w.title,
+            icon: windowIconTarget(w),
+          })),
+          anchorY: r.top + r.height / 2,
+        }).catch(() => {});
+      },
+      previewOpen ? 60 : 260,
+    );
+  };
+  const leaveApp = () => {
+    window.clearTimeout(hoverTimer.current);
+    invoke("preview_close_soon").catch(() => {});
+  };
 
   const wifiOn = !!wifi?.adapter && wifi.connected;
   const wifiTitle = !wifi
@@ -80,17 +112,23 @@ export default function Bar() {
       </div>
 
       <div className="bar__apps">
-        {groups.map((g) => {
+      {groups.map((g) => {
           const shown = g.windows.find((w) => w.focused) ?? g.windows[0];
-          const title = `${g.name}${g.windows.length > 1 ? ` (${g.windows.length})` : ""} — ${shown.title}`;
+          const label = `${g.name}${g.windows.length > 1 ? ` (${g.windows.length})` : ""}`;
+          const click = () => {
+            invoke("preview_close").catch(() => {});
+            onAppClick(g);
+          };
           return asIcons ? (
             <div
               key={g.key}
               className={`appicon ${g.focused ? "appicon--focus" : ""} ${
                 g.allMinimized ? "appicon--min" : ""
               }`}
-              title={title}
-              onClick={() => onAppClick(g)}
+              title={`${label} — ${shown.title}`}
+              onClick={click}
+              onMouseEnter={hoverApp(g)}
+              onMouseLeave={leaveApp}
             >
               <AppIcon target={g.icon} fallback={g.name.charAt(0).toUpperCase()} size={24} />
             </div>
@@ -100,8 +138,10 @@ export default function Bar() {
               className={`appdot ${g.focused ? "appdot--focus" : ""} ${
                 g.allMinimized ? "appdot--min" : ""
               }`}
-              title={title}
-              onClick={() => onAppClick(g)}
+              title={`${label} — ${shown.title}`}
+              onClick={click}
+              onMouseEnter={hoverApp(g)}
+              onMouseLeave={leaveApp}
             />
           );
         })}
