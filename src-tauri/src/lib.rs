@@ -115,6 +115,24 @@ pub fn run() {
     tauri::Builder::default()
         // Harus plugin pertama. Instance kedua langsung keluar; instance pertama diam saja.
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("orumi-state")
+                .setup(|app, _api| {
+                    let cfg = config::load(app);
+                    app.manage(config::ConfigState::new(cfg));
+                    app.manage(stats::StatsState::new());
+                    app.manage(stats::ProcState::new());
+                    app.manage(gpu::GpuState::new());
+                    app.manage(apps::AppsState::new());
+                    let flags: HashMap<_, _> = PANELS
+                        .iter()
+                        .map(|s| (s.label, Arc::new(AtomicBool::new(false))))
+                        .collect();
+                    app.manage(Panels(flags));
+                    Ok(())
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             edge::toggle_panel,
             edge::set_panel,
@@ -172,20 +190,13 @@ pub fn run() {
             taskbar::apply(app.handle(), cfg.taskbar_autohide);
             app.manage(config::ConfigState::new(cfg.clone()));
 
-            app.manage(stats::StatsState::new());
-            app.manage(stats::ProcState::new());
-            app.manage(gpu::GpuState::new());
-            app.manage(apps::AppsState::new());
-
             // --- Semua panel ---
-            let mut flags = HashMap::new();
             let mut watched = Vec::new();
             for spec in PANELS {
                 let window = app
                     .get_webview_window(spec.label)
                     .unwrap_or_else(|| panic!("window '{}' tidak ada di tauri.conf.json", spec.label));
-                let pinned = Arc::new(AtomicBool::new(false));
-                flags.insert(spec.label, pinned.clone());
+                let pinned = app.state::<Panels>().0[spec.label].clone();
 
                 edge::place(&window, &spec)?;
                 window.set_zoom(edge::ui_scale())?;
@@ -196,7 +207,6 @@ pub fn run() {
                 watched.push((window, spec, pinned));
             }
             edge::start_all(app.handle().clone(), watched);
-            app.manage(Panels(flags));
 
             overlay::start_volume_watcher(app.handle().clone());
             brightness::start_watcher(app.handle().clone());
