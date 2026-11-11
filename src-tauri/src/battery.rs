@@ -1,5 +1,5 @@
-//! Status baterai lewat GetSystemPowerStatus.
-//! Interpretasi flag mengikuti Bloom (GPL-3.0): battery.rs.
+//! Battery status through GetSystemPowerStatus.
+//! Flag interpretation follows Bloom (GPL-3.0): battery.rs.
 
 use serde::Serialize;
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
@@ -12,11 +12,11 @@ const CHARGING_FLAG: u8 = 8;
 pub struct BatteryStatus {
     percent: u8,
     charging: bool,
-    /// Tersambung ke listrik (belum tentu sedang mengisi, misalnya sudah penuh).
+    /// Connected to power (not necessarily charging, e.g. when fully charged).
     plugged: bool,
 }
 
-/// None = PC ini tidak punya baterai (atau statusnya tidak bisa dibaca).
+/// None = this PC has no battery (or its status cannot be read).
 #[tauri::command]
 pub fn get_battery() -> Option<BatteryStatus> {
     let mut status = SYSTEM_POWER_STATUS::default();

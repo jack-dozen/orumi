@@ -4,11 +4,11 @@ import { saveConfig, useConfig, type ColorSlot, type Config } from "../useConfig
 import Icon from "./Icon";
 import WallpaperSettings from "./WallpaperSettings";
 
-/** Notch normalnya tidak mengambil fokus; untuk mengetik ia perlu diizinkan sementara. */
+/** The notch normally does not take focus; temporarily allow it to receive focus for typing. */
 const activate = (enable: boolean) =>
   invoke("panel_activation", { label: "notch", enable }).catch(() => {});
 
-/** Batas waktu menunggu kombinasi tombol sebelum penangkapan dibatalkan. */
+/** Timeout for waiting on a key combination before capture is canceled. */
 const CAPTURE_TIMEOUT_MS = 6000;
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -23,9 +23,9 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * Kolom hotkey: bisa diketik langsung (mis. Ctrl+Alt+K) atau ditangkap dari keyboard.
- * Kombinasi yang sudah dipakai app lain tidak bisa ditangkap (app itu menerimanya lebih dulu);
- * ketik manual supaya Windows memberi tahu bahwa kombinasi itu tidak tersedia.
+ * Hotkey field: type directly (e.g. Ctrl+Alt+K) or capture from the keyboard.
+ * Combinations already used by another app cannot be captured (that app receives them first);
+ * type them manually so Windows can report that the combination is unavailable.
  */
 function HotkeyField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [capturing, setCapturing] = useState(false);
@@ -47,7 +47,7 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
         return;
       }
       const code = e.code;
-      if (/^(Control|Alt|Shift|Meta)/.test(code)) return; // modifier saja: tunggu tombol utamanya
+      if (/^(Control|Alt|Shift|Meta)/.test(code)) return; // Modifier only: wait for the primary key.
 
       let key: string | null = null;
       if (code.startsWith("Key")) key = code.slice(3);
@@ -59,7 +59,7 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
       const mods = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift"].filter(
         Boolean,
       ) as string[];
-      if (mods.length === 0) return; // wajib ada modifier supaya tidak membajak ketikan biasa
+      if (mods.length === 0) return; // A modifier is required to avoid hijacking regular typing.
 
       setCapturing(false);
       onChangeRef.current([...mods, key].join("+"));
@@ -110,7 +110,7 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
   );
 }
 
-// ---------- Aplikasi: skala, kota, hotkey ----------
+// ---------- App: scale, city, hotkey ----------
 
 export default function AppSettings() {
   const cfg = useConfig();
@@ -118,9 +118,9 @@ export default function AppSettings() {
   const [city, setCity] = useState("");
   const [note, setNote] = useState("");
   const [ok, setOk] = useState("");
-  const [resetKey, setResetKey] = useState(0); // memaksa kolom hotkey memuat ulang nilai tersimpan
+  const [resetKey, setResetKey] = useState(0); // force the hotkey field to reload the saved value
 
-  // Isian lokal mengikuti config yang tersimpan.
+  // The local fields follow the saved config.
   useEffect(() => {
     if (!cfg) return;
     setScale(Math.round(cfg.ui_scale * 100));
@@ -134,7 +134,7 @@ export default function AppSettings() {
     try {
       const res = await saveConfig({ ...cfg, ...patch });
       setNote(res.warnings.join(" "));
-      // Ada yang ditolak: kembalikan tampilan kolom ke nilai yang sebenarnya dipakai.
+      // Something was rejected: reset the field display to the value actually in use.
       if (res.warnings.length > 0) setResetKey((k) => k + 1);
       return res.warnings;
     } catch (e) {
@@ -270,7 +270,7 @@ export default function AppSettings() {
   );
 }
 
-// ---------- Warna ----------
+// ---------- Colors ----------
 
 const SLOTS = [
   { key: "bg0", label: "Latar panel", note: "bg0", token: "--surface" },
@@ -311,7 +311,7 @@ export function ColorSettings() {
       colors: { ...cfg.colors, [key]: { ...cfg.colors[key], ...patch } },
     }).catch(() => {});
 
-  /** Memilih warna otomatis menjadikan slot itu custom. Disimpan setelah jeda singkat. */
+  /** Choosing a color automatically makes that slot custom. Saved after a short delay. */
   const pick = (key: SlotKey, value: string) => {
     setHex((h) => ({ ...h, [key]: value }));
     window.clearTimeout(timers.current[key]);

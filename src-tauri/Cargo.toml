@@ -40,8 +40,8 @@ opt-level = 3
 panic = "abort"
 strip = true
 
-# Dependency (image, rayon, wmi, ...) dikompilasi dengan optimasi walau di mode dev.
-# Tanpa ini, decode gambar di `tauri dev` sangat lambat. Compile pertama jadi lebih lama.
+# Dependencies (image, rayon, wmi, ...) are optimized even in dev mode.
+# Without this, image decoding in `tauri dev` is very slow. The first compile takes longer.
 [profile.dev]
 opt-level = 1
 

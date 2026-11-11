@@ -11,13 +11,13 @@ import {
 } from "@material/material-color-utilities";
 import type { ColorSlot, Config } from "./useConfig";
 
-/** Warna dasar kalau wallpaper tidak bisa dibaca (polos atau tidak ada). */
+/** Base colors when the wallpaper cannot be read (plain or missing). */
 const FALLBACK_SEED = argbFromHex("#3b82f6");
 
 type Tokens = Record<string, string>;
 type RGB = [number, number, number];
 
-// ---------- Utilitas warna ----------
+// ---------- Color utilities ----------
 
 const toRgb = (hex: string): RGB => [
   parseInt(hex.slice(1, 3), 16),
@@ -31,7 +31,7 @@ const toHex = ([r, g, b]: RGB) =>
     .map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0"))
     .join("");
 
-/** Campur dua warna: t = 0 -> a, t = 1 -> b. */
+/** Blend two colors: t = 0 -> a, t = 1 -> b. */
 function mix(a: string, b: string, t: number): string {
   const x = toRgb(a);
   const y = toRgb(b);
@@ -53,15 +53,15 @@ function contrast(a: string, b: string): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-/** Dari dua kandidat, pilih yang paling terbaca di atas warna `on`. */
+/** Choose the more legible of two candidates on top of the `on` color. */
 const pickReadable = (on: string, a: string, b: string) => (contrast(on, a) >= contrast(on, b) ? a : b);
 
 // ---------- Token ----------
 
-/** Empat warna (otomatis dari wallpaper atau custom) -> seluruh token CSS. */
+/** Four colors (automatic from the wallpaper or custom) -> all CSS tokens. */
 function buildTokens(cfg: Pick<Config, "colors" | "bg_tint">, seed: number): Tokens {
   const hue = Hct.fromInt(seed).hue;
-  // bg_tint 0 = nyaris abu-abu netral, 100 = latar jelas berwarna wallpaper.
+  // bg_tint 0 = nearly neutral gray; 100 = a background strongly tinted by the wallpaper.
   const tinted = TonalPalette.fromHueAndChroma(hue, 2 + (cfg.bg_tint / 100) * 34);
   const soft = TonalPalette.fromHueAndChroma(hue, 6);
   const accentPalette = themeFromSourceColor(seed).palettes.primary;
@@ -74,7 +74,7 @@ function buildTokens(cfg: Pick<Config, "colors" | "bg_tint">, seed: number): Tok
   const fg = pick(cfg.colors.fg, () => hexFromArgb(soft.tone(92)));
   const accent = pick(cfg.colors.accent, () => hexFromArgb(accentPalette.tone(80)));
 
-  // Latar terang membutuhkan warna error yang lebih gelap supaya terbaca.
+  // Light backgrounds need a darker error color for legibility.
   const light = luminance(bg0) > 0.5;
 
   return {
@@ -119,10 +119,10 @@ async function seedFromWallpaper(): Promise<number> {
 }
 
 /**
- * Semua window mengikuti tema yang dihitung satu window sumber (notch).
- * Wallpaper diperiksa saat ada panel yang dibuka (murah: hanya membandingkan stempel),
- * bukan berkala. Warna wallpaper di-cache per stempel, jadi menggeser slider atau
- * mengganti warna custom tidak membaca ulang gambar.
+ * All windows follow the theme calculated by a single source window (the notch).
+ * The wallpaper is checked when a panel opens (inexpensive: only its stamp is compared),
+ * not periodically. Wallpaper colors are cached by stamp, so moving a slider or
+ * changing a custom color does not reread the image.
  */
 export function useTheme(isSource: boolean) {
   useEffect(() => {
@@ -133,7 +133,7 @@ export function useTheme(isSource: boolean) {
     let seedCache: { stamp: string | null; seed: number } | null = null;
     const unlistens: Promise<() => void>[] = [];
 
-    // Semua window: pakai tema yang sudah ada, lalu ikuti perubahannya.
+    // All windows: use the existing theme, then follow its updates.
     invoke<string | null>("get_theme")
       .then((json) => {
         if (json && !cancelled) applyTokens(JSON.parse(json));
@@ -141,7 +141,7 @@ export function useTheme(isSource: boolean) {
       .catch(() => {});
     unlistens.push(listen<string>("theme-changed", (e) => applyTokens(JSON.parse(e.payload))));
 
-    /** force: hitung ulang walau tidak ada yang berubah. rewall: baca ulang gambar wallpaper. */
+    /** force: recalculate even if nothing changed. rewall: reread the wallpaper image. */
     const check = async (force: boolean, rewall = false) => {
       if (!force && Date.now() - lastCheck < 3000) return;
       lastCheck = Date.now();
@@ -170,7 +170,7 @@ export function useTheme(isSource: boolean) {
         applyTokens(tokens);
         await invoke("set_theme", { json: JSON.stringify(tokens) });
       } catch {
-        /* coba lagi pada pemicu berikutnya */
+        /* try again on the next trigger */
       }
     };
 

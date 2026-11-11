@@ -1,6 +1,6 @@
-//! Auto-hide taskbar Windows lewat API resmi (ABM_SETSTATE), dengan pemulihan tahan-crash:
-//! keadaan asli disimpan di file penanda, dipulihkan saat keluar normal, dan oleh proses
-//! penjaga kecil kalau app mati paksa. Polanya mengikuti Bloom (GPL-3.0): penanda + pengawas.
+//! Auto-hide the Windows taskbar through the official API (ABM_SETSTATE), with crash-safe recovery:
+//! the original state is saved in a marker file, restored on normal exit, and by a small watchdog
+//! if the app is forcibly terminated. The pattern follows Bloom (GPL-3.0): marker + watchdog.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -34,7 +34,7 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 #[derive(Serialize, Deserialize)]
 struct Marker {
-    /// Nilai ABM_GETSTATE sebelum kita mengubahnya.
+    /// ABM_GETSTATE value before we changed it.
     original_state: u32,
 }
 
@@ -66,7 +66,7 @@ fn set_state(state: u32) {
     let _ = unsafe { appbar(ABM_SETSTATE, state) };
 }
 
-/// Kembalikan taskbar ke keadaan asli kalau ada penanda, lalu hapus penandanya.
+/// Restore the taskbar to its original state if a marker exists, then remove the marker.
 fn restore_from(path: &Path) {
     if let Some(m) = read_marker(path) {
         set_state(m.original_state);
@@ -74,7 +74,7 @@ fn restore_from(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
-/// Nyalakan atau matikan auto-hide. Aman dipanggil berulang.
+/// Enable or disable auto-hide. Safe to call repeatedly.
 pub fn apply(app: &AppHandle, enabled: bool) {
     let Some(path) = marker_path(app) else { return };
     if !enabled {
@@ -82,8 +82,8 @@ pub fn apply(app: &AppHandle, enabled: bool) {
         return;
     }
 
-    // Penanda yang masih ada berarti sesi sebelumnya tidak sempat memulihkan:
-    // keadaan asli yang sebenarnya ada di penanda, bukan yang terbaca sekarang.
+    // A remaining marker means the previous session did not restore the state:
+    // the true original state is in the marker, not the current reading.
     let original = match read_marker(&path) {
         Some(m) => m.original_state,
         None => match get_state() {
@@ -93,7 +93,7 @@ pub fn apply(app: &AppHandle, enabled: bool) {
     };
 
     if original & ABS_AUTOHIDE != 0 {
-        // Pengguna memang sudah memakai auto-hide: tidak ada yang perlu diubah atau dipulihkan.
+        // The user already had auto-hide enabled: nothing needs to be changed or restored.
         let _ = fs::remove_file(&path);
         return;
     }
@@ -103,21 +103,21 @@ pub fn apply(app: &AppHandle, enabled: bool) {
     }
     if let Ok(text) = serde_json::to_string(&Marker { original_state: original }) {
         if fs::write(&path, text).is_err() {
-            return; // tanpa penanda, jangan mengubah apa pun
+            return; // without a marker, do not change anything
         }
     }
     set_state(original | ABS_AUTOHIDE);
 }
 
-/// Dipanggil saat app keluar secara normal.
+/// Called when the app exits normally.
 pub fn restore(app: &AppHandle) {
     if let Some(path) = marker_path(app) {
         restore_from(&path);
     }
 }
 
-/// Jalankan salinan kecil diri sendiri yang menunggu proses ini berakhir lalu memulihkan.
-/// DETACHED_PROCESS: tidak ikut mati oleh Ctrl+C atau penutupan terminal.
+/// Launch a small copy of this process that waits for it to exit, then restores the state.
+/// DETACHED_PROCESS: it survives Ctrl+C and terminal closure.
 pub fn spawn_guard(app: &AppHandle) {
     let Some(marker) = marker_path(app) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
@@ -132,8 +132,8 @@ pub fn spawn_guard(app: &AppHandle) {
         .spawn();
 }
 
-/// Mode penjaga (`--guard <pid> <penanda>`): tanpa UI. Menunggu proses induk berakhir,
-/// lalu memulihkan flyout Windows dan taskbar.
+/// Watchdog mode (`--guard <pid> <marker>`): no UI. Wait for the parent process to exit,
+/// then restore the Windows flyout and taskbar.
 pub fn run_guard(args: &[String]) {
     let Some(i) = args.iter().position(|a| a == "--guard") else { return };
     let pid: u32 = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(0);

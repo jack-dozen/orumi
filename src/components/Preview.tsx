@@ -34,7 +34,7 @@ function Thumb({ src }: { src: string }) {
   return <img src={shown} alt="" draggable={false} />;
 }
 
-/** Pratinjau window yang tumbuh dari tepi bar. Datanya dikirim Rust saat ikon di-hover. */
+/** Window preview that grows from the bar edge. Rust sends its data when an icon is hovered. */
 export default function Preview() {
   const visible = useEdgeVisible("preview");
   const [data, setData] = useState<Payload | null>(null);

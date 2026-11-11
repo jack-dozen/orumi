@@ -1,11 +1,11 @@
-//! Activities: panel dari tepi bawah berisi workspace dan app grid (pengganti start menu).
+//! Activities: a panel from the bottom edge containing workspaces and an app grid (a Start menu replacement).
 //!
-//! Seluruh logikanya hidup di folder ini supaya tidak bercampur dengan kode panel lain.
-//! File lama hanya perlu tahu tiga hal (lihat CHANGES.md): `mod activities;`, daftar command
-//! di `generate_handler!`, dan satu panggilan `activities::init(...)` di `setup`.
+//! All of its logic lives in this folder to keep it separate from other panel code.
+//! The existing files only need three changes (see CHANGES.md): `mod activities;`, the command list
+//! in `generate_handler!`, and a call to `activities::init(...)` in `setup`.
 //!
-//! Window "activities" TIDAK masuk `PANELS`/edge.rs. Ia dikelola sendiri di sini: tidak ada
-//! pemicu tepi layar, hanya Win key (winkey.rs) atau command `activities_toggle`.
+//! The "activities" window is NOT part of `PANELS`/edge.rs. It is managed here: there is no
+//! screen-edge trigger, only the Win key (winkey.rs) or the `activities_toggle` command.
 
 mod thumbs;
 mod winkey;
@@ -27,17 +27,17 @@ use workspaces::{Workspace, WorkspaceState};
 
 /// Label window di tauri.conf.json.
 const LABEL: &str = "activities";
-/// Lamanya animasi tutup di sisi React sebelum window benar-benar disembunyikan.
+/// Duration of the close animation on the React side before the window is actually hidden.
 const CLOSE_ANIM: Duration = Duration::from_millis(320);
-/// Ukuran panel (satuan desain, sama dengan PanelSpec.size panel lain): paling besar segini,
-/// dan tidak melebihi bagian layar berikut (lebar, tinggi).
+/// Panel size (design units, same as other panels' PanelSpec.size): capped at this size
+/// and at the following screen dimensions (width, height).
 const PANEL_MAX: (f64, f64) = (1600.0, 860.0);
 const PANEL_FRACTION: (f64, f64) = (0.92, 0.84);
 
-/// true = Activities sedang terbuka (atau sedang menyiapkan snapshot untuk dibuka).
+/// true = Activities is open (or preparing a snapshot to open).
 static OPEN: AtomicBool = AtomicBool::new(false);
 
-/// Dipanggil sekali dari `setup` di lib.rs.
+/// Called once from `setup` in lib.rs.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     app.manage(WorkspaceState::new());
     if app.get_webview_window(LABEL).is_none() {
@@ -48,7 +48,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Nyalakan/matikan pemicu Win key (untuk dihubungkan ke config nanti).
+/// Enable/disable the Win key trigger (to be connected to config later).
 #[allow(dead_code)]
 pub fn set_win_key_enabled(on: bool) {
     winkey::set_enabled(on);
@@ -58,9 +58,9 @@ pub fn is_open() -> bool {
     OPEN.load(Ordering::SeqCst)
 }
 
-/// Tutup karena Win ditekan selagi Activities terbuka (lihat winkey.rs). Memakai animasi yang
-/// sama dengan `hide`. Kalau Start menu kembali lolos saat Win ditekan beruntun, ganti isinya
-/// dengan penyembunyian langsung tanpa menunggu `CLOSE_ANIM`.
+/// Close when Win is pressed while Activities is open (see winkey.rs). Uses the same animation
+/// as `hide`. If the Start menu appears again during repeated Win presses, replace its contents
+/// with an immediate hide instead of waiting for `CLOSE_ANIM`.
 pub fn dismiss(app: &AppHandle) {
     hide(app);
 }
@@ -73,8 +73,8 @@ pub fn toggle(app: &AppHandle) {
     }
 }
 
-/// Ambil snapshot window (dengan thumbnail) DULU, baru tampilkan window Activities.
-/// Dengan begitu Activities tidak ikut tertangkap dan tidak ada kedipan isi lama.
+/// Take a snapshot of windows (with thumbnails) BEFORE showing the Activities window.
+/// This prevents Activities from being captured and avoids flashing stale contents.
 pub fn show(app: &AppHandle) {
     if OPEN.swap(true, Ordering::SeqCst) {
         return;
@@ -86,7 +86,7 @@ pub fn show(app: &AppHandle) {
 
         let a = app.clone();
         let _ = app.run_on_main_thread(move || {
-            // Sudah ditutup lagi selama snapshot diambil.
+            // It was closed again while the snapshot was being taken.
             if !OPEN.load(Ordering::SeqCst) {
                 return;
             }
@@ -107,14 +107,14 @@ pub fn hide(app: &AppHandle) {
     if !OPEN.swap(false, Ordering::SeqCst) {
         return;
     }
-    // React memainkan animasi tutup; window disembunyikan setelahnya.
+    // React plays the close animation; hide the window afterward.
     let _ = app.emit_to(LABEL, "activities-close", ());
     let app = app.clone();
     thread::spawn(move || {
         thread::sleep(CLOSE_ANIM);
         let a = app.clone();
         let _ = app.run_on_main_thread(move || {
-            // Dibuka lagi selama animasi tutup: biarkan.
+            // Reopened during the close animation: leave it open.
             if OPEN.load(Ordering::SeqCst) {
                 return;
             }
@@ -125,16 +125,16 @@ pub fn hide(app: &AppHandle) {
     });
 }
 
-/// Taruh window sebagai panel di tepi bawah, di tengah, dengan cara yang sama seperti panel
-/// lain (`edge::place`) dan mengikuti skala UI utama. Dihitung ulang tiap dibuka (resolusi,
-/// DPI, atau skala bisa berubah), jadi perubahan skala berlaku pada pembukaan berikutnya.
+/// Place the window as a panel centered on the bottom edge, like other panels (`edge::place`),
+/// and use the main UI scale. Recalculate each time it opens (resolution, DPI, or scale may
+/// change) so scale changes take effect the next time it opens.
 fn place_panel(window: &WebviewWindow) {
     let scale = crate::edge::ui_scale();
     let _ = window.set_zoom(scale);
     let Ok(Some(m)) = window.primary_monitor() else {
         return;
     };
-    // 1 satuan desain = u pixel fisik.
+    // 1 design unit = u physical pixels.
     let u = m.scale_factor() * scale;
     let (mw, mh) = (m.size().width as f64 / u, m.size().height as f64 / u);
     let spec = PanelSpec {
@@ -151,7 +151,7 @@ fn place_panel(window: &WebviewWindow) {
     let _ = crate::edge::place(window, &spec);
 }
 
-// ---------- Command untuk React ----------
+// ---------- Commands for React ----------
 
 #[tauri::command]
 pub fn activities_toggle(app: AppHandle) {

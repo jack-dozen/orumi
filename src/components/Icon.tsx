@@ -1,12 +1,12 @@
 type Props = {
     name: string;
     size?: number;
-    /** Varian terisi, untuk keadaan aktif. */
+    /** Filled variant for the active state. */
     fill?: boolean;
     className?: string;
   };
 
-  /** Ikon Material Symbols Rounded. `name` adalah nama ikon di fonts.google.com/icons. */
+  /** Material Symbols Rounded icon. `name` is the icon name from fonts.google.com/icons. */
   export default function Icon({ name, size, fill, className }: Props) {
     return (
       <span

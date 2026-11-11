@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { saveConfig, useConfig, type Config } from "../useConfig";
 
-/** Notch normalnya tidak mengambil fokus; untuk mengetik ia perlu diizinkan sementara. */
+/** The notch normally does not take focus; temporarily allow it to receive focus for typing. */
 const activate = (enable: boolean) =>
   invoke("panel_activation", { label: "notch", enable }).catch(() => {});
 
@@ -20,7 +20,7 @@ export default function WallpaperSettings() {
     setCmd(cfg.wallpaper_command);
   }, [cfg]);
 
-  // Cek folder: berapa gambar yang ditemukan.
+  // Check the folder: how many images were found.
   useEffect(() => {
     if (!cfg || cfg.wallpaper_switcher !== "builtin") return;
     let cancelled = false;

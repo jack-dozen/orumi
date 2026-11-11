@@ -1,9 +1,9 @@
-//! Antarmuka workspace untuk Activities.
+//! Workspace interface for Activities.
 //!
-//! UI hanya bicara lewat `WorkspaceProvider`. Sekarang isinya `StaticProvider` (palsu:
-//! workspace disimpan di memori dan TIDAK menyembunyikan window sungguhan). Saat window
-//! manager sudah dipilih, cukup tulis provider baru yang bicara lewat IPC-nya dan ganti
-//! satu baris di `WorkspaceState::new()`. UI dan command tidak perlu diubah.
+//! The UI communicates only through `WorkspaceProvider`. It currently contains `StaticProvider`
+//! (a stub: workspaces are stored in memory and do NOT hide real windows). Once a window manager
+//! is selected, add a provider that communicates through its IPC and replace one line in
+//! `WorkspaceState::new()`. The UI and commands will not need to change.
 
 use std::{collections::HashMap, sync::Mutex};
 
@@ -16,7 +16,7 @@ pub struct Workspace {
     pub id: String,
     pub name: String,
     pub active: bool,
-    /// hwnd semua window di workspace ini.
+    /// hwnds of all windows in this workspace.
     pub windows: Vec<i64>,
 }
 
@@ -31,7 +31,7 @@ pub struct WorkspaceState(pub Box<dyn WorkspaceProvider>);
 
 impl WorkspaceState {
     pub fn new() -> Self {
-        // Ganti di sini dengan provider IPC window manager nanti.
+        // Replace this with the window manager's IPC provider later.
         Self(Box::new(StaticProvider::new(4)))
     }
 }
@@ -39,9 +39,9 @@ impl WorkspaceState {
 // ---------- Provider palsu ----------
 
 struct Inner {
-    /// Indeks workspace aktif.
+    /// Index of the active workspace.
     active: usize,
-    /// hwnd -> indeks workspace. Window baru masuk ke workspace yang aktif saat pertama terlihat.
+    /// hwnd -> workspace index. New windows join the active workspace when first seen.
     assigned: HashMap<i64, usize>,
 }
 

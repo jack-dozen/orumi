@@ -22,7 +22,7 @@ export type MediaState = {
   seek: (ms: number) => void;
 };
 
-/** Ambil info media tiap detik, hanya saat `active` = true. */
+/** Fetch media info every second, only while `active` = true. */
 export function useMedia(active: boolean): MediaState {
   const [info, setInfo] = useState<MediaInfo | null>(null);
   const [art, setArt] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export function useMedia(active: boolean): MediaState {
       }
       setInfo(res);
     } catch {
-      /* coba lagi di polling berikutnya */
+      /* try again on the next poll */
     }
   }, []);
 

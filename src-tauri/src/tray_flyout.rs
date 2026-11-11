@@ -1,6 +1,6 @@
-//! Tombol tray di bar: membuka flyout "ikon tersembunyi" bawaan Windows 11 lewat UI Automation.
-//! Pola pencarian chevron dan penanganan state basi diadaptasi dari Bloom (GPL-3.0): tray.rs.
-//! Ikon dan menu kanannya tetap ditangani Windows, jadi semua app tray berfungsi normal.
+//! Tray button in the bar: opens the built-in Windows 11 "hidden icons" flyout through UI Automation.
+//! The chevron search pattern and stale-state handling are adapted from Bloom (GPL-3.0): tray.rs.
+//! Windows still handles the icons and their context menus, so all tray apps work normally.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{thread, time::Duration};
@@ -27,7 +27,7 @@ use windows::{
     },
 };
 
-/// false = flyout dibiarkan di posisi bawaan Windows (dekat taskbar).
+/// false = leave the flyout at its default Windows position (near the taskbar).
 const MOVE_FLYOUT: bool = true;
 
 struct ComGuard(bool);
@@ -46,7 +46,7 @@ impl Drop for ComGuard {
     }
 }
 
-/// Window flyout ikon tersembunyi: nama kelasnya berbeda antar build Windows.
+/// Hidden-icons flyout window: its class name varies between Windows builds.
 fn overflow_visible() -> Option<HWND> {
     unsafe {
         let hwnd = FindWindowW(w!("TopLevelWindowForOverflowXamlIsland"), PCWSTR::null())
@@ -56,12 +56,12 @@ fn overflow_visible() -> Option<HWND> {
     }
 }
 
-/// Cari tombol chevron di taskbar. Namanya dilokalkan ("Show Hidden Icons", dst.), jadi
-/// dikenali dari AutomationId dan kelasnya.
+/// Find the chevron button on the taskbar. Its name is localized ("Show Hidden Icons", etc.), so
+/// identified by its AutomationId and class.
 unsafe fn find_chevron(automation: &IUIAutomation) -> Result<IUIAutomationElement, String> {
     let taskbar = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null())
         .map_err(|_| "Taskbar Windows tidak ditemukan".to_string())?;
-    // Kontrol tray Windows 11 ada di jembatan XAML anak, bukan di Shell_TrayWnd langsung.
+    // Windows 11 tray controls are in a child XAML bridge, not directly in Shell_TrayWnd.
     let bridge = FindWindowExW(
         Some(taskbar),
         None,
@@ -89,7 +89,7 @@ unsafe fn find_chevron(automation: &IUIAutomation) -> Result<IUIAutomationElemen
         if class == "SystemTray.NormalButton" {
             return Ok(el);
         }
-        // Cadangan untuk build lama: nama bahasa Inggris tombolnya.
+        // Fallback for older builds: the button's English name.
         if fallback.is_none() && name.to_lowercase().contains("hidden") {
             fallback = Some(el);
         }
@@ -103,7 +103,7 @@ unsafe fn find_chevron(automation: &IUIAutomation) -> Result<IUIAutomationElemen
     })
 }
 
-/// Pindahkan flyout ke samping bar (best-effort; gagal = dibiarkan di tempatnya).
+/// Move the flyout beside the bar (best effort; if it fails, leave it where it is).
 unsafe fn place_near(hwnd: HWND, anchor: (i32, i32)) {
     let mut r = RECT::default();
     if GetWindowRect(hwnd, &mut r).is_err() {
@@ -139,11 +139,11 @@ fn toggle_overflow(anchor: Option<(i32, i32)>) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         pattern.Invoke().map_err(|e| e.to_string())?;
         if was_open {
-            return Ok(()); // chevron bekerja sebagai sakelar: ini menutup flyout
+            return Ok(()); // the chevron is a toggle: this closes the flyout
         }
 
-        // Explorer mengingat state "terbuka" walau flyout sudah hilang; kalau flyout tidak muncul,
-        // sakelar sekali lagi lalu tunggu lagi.
+        // Explorer remembers the "open" state even after the flyout disappears; if it does not appear,
+        // toggle once more and wait again.
         for attempt in 0..2 {
             for _ in 0..15 {
                 if let Some(hwnd) = overflow_visible() {
@@ -164,7 +164,7 @@ fn toggle_overflow(anchor: Option<(i32, i32)>) -> Result<(), String> {
     }
 }
 
-/// Titik di kanan bar (x) dan dekat dasarnya (y), dalam pixel fisik.
+/// Point to the right of the bar (x) and near its bottom (y), in physical pixels.
 fn bar_anchor(app: &AppHandle) -> Option<(i32, i32)> {
     let bar = app.get_webview_window("bar")?;
     let pos = bar.outer_position().ok()?;

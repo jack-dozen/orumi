@@ -10,10 +10,10 @@ export type SnapWindow = {
   exe: string;
   minimized: boolean;
   focused: boolean;
-  /** AppUserModelID (app Store) dan jalur program, untuk mengambil ikon. */
+  /** AppUserModelID (Store app) and program path, used to fetch the icon. */
   aumid: string;
   path: string;
-  /** JPEG base64 tanpa prefix; null kalau window tidak bisa ditangkap. */
+  /** JPEG base64 without a prefix; null if the window cannot be captured. */
   thumb: string | null;
 };
 
@@ -24,20 +24,20 @@ export type Workspace = {
   windows: number[];
 };
 
-/** Alamat ikon untuk sebuah window, dalam format yang dimengerti `AppIcon`. */
+/** Icon address for a window, in the format understood by `AppIcon`. */
 export const iconTarget = (w: { aumid: string; path: string }) =>
   w.aumid ? `aumid:${w.aumid}` : w.path ? `path:${w.path}` : null;
 
 export const closeActivities = () => invoke("activities_close").catch(() => {});
 
 /**
- * Status dan data Activities. Rust memancarkan:
- *  - "activities-open"  (payload: daftar window + thumbnail) saat window tampil
- *  - "activities-close" saat mulai menutup
+ * Activities status and data. Rust emits:
+ *  - "activities-open"  (payload: window list + thumbnails) when the window is shown
+ *  - "activities-close" when closing starts
  */
 export function useActivities() {
   const [visible, setVisible] = useState(false);
-  /** Naik setiap kali dibuka; dipakai React untuk mereset tampilan. */
+  /** Increments each time it opens; used by React to reset the display. */
   const [openCount, setOpenCount] = useState(0);
   const [wins, setWins] = useState<SnapWindow[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -49,7 +49,7 @@ export function useActivities() {
       .catch(() => setWorkspaces([]));
   }, []);
 
-  // Daftar app dimuat sekali (di-cache oleh Rust, sama dengan yang dipakai launcher).
+  // The app list is loaded once (cached by Rust, shared with the launcher).
   useEffect(() => {
     invoke<AppEntry[]>("list_apps", { refresh: false })
       .then(setApps)
@@ -62,7 +62,7 @@ export function useActivities() {
         setWins(e.payload ?? []);
         setOpenCount((n) => n + 1);
         refreshWorkspaces();
-        // Dua frame supaya transisi buka benar-benar terlihat.
+        // Two frames ensure the opening transition is actually visible.
         requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
       }),
       listen("activities-close", () => setVisible(false)),

@@ -16,8 +16,8 @@ type Item = {
 };
 
 /**
- * Tampilan Alt+Tab. Seluruh logika (urutan, tombol, pemilihan) ada di Rust; komponen ini
- * hanya menggambar daftar yang dikirim dan indeks yang sedang dipilih.
+ * Alt+Tab display. All logic (ordering, keys, selection) is in Rust; this component
+ * only renders the received list and the currently selected index.
  */
 export default function Switcher() {
   const visible = useEdgeVisible("switcher");
@@ -37,7 +37,7 @@ export default function Switcher() {
     };
   }, []);
 
-  // Jaga item terpilih tetap terlihat saat daftarnya lebih panjang dari panel.
+  // Keep the selected item visible when the list is taller than the panel.
   useEffect(() => {
     activeRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
   }, [index, items]);

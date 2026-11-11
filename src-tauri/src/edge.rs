@@ -10,29 +10,29 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
 
-/// Seberapa tipis zona pemicu di tepi layar (DIP).
+/// Thickness of the screen-edge trigger zone (DIP).
 const EDGE_TRIGGER_DIP: f64 = 2.0;
-/// Jeda sebelum panel menghilang setelah kursor menjauh.
+/// Delay before a panel hides after the cursor moves away.
 const HIDE_DELAY: Duration = Duration::from_millis(400);
-/// Kursor harus diam di tepi selama ini sebelum panel muncul (mencegah muncul tidak sengaja).
+/// How long the cursor must remain at the edge before a panel appears (prevents accidental activation).
 const EDGE_DWELL: Duration = Duration::from_millis(200);
-/// Panel yang dibuka lewat klik tapi tidak pernah dimasuki kursor ditutup setelah ini.
+/// A panel opened by clicking but never entered by the cursor closes after this delay.
 const PIN_GRACE: Duration = Duration::from_secs(6);
-/// Interval pemantau kursor: cepat saat kursor dekat tepi atau ada panel terlihat, lambat saat idle.
+/// Cursor monitor interval: fast near an edge or while a panel is visible, slow while idle.
 const POLL_FAST: Duration = Duration::from_millis(30);
 const POLL_IDLE: Duration = Duration::from_millis(150);
-/// "Dekat tepi" = dalam jarak ini dari tepi layar (satuan desain).
+/// "Near the edge" = within this distance of the screen edge (design units).
 const NEAR_EDGE_DIP: f64 = 96.0;
-/// Seberapa sering ukuran monitor dibaca ulang.
+/// How often to reread monitor dimensions.
 const METRICS_REFRESH: Duration = Duration::from_secs(5);
-/// Jarak bar dari tepi atas dan bawah layar (satuan desain, sebelum skala UI).
+/// Bar distance from the top and bottom screen edges (design units, before UI scaling).
 const BAR_INSET_DIP: f64 = 12.0;
 
-// ---------- Skala UI (bisa diubah saat berjalan) ----------
+// ---------- UI scale (can be changed at runtime) ----------
 
 static UI_SCALE_BITS: AtomicU64 = AtomicU64::new(0);
 
-/// Skala seluruh UI: ukuran window dan isinya. 1.0 = ukuran desain asli.
+/// Scale for the entire UI: window dimensions and contents. 1.0 = original design size.
 pub fn ui_scale() -> f64 {
     let bits = UI_SCALE_BITS.load(Ordering::Relaxed);
     if bits == 0 {
@@ -46,7 +46,7 @@ pub fn set_ui_scale(v: f64) {
     UI_SCALE_BITS.store(v.to_bits(), Ordering::Relaxed);
 }
 
-// ---------- Panel ----------
+// ---------- Panels ----------
 
 #[derive(Clone, Copy)]
 pub enum Edge {
@@ -54,24 +54,24 @@ pub enum Edge {
     Top,
     Bottom,
     Right,
-    /// Posisi dan ukuran ditentukan kode lewat set_free_rect (mis. pratinjau thumbnail).
+    /// Position and size are set by code through set_free_rect (e.g. thumbnail previews).
     Free,
 }
 
-/// Deskripsi satu panel. Menambah panel baru = menambah satu spec.
+/// Description of one panel. Add a new spec to add a panel.
 #[derive(Clone, Copy)]
 pub struct PanelSpec {
     pub label: &'static str,
     pub edge: Edge,
-    /// Ukuran window dalam satuan desain (lebar, tinggi).
-    /// Untuk Edge::Left tinggi diabaikan (setinggi layar).
+    /// Window size in design units (width, height).
+    /// For Edge::Left, height is ignored (full screen height).
     pub size: (f64, f64),
-    /// Panjang zona pemicu di tepi, di tengah tepi. None = sepanjang sisi/lebar window.
+    /// Length of the trigger zone centered along the edge. None = the full edge/window width.
     pub trigger_len: Option<f64>,
-    /// true = muncul saat kursor menyentuh tepi dan hilang saat kursor menjauh.
-    /// false = hanya mengikuti flag (hotkey, tombol, atau perintah dari React).
+    /// true = appears when the cursor touches the edge and hides when it moves away.
+    /// false = follows the flag only (hotkey, button, or command from React).
     pub hover: bool,
-    /// true = window mengambil fokus keyboard saat muncul.
+    /// true = the window takes keyboard focus when shown.
     pub focus: bool,
 }
 
@@ -90,15 +90,15 @@ fn flag_has(list: &Mutex<Vec<&'static str>>, label: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Panel yang dibuka lewat klik di UI (bukan hotkey/tray): menutup sendiri saat kursor menjauh.
+/// Panel opened by clicking in the UI (not via hotkey/tray): hides when the cursor moves away.
 static TRANSIENT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
-/// Panel yang sedang dipakai mengetik: jangan ditutup otomatis.
+/// Panel currently used for typing: do not close automatically.
 static HELD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
-/// Ukuran window sementara yang menggantikan PanelSpec.size (mis. launcher saat pengalih wallpaper).
+/// Temporary window size that replaces PanelSpec.size (e.g. the launcher while the wallpaper picker is open).
 static SIZE_OVERRIDE: Mutex<Vec<(&'static str, (f64, f64))>> = Mutex::new(Vec::new());
 
-/// Ukuran launcher (satuan desain) saat menampilkan pengalih wallpaper: lebar dan pendek.
+/// Launcher size (design units) while showing the wallpaper picker: wide and short.
 const WALLPAPER_VIEW_SIZE: (f64, f64) = (1040.0, 300.0);
 
 fn size_override(label: &str) -> Option<(f64, f64)> {
@@ -117,7 +117,7 @@ fn set_size_override(label: &'static str, size: Option<(f64, f64)>) {
     }
 }
 
-/// Posisi dan ukuran window "bebas" dalam pixel fisik: (x, y, lebar, tinggi).
+/// Position and size of a "free" window in physical pixels: (x, y, width, height).
 static FREE_RECT: Mutex<Vec<(&'static str, (f64, f64, f64, f64))>> = Mutex::new(Vec::new());
 
 fn free_rect(label: &str) -> Option<(f64, f64, f64, f64)> {
@@ -156,7 +156,7 @@ pub fn set_hit_rect(label: &'static str, rect: Option<(f64, f64, f64, f64)>) {
     }
 }
 
-/// Launcher berganti tampilan: "wallpaper" melebar, selain itu kembali ke ukuran biasa.
+/// Launcher view changed: "wallpaper" expands it; otherwise, restore its usual size.
 #[tauri::command]
 pub fn launcher_view(view: String, app: AppHandle) {
     set_size_override("launcher", (view == "wallpaper").then_some(WALLPAPER_VIEW_SIZE));
@@ -164,11 +164,11 @@ pub fn launcher_view(view: String, app: AppHandle) {
     let _ = app.run_on_main_thread(move || crate::place_panel(&a, "launcher"));
 }
 
-/// Flag "dibuka paksa" per panel (hotkey, tray, atau klik tombol).
+/// Per-panel "forced open" flag (hotkey, tray, or button click).
 pub struct Panels(pub HashMap<&'static str, Arc<AtomicBool>>);
 
 impl Panels {
-    /// Hotkey dan tray: terbuka menetap sampai ditutup lagi.
+    /// Hotkey and tray: stays open until closed again.
     pub fn toggle(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
             flag_set(&TRANSIENT, key, false);
@@ -187,7 +187,7 @@ impl Panels {
         }
     }
 
-    /// Klik di UI: terbuka, lalu menutup sendiri saat kursor menjauh.
+    /// UI click: opens, then hides when the cursor moves away.
     pub fn set_transient(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
             flag_set(&TRANSIENT, key, true);
@@ -203,7 +203,7 @@ impl Panels {
     }
 }
 
-/// Dipanggil dari tombol di bar: buka sementara, atau tutup kalau sudah terbuka.
+/// Called from a bar button: open temporarily, or close if already open.
 #[tauri::command]
 pub fn toggle_panel(label: String, panels: State<'_, Panels>) {
     if panels.is_open(&label) {
@@ -213,7 +213,7 @@ pub fn toggle_panel(label: String, panels: State<'_, Panels>) {
     }
 }
 
-/// invoke("set_panel", { label, open }). open = true membuka sementara.
+/// invoke("set_panel", { label, open }). open = true opens temporarily.
 #[tauri::command]
 pub fn set_panel(label: String, open: bool, panels: State<'_, Panels>) {
     if open {
@@ -223,8 +223,8 @@ pub fn set_panel(label: String, open: bool, panels: State<'_, Panels>) {
     }
 }
 
-/// Izinkan bar/notch mengambil fokus keyboard sementara (untuk mengetik di dalamnya).
-/// enable = false mengembalikannya ke mode "tidak merebut fokus".
+/// Temporarily allow the bar/notch to take keyboard focus (for typing inside it).
+/// enable = false returns it to "does not take focus" mode.
 #[tauri::command]
 pub fn panel_activation(
     label: String,
@@ -259,13 +259,13 @@ impl Rect {
     }
 }
 
-/// (x, y, lebar, tinggi, scale) monitor utama dalam pixel fisik.
+/// (x, y, width, height, scale) of the primary monitor in physical pixels.
 type Metrics = (f64, f64, f64, f64, f64);
 
-/// Hitung (rect window, rect zona pemicu) dalam pixel fisik.
+/// Calculate the window rect and trigger-zone rect in physical pixels.
 fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
     let (mx, my, mw, mh, scale) = m;
-    // 1 satuan desain = u pixel fisik (skala DPI monitor dikali skala UI).
+    // 1 design unit = u physical pixels (monitor DPI scale multiplied by UI scale).
     let u = scale * ui_scale();
     let size = size_override(spec.label).unwrap_or(spec.size);
 
@@ -332,7 +332,7 @@ fn monitor_metrics(window: &WebviewWindow) -> Option<Metrics> {
     ))
 }
 
-/// Taruh window di posisi dan ukuran yang benar.
+/// Place the window at the correct position and size.
 pub fn place(window: &WebviewWindow, spec: &PanelSpec) -> tauri::Result<()> {
     if let Some(m) = monitor_metrics(window) {
         let (win, _) = layout(spec, m);
@@ -342,16 +342,16 @@ pub fn place(window: &WebviewWindow, spec: &PanelSpec) -> tauri::Result<()> {
     Ok(())
 }
 
-/// activatable = false: window tidak mengambil fokus saat diklik (bar dan notch),
-/// jadi mengklik bar atau notch tidak memutus ketikan di aplikasi yang sedang aktif.
+/// activatable = false: clicking the window does not give it focus (bar and notch),
+/// so clicking the bar or notch does not interrupt typing in the active app.
 pub fn set_activatable(window: &WebviewWindow, activatable: bool) {
     use windows::Win32::{
         Foundation::HWND,
         UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, GWL_EXSTYLE, WS_EX_NOACTIVATE},
     };
 
-    // hwnd() dari Tauri bertipe HWND milik versi crate `windows` yang berbeda dari kita,
-    // jadi dikonversi lewat nilai pointer-nya.
+    // Tauri's hwnd() uses an HWND type from a different version of the `windows` crate,
+    // so convert it through its pointer value.
     if let Ok(h) = window.hwnd() {
         let hwnd = HWND(h.0 as isize as *mut c_void);
         unsafe {
@@ -366,19 +366,19 @@ pub fn set_activatable(window: &WebviewWindow, activatable: bool) {
     }
 }
 
-/// Ubah window di main thread: atur ulang posisi, click-through, fokus, dan beri tahu React.
+/// Update the window on the main thread: reset position, click-through and focus, then notify React.
 fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool, spec: &PanelSpec) {
     let window = window.clone();
     let event = event.to_string();
     let spec = *spec;
     let _ = app.run_on_main_thread(move || {
         if show {
-            // Launcher selalu dibuka dengan ukuran biasa (tampilan wallpaper melebarkannya sendiri).
+            // Always open the launcher at its usual size (the wallpaper view expands it itself).
             if spec.label == "launcher" {
                 set_size_override("launcher", None);
             }
 
-            // Layar bisa berubah (mati/nyala, resolusi, dock), jadi atur ulang tiap kali muncul.
+            // The display can change (power, resolution, dock), so reset each time it appears.
             let _ = place(&window, &spec);
             let _ = window.set_always_on_top(true);
         }
@@ -398,12 +398,12 @@ struct Runtime {
     visible: bool,
     outside_since: Option<Instant>,
     inside_since: Option<Instant>,
-    /// Kursor pernah masuk ke window saat panel dibuka lewat klik.
+    /// Whether the cursor entered the window after the panel was opened by clicking.
     pin_entered: bool,
 }
 
-/// Satu thread untuk semua panel.
-/// Memancarkan event "edge-visible:<label>" (payload bool) ke React.
+/// One thread for all panels.
+/// Emit an "edge-visible:<label>" event (bool payload) to React.
 pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<AtomicBool>)>) {
     thread::spawn(move || {
         let mut panels: Vec<Runtime> = items
@@ -423,7 +423,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             return;
         }
 
-        // Satu window dipakai untuk membaca kursor dan monitor.
+        // Use one window to read cursor and monitor state.
         let probe = panels[0].window.clone();
         let mut metrics = monitor_metrics(&probe);
         let mut last_refresh = Instant::now();
@@ -440,7 +440,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             let Ok(cursor) = probe.cursor_position() else { continue };
 
 
-            // Pilih seberapa cepat memantau pada putaran berikutnya.
+            // Choose how often to poll on the next iteration.
             let margin = NEAR_EDGE_DIP * m.4;
             let near_edge = cursor.x < m.0 + margin
                 || cursor.x > m.0 + m.2 - margin
@@ -451,7 +451,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 .any(|p| p.visible || p.pinned.load(Ordering::Relaxed));
             interval = if near_edge || busy { POLL_FAST } else { POLL_IDLE };
 
-            // Pratinjau thumbnail adalah perpanjangan bar: selama kursor di atasnya, bar tetap terbuka.
+            // A thumbnail preview extends the bar: keep the bar open while the cursor is over it.
             let over_preview = panels
                 .iter()
                 .any(|q| q.spec.label == "preview" && q.visible)
@@ -463,7 +463,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             for p in panels.iter_mut() {
                 let pinned = p.pinned.load(Ordering::Relaxed);
 
-                // Panel tanpa hover: hanya mengikuti flag.
+                // Panel without hover: follow the flag only.
                 if !p.spec.hover {
                     if pinned != p.visible {
                         p.visible = pinned;
@@ -472,7 +472,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     continue;
                 }
 
-                // Dibuka paksa: abaikan posisi kursor, kecuali panel yang dibuka lewat klik.
+                // Forced open: ignore cursor position, except for panels opened by clicking.
                 if pinned {
                     if !p.visible {
                         p.visible = true;
@@ -493,7 +493,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                             let since = *p.outside_since.get_or_insert_with(Instant::now);
                             let limit = if p.pin_entered { HIDE_DELAY } else { PIN_GRACE };
                             if since.elapsed() >= limit {
-                                // Lepas kuncinya; iterasi berikutnya menyembunyikan panel.
+                                // Release the lock; the next iteration will hide the panel.
                                 p.pinned.store(false, Ordering::Relaxed);
                                 flag_set(&TRANSIENT, p.spec.label, false);
                             }
@@ -522,7 +522,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     || flag_has(&HELD, p.spec.label)
                     || (p.spec.label == "bar" && over_preview)
                 {
-                    // Kursor di dalam, atau panel sedang dipakai mengetik: jangan ditutup.
+                    // Cursor is inside, or the panel is being used for typing: do not close it.
                     p.outside_since = None;
                 } else {
                     let since = *p.outside_since.get_or_insert_with(Instant::now);

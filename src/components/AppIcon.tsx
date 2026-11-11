@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
-/** target -> alamat gambar (null = tidak ada). Bertahan selama app jalan. */
+/** target -> image address (null = none). Persists while the app runs. */
 const cache = new Map<string, string | null>();
 const pending = new Map<string, Promise<string | null>>();
 
@@ -20,8 +20,8 @@ function load(target: string): Promise<string | null> {
 }
 
 /**
- * Ikon aplikasi. target: "aumid:<AppID>" atau "path:<jalur .exe>".
- * Selama ikon belum ada (atau gagal diambil) tampil huruf `fallback`.
+ * App icon. target: "aumid:<AppID>" or "path:<.exe path>".
+ * Show the `fallback` letter until the icon is available (or if fetching it fails).
  */
 export default function AppIcon({
   target,

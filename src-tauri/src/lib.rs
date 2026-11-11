@@ -32,7 +32,7 @@ use tauri::{
     AppHandle, Emitter, Manager,
 };
 
-/// Daftar semua panel.
+/// List of all panels.
 const PANELS: [PanelSpec; 6] = [
     PanelSpec {
         label: "bar",
@@ -79,12 +79,12 @@ const PANELS: [PanelSpec; 6] = [
         edge: Edge::Free,
         size: (0.0, 0.0),
         trigger_len: None,
-        hover: true, // memakai aturan tutup-otomatis panel yang dibuka lewat klik
+        hover: true, // use auto-close behavior for panels opened by clicking
         focus: false,
     },
 ];
 
-/// Terapkan ukuran, posisi, dan zoom semua panel. Dipanggil saat startup dan saat skala berubah.
+/// Apply size, position, and zoom to all panels. Called at startup and when the scale changes.
 pub fn apply_layout(app: &AppHandle) {
     for spec in PANELS {
         if let Some(window) = app.get_webview_window(spec.label) {
@@ -94,7 +94,7 @@ pub fn apply_layout(app: &AppHandle) {
     }
 }
 
-/// Taruh ulang satu panel (misalnya setelah ukurannya berubah).
+/// Reposition one panel (e.g. after its size changes).
 pub fn place_panel(app: &AppHandle, label: &str) {
     if let Some(spec) = PANELS.iter().find(|s| s.label == label) {
         if let Some(window) = app.get_webview_window(label) {
@@ -105,7 +105,7 @@ pub fn place_panel(app: &AppHandle, label: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Peluncuran sebagai penjaga pemulih (lihat taskbar.rs): tanpa UI, tanpa Tauri.
+    // Launch as the recovery watchdog (see taskbar.rs): no UI and no Tauri.
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--guard") {
         taskbar::run_guard(&args);
@@ -113,7 +113,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
-        // Harus plugin pertama. Instance kedua langsung keluar; instance pertama diam saja.
+        // Must be the first plugin. A second instance exits immediately; the first stays idle.
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
         .plugin(
             tauri::plugin::Builder::<tauri::Wry>::new("orumi-state")
@@ -190,7 +190,7 @@ pub fn run() {
             taskbar::apply(app.handle(), cfg.taskbar_autohide);
             app.manage(config::ConfigState::new(cfg.clone()));
 
-            // --- Semua panel ---
+            // --- All panels ---
             let mut watched = Vec::new();
             for spec in PANELS {
                 let window = app
@@ -201,9 +201,9 @@ pub fn run() {
                 edge::place(&window, &spec)?;
                 window.set_zoom(edge::ui_scale())?;
                 if (spec.hover && !spec.focus) || spec.label == "switcher" {
-                    edge::set_activatable(&window, false); // bar, notch, dan switcher
+                    edge::set_activatable(&window, false); // bar, notch, and switcher
                 }
-                window.set_ignore_cursor_events(true)?; // awalnya click-through
+                window.set_ignore_cursor_events(true)?; // initially click-through
                 watched.push((window, spec, pinned));
             }
             edge::start_all(app.handle().clone(), watched);
@@ -218,7 +218,7 @@ pub fn run() {
             altswitch::start(app.handle().clone());
             activities::init(app.handle())?;
 
-            // --- Hotkey global (dari config) ---
+            // --- Global hotkeys (from config) ---
             config::init_hotkeys(app.handle(), &cfg.hotkeys)?;
 
             // --- Tray icon ---
@@ -265,7 +265,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // Pulihkan flyout Windows dan taskbar di jalur keluar normal (termasuk menu tray).
+            // Restore the Windows flyout and taskbar on normal exit (including the tray menu).
             if let tauri::RunEvent::Exit = event {
                 osd::restore();
                 taskbar::restore(app);

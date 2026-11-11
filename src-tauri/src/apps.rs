@@ -3,7 +3,7 @@ use std::{os::windows::process::CommandExt, process::Command, sync::Mutex};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-/// Supaya PowerShell/explorer tidak memunculkan jendela konsol.
+/// Prevent PowerShell/Explorer from opening a console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Deserialize)]
@@ -20,7 +20,7 @@ pub struct AppEntry {
     id: String,
 }
 
-/// Cache daftar app (None = belum pernah dimuat).
+/// Cache of the app list (None = not loaded yet).
 pub struct AppsState(Mutex<Option<Vec<AppEntry>>>);
 
 impl AppsState {
@@ -29,7 +29,7 @@ impl AppsState {
     }
 }
 
-/// Baca daftar app Start menu lewat PowerShell (butuh ~1-2 detik).
+/// Read the Start menu app list through PowerShell (takes ~1-2 seconds).
 fn load_apps() -> Vec<AppEntry> {
     let script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \
                   ConvertTo-Json -Compress -InputObject @(Get-StartApps)";

@@ -12,14 +12,14 @@ import Icon from "./Icon";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Pilih tab di notch, lalu buka (atau tutup) notch-nya. */
+/** Select a notch tab, then open (or close) the notch. */
 async function notchTab(tab: string, toggle: boolean) {
   await emitTo("notch", "notch-tab", tab);
   if (toggle) invoke("toggle_panel", { label: "notch" });
   else invoke("set_panel", { label: "notch", open: true });
 }
 
-/** Klik app: pindah ke app itu; kalau sudah fokus, minimalkan atau ganti window. */
+/** Click an app to switch to it; if already focused, minimize it or switch windows. */
 function onAppClick(g: AppGroup) {
   if (!g.focused) {
     invoke("focus_window", { hwnd: g.windows[0].hwnd }).catch(() => {});
@@ -58,7 +58,7 @@ export default function Bar() {
   const previewOpen = useEdgeVisible("preview");
   const hoverTimer = useRef<number | undefined>(undefined);
 
-  // Bar tersembunyi: tutup pratinjau thumbnail.
+  // Bar hidden: close the thumbnail preview.
   useEffect(() => {
     if (!visible) invoke("preview_close").catch(() => {});
   }, [visible]);
@@ -66,7 +66,7 @@ export default function Bar() {
   const hoverApp = (g: AppGroup) => (e: ReactMouseEvent<HTMLElement>) => {
     const el = e.currentTarget;
     window.clearTimeout(hoverTimer.current);
-    // Niat hover: tunggu sebentar; kalau pratinjau sudah terbuka, ganti isinya hampir seketika.
+    // Hover intent: wait briefly; if the preview is already open, update its contents almost immediately.
     hoverTimer.current = window.setTimeout(
       () => {
         const r = el.getBoundingClientRect();

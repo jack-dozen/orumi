@@ -1,6 +1,6 @@
-//! Ikon aplikasi: diekstrak lewat IShellItemImageFactory (berlaku untuk app Win32 maupun
-//! Store/UWP), disimpan sebagai PNG di cache, dan dimuat UI lewat asset protocol.
-//! Pola ekstraksi diadaptasi dari Bloom (GPL-3.0): commands.rs dan utils.rs.
+//! App icons: extracted through IShellItemImageFactory (works for both Win32 and
+//! Store/UWP apps), saved as PNGs in the cache, and loaded by the UI through the asset protocol.
+//! The extraction pattern is adapted from Bloom (GPL-3.0): commands.rs and utils.rs.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -32,9 +32,9 @@ use windows::{
     },
 };
 
-/// Ukuran ikon yang diminta (px). 128 cukup tajam untuk ikon hingga ~64 px (CSS) di layar DPI tinggi.
+/// Requested icon size (px). 128 is sharp enough for icons up to ~64 CSS px on high-DPI displays.
 const ICON_SIZE: i32 = 128;
-/// Naikkan untuk membuang cache lama (mis. kalau cara konversi warna berubah).
+/// Increment to invalidate the old cache (e.g. if the color conversion method changes).
 const ICON_VERSION: u32 = 2;
 
 type Reply = mpsc::Sender<Option<PathBuf>>;
@@ -46,7 +46,7 @@ fn hash_key(target: &str) -> u64 {
     h.finish()
 }
 
-/// "aumid:<AppID>" -> shell:AppsFolder\<AppID>; "path:<jalur>" -> jalur itu sendiri.
+/// "aumid:<AppID>" -> shell:AppsFolder\<AppID>; "path:<path>" -> the path itself.
 fn parsing_name(target: &str) -> Option<String> {
     if let Some(id) = target.strip_prefix("aumid:") {
         let id = id.trim();
@@ -59,7 +59,7 @@ fn parsing_name(target: &str) -> Option<String> {
     }
 }
 
-/// Bitmap 32-bit dari Shell (alpha premultiplied, urutan BGRA) -> PNG (alpha biasa, RGBA).
+/// 32-bit bitmap from Shell (premultiplied alpha, BGRA order) -> PNG (regular alpha, RGBA).
 unsafe fn hbitmap_to_png(hbitmap: HBITMAP) -> Option<Vec<u8>> {
     let mut bm: BITMAP = std::mem::zeroed();
     let got = GetObjectW(
@@ -79,7 +79,7 @@ unsafe fn hbitmap_to_png(hbitmap: HBITMAP) -> Option<Vec<u8>> {
         bmiHeader: BITMAPINFOHEADER {
             biSize: size_of::<BITMAPINFOHEADER>() as u32,
             biWidth: w,
-            biHeight: -h, // negatif = baris dari atas ke bawah
+            biHeight: -h, // negative = rows run from top to bottom
             biPlanes: 1,
             biBitCount: 32,
             biCompression: BI_RGB.0,
@@ -107,7 +107,7 @@ unsafe fn hbitmap_to_png(hbitmap: HBITMAP) -> Option<Vec<u8>> {
         return None;
     }
 
-    // Ikon lama tanpa kanal alpha: semua alpha 0. Anggap buram penuh.
+    // Older icons without an alpha channel have all alpha values set to 0. Treat them as fully opaque.
     let has_alpha = px.chunks_exact(4).any(|p| p[3] != 0);
     for p in px.chunks_exact_mut(4) {
         let (b, g, r, a) = (p[0], p[1], p[2], p[3]);
@@ -150,7 +150,7 @@ unsafe fn extract(target: &str) -> Option<Vec<u8>> {
     png
 }
 
-/// Satu thread untuk semua ekstraksi: ekstraksi ikon bisa lambat dan butuh COM.
+/// One thread for all extraction: extracting icons can be slow and requires COM.
 fn worker(cache_dir: PathBuf, rx: mpsc::Receiver<(String, Reply)>) {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -193,8 +193,8 @@ fn sender(app: &AppHandle) -> Option<mpsc::Sender<(String, Reply)>> {
     cell.lock().ok().map(|t| t.clone())
 }
 
-/// target: "aumid:<AppID>" atau "path:<jalur .exe>".
-/// Mengembalikan jalur file PNG di cache (dimuat UI lewat asset protocol), atau None.
+/// target: "aumid:<AppID>" or "path:<.exe path>".
+/// Returns the cached PNG file path (loaded by the UI through the asset protocol), or None.
 #[tauri::command]
 pub async fn app_icon(target: String, app: AppHandle) -> Result<Option<String>, String> {
     let Some(tx) = sender(&app) else { return Ok(None) };

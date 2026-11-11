@@ -1,5 +1,5 @@
-//! Pratinjau thumbnail window saat ikon app di bar di-hover. Tangkapan memakai PrintWindow
-//! (pola dock Bloom, GPL-3.0: utils.rs), disimpan sebagai JPEG kecil di cache, dan dimuat UI
+//! Window thumbnail preview when hovering over an app icon in the bar. Captures use PrintWindow
+//! (Bloom dock pattern, GPL-3.0: utils.rs), stored as small JPEGs in the cache and loaded by the UI
 //! lewat asset protocol.
 #![allow(unsafe_op_in_unsafe_fn)]
 
@@ -31,7 +31,7 @@ use windows::Win32::{
 
 use crate::edge::Panels;
 
-/// PrintWindow tidak ada di fitur crate yang kita pakai: deklarasikan langsung.
+/// PrintWindow is not included in the crate features we use: declare it directly.
 #[link(name = "user32")]
 unsafe extern "system" {
     fn PrintWindow(hwnd: HWND, hdc_blt: HDC, flags: u32) -> i32;
@@ -39,14 +39,14 @@ unsafe extern "system" {
 
 const PW_RENDERFULLCONTENT: u32 = 0x2;
 
-// Ukuran kartu (px CSS, harus sama dengan CSS .pv*): thumbnail, ruang, judul.
+// Card dimensions (CSS px, must match CSS .pv*): thumbnail, spacing, title.
 const PV_W: f64 = 220.0;
 const PV_H: f64 = 124.0;
 const PV_PAD: f64 = 12.0;
 const PV_GAP: f64 = 10.0;
 const PV_TITLE: f64 = 28.0;
 const MAX_ITEMS: usize = 4;
-/// Tangkapan disimpan 2x lebih besar dari kartu supaya tajam di layar DPI tinggi.
+/// Captures are stored at 2x card size for sharpness on high-DPI displays.
 const CAP_W: u32 = 440;
 const CAP_H: u32 = 248;
 
@@ -96,7 +96,7 @@ fn cache_dir(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_cache_dir().ok().map(|d| d.join("previews"))
 }
 
-/// Kosongkan cache saat app mulai: id window bisa dipakai ulang oleh Windows.
+/// Clear the cache when the app starts: Windows may reuse window IDs.
 pub fn clear_cache(app: &AppHandle) {
     if let Some(dir) = cache_dir(app) {
         let _ = fs::remove_dir_all(&dir);
@@ -122,7 +122,7 @@ fn files_for(dir: &Path, hwnd: i64) -> Vec<PathBuf> {
     files
 }
 
-/// Tangkap isi window menjadi JPEG kecil. None kalau diperkecil atau gagal.
+/// Capture the window contents as a small JPEG. None if minimized or capture fails.
 unsafe fn capture_jpeg(hwnd_raw: i64) -> Option<Vec<u8>> {
     let hwnd = HWND(hwnd_raw as isize as *mut c_void);
     if !IsWindow(Some(hwnd)).as_bool() || IsIconic(hwnd).as_bool() {
@@ -136,7 +136,7 @@ unsafe fn capture_jpeg(hwnd_raw: i64) -> Option<Vec<u8>> {
         return None;
     }
 
-    // Batas yang benar-benar terlihat (tanpa bayangan/bingkai tak terlihat).
+    // Actual visible bounds (excluding invisible shadows/borders).
     let mut frame = RECT::default();
     let _ = DwmGetWindowAttribute(
         hwnd,
@@ -180,7 +180,7 @@ unsafe fn capture_jpeg(hwnd_raw: i64) -> Option<Vec<u8>> {
             DIB_RGB_COLORS,
         ) != 0
         {
-            // BGRA -> RGBA, alpha tidak bermakna di sini.
+            // BGRA -> RGBA; alpha is not meaningful here.
             for c in px.chunks_exact_mut(4) {
                 c.swap(0, 2);
                 c[3] = 255;
@@ -286,7 +286,7 @@ fn build_items(dir: &Path, reqs: Vec<PreviewReq>) -> Vec<PreviewItem> {
         .collect()
 }
 
-/// Ukuran kartu (px CSS) untuk n window.
+/// Card dimensions (CSS px) for n windows.
 fn card_size(n: usize) -> (f64, f64) {
     let n = n as f64;
     (2.0 * PV_PAD + n * PV_W + (n - 1.0) * PV_GAP, 2.0 * PV_PAD + PV_H + PV_TITLE)
@@ -408,13 +408,13 @@ pub async fn preview_open(
     Ok(())
 }
 
-/// Kursor kembali ke area pratinjau atau bar: batalkan penutupan yang tertunda.
+/// Cursor returned to the preview area or bar: cancel the pending close.
 #[tauri::command]
 pub fn preview_keep() {
     GEN.fetch_add(1, Ordering::SeqCst);
 }
 
-/// Tutup sebentar lagi, kecuali ada preview_keep atau preview_open sebelum itu.
+/// Close shortly, unless preview_keep or preview_open is called before then.
 #[tauri::command]
 pub fn preview_close_soon(app: AppHandle) {
     let generation = GEN.fetch_add(1, Ordering::SeqCst) + 1;

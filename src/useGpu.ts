@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-/** Pemakaian GPU (0-100), atau null kalau belum ada/tidak tersedia. */
+/** GPU usage (0-100), or null if unavailable. */
 export function useGpu(active: boolean): number | null {
   const [gpu, setGpu] = useState<number | null>(null);
 
@@ -14,7 +14,7 @@ export function useGpu(active: boolean): number | null {
         const v = await invoke<number | null>("get_gpu");
         if (!cancelled) setGpu(v);
       } catch {
-        /* coba lagi di tick berikutnya */
+        /* try again on the next tick */
       }
     };
 

@@ -9,7 +9,7 @@ export type Stats = {
   disk_total: number;
 };
 
-/** Ambil statistik tiap detik, hanya saat `active` = true. */
+/** Fetch statistics every second, only while `active` = true. */
 export function useStats(active: boolean): Stats | null {
   const [stats, setStats] = useState<Stats | null>(null);
 
@@ -22,7 +22,7 @@ export function useStats(active: boolean): Stats | null {
         const s = await invoke<Stats>("get_stats");
         if (!cancelled) setStats(s);
       } catch {
-        /* abaikan, coba lagi di tick berikutnya */
+        /* ignore and try again on the next tick */
       }
     };
 

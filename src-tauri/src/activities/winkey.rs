@@ -1,23 +1,22 @@
-//! Pemicu "Win key sendirian".
+//! "Win key by itself" trigger.
 //!
-//! Sumber utamanya BUKAN hook, melainkan pemantau (`poller`) yang membaca status tombol dari
-//! Windows (GetAsyncKeyState) tiap ~8 ms. Hook keyboard tingkat rendah ternyata bisa tidak
-//! menerima tombol selama beberapa ratus ms sampai detik setelah Activities dibuka/ditutup,
-//! dan itu membuat penyamaran Start menu terlewat saat Win ditekan beruntun.
+//! The primary source is NOT the hook, but a poller that reads key states from Windows
+//! (GetAsyncKeyState) every ~8 ms. The low-level keyboard hook can fail to receive keys for
+//! hundreds of milliseconds or even seconds after Activities opens/closes, causing the Start
+//! menu masking to fail during repeated Win presses.
 //!
-//! - Semua event Win dan kombinasinya SELALU diteruskan apa adanya, jadi Win+E, Win+Panah,
-//!   dst. tetap bekerja dan tetap terlihat oleh program lain (mis. window manager).
-//! - Start menu dicegah dengan "penyamaran": begitu Win mulai ditekan, satu tombol netral
-//!   (VK 0xE8) disuntikkan SELAGI Win masih ditahan. Windows lalu menganggap Win dipakai
-//!   dalam kombinasi dan tidak membuka Start saat Win dilepas.
-//! - Kalau Activities sedang terbuka saat Win ditekan, Activities langsung disembunyikan di
-//!   Win-down. Win dilepas tanpa tombol/klik lain di antaranya = ketukan: toggle Activities.
-//! - Hook tetap dipasang sebagai pelengkap: ia menyuntik penyamaran seketika (kalau sedang
-//!   hidup) dan menangkap tombol lain yang ditekan sangat singkat saat Win ditahan.
+//! - Always pass all Win events and combinations through unchanged, so Win+E, Win+Arrow,
+//!   etc. keep working and remain visible to other programs (e.g. the window manager).
+//! - Prevent the Start menu through "masking": as soon as Win is pressed, inject a neutral key
+//!   (VK 0xE8) WHILE Win remains held. Windows then treats Win as part of a combination and
+//!   does not open Start when Win is released.
+//! - If Activities is open when Win is pressed, hide it immediately on Win-down. Releasing Win
+//!   without another key/click in between is a tap: toggle Activities.
+//! - Keep the hook as a supplement: it injects masking immediately (if running) and catches
+//!   other keys pressed very briefly while Win is held.
 //!
-//! Batasan: kalau window yang fokus berjalan sebagai administrator, Windows bisa tidak
-//! memberi tahu status tombolnya ke program non-admin; jalankan ORUMI sebagai administrator
-//! kalau perlu.
+//! Limitation: if the focused window is running as administrator, Windows may not report key
+//! states to non-admin programs; run ORUMI as administrator if needed.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -55,21 +54,21 @@ const WM_SYSKEYUP: usize = 0x0105;
 const LLKHF_INJECTED: u32 = 0x10;
 const VK_LWIN: u32 = 0x5B;
 const VK_RWIN: u32 = 0x5C;
-/// Tombol netral untuk penyamaran (tidak dipakai Windows; sama dengan altswitch.rs).
+/// Neutral key for masking (unused by Windows; same as in altswitch.rs).
 const VK_NEUTRAL: u32 = 0xE8;
-/// Interval pemantau.
+/// Polling interval.
 const POLL_MS: u64 = 8;
-/// Penyamaran dari hook dan pemantau untuk Win-down yang sama dijadikan satu.
+/// Coalesce masking from the hook and poller for the same Win-down.
 const MASK_DEDUPE_MS: u32 = 60;
 
-/// true = cetak log diagnostik ke stderr (lihat konsol `npm run tauri dev`).
+/// true = print diagnostic logs to stderr (see the `npm run tauri dev` console).
 const DEBUG: bool = true;
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
-/// Hook melihat tombol lain (atau yang lain) ditekan selagi Win ditahan. Dihapus pemantau
-/// tiap kali sebuah tekanan Win selesai.
+/// The hook saw another key (or another event) pressed while Win was held. Cleared by the poller
+/// each time a Win press ends.
 static COMBO: AtomicBool = AtomicBool::new(false);
-/// Waktu (ms sejak start) penyamaran terakhir.
+/// Time (ms since start) of the last masking event.
 static LAST_MASK: AtomicU32 = AtomicU32::new(0);
 static T0: OnceLock<Instant> = OnceLock::new();
 
@@ -78,13 +77,13 @@ fn now_ms() -> u32 {
 }
 
 enum Msg {
-    /// Ketukan Win sendirian: toggle Activities.
+    /// Win pressed by itself: toggle Activities.
     Tap,
-    /// Win baru ditekan: suntikkan tombol netral agar Start menu tidak terbuka.
+    /// Win was just pressed: inject a neutral key so the Start menu does not open.
     Mask,
-    /// Win ditekan saat Activities terbuka: tutup sekarang juga.
+    /// Win pressed while Activities is open: close it immediately.
     Dismiss,
-    /// Baris log (dicetak oleh pekerja; I/O di dalam callback hook bisa memicu timeout).
+    /// Log line (printed by the worker; I/O inside the hook callback can cause a timeout).
     Log(String),
 }
 
@@ -100,8 +99,8 @@ fn log(line: String) {
     }
 }
 
-/// Status fisik tombol menurut Windows. Di dalam callback hook, nilainya adalah keadaan
-/// SEBELUM event yang sedang diproses.
+/// Physical key state according to Windows. Inside the hook callback, this is the state
+/// BEFORE the event being processed.
 unsafe fn async_down(vk: u32) -> bool {
     (GetAsyncKeyState(vk as i32) as u16) & 0x8000 != 0
 }
@@ -110,7 +109,7 @@ pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
 }
 
-// ---------- Hook (pelengkap) ----------
+// ---------- Hook (supplement) ----------
 
 unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) {
     let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
@@ -118,14 +117,14 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) {
     if !(down || up) || !ENABLED.load(Ordering::Relaxed) {
         return;
     }
-    // Event suntikan (termasuk milik kita sendiri dan altswitch) tidak dihitung.
+    // Ignore injected events (including our own and those from altswitch).
     if kb.flags.0 & LLKHF_INJECTED != 0 {
         return;
     }
 
     let vk = kb.vkCode;
     if vk == VK_LWIN || vk == VK_RWIN {
-        // Tekanan baru (bukan auto-repeat) = Win belum tertahan menurut Windows.
+        // A new press (not auto-repeat) means Win was not already held according to Windows.
         if down && !async_down(vk) {
             send(Msg::Mask);
             log(format!("t={} hook: win-down vk={vk:#x}", kb.time));
@@ -142,14 +141,14 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
     if code >= 0 {
         handle(wparam.0, &*(lparam.0 as *const KBDLLHOOKSTRUCT));
     }
-    CallNextHookEx(None, code, wparam, lparam) // tidak pernah menelan event
+    CallNextHookEx(None, code, wparam, lparam) // never swallow the event
 }
 
-// ---------- Pemantau (sumber utama) ----------
+// ---------- Poller (primary source) ----------
 
 fn poller() {
     unsafe {
-        // Harus tetap jalan walau CPU sedang sibuk (mis. saat Activities mengambil thumbnail).
+        // Must keep running even when the CPU is busy (e.g. while Activities captures thumbnails).
         let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     }
     let mut was = false;
@@ -166,7 +165,7 @@ fn poller() {
         let win = unsafe { async_down(VK_LWIN) || async_down(VK_RWIN) };
 
         if win && !was {
-            // Tekanan Win baru. Catat tombol/mouse yang sudah tertahan lebih dulu.
+            // New Win press. Record any keys/mouse buttons that were already held.
             for vk in 1..256u32 {
                 base[vk as usize] = unsafe { async_down(vk) };
             }
@@ -178,7 +177,7 @@ fn poller() {
             }
             log(format!("pemantau: win-down, activities_terbuka={dismissed}"));
         } else if win && !polled_combo {
-            // Selagi Win ditahan: tombol keyboard atau klik mouse baru = kombinasi.
+            // While Win is held, a new key press or mouse click means a combination.
             for vk in 1..256u32 {
                 if vk == VK_LWIN || vk == VK_RWIN || vk == VK_NEUTRAL {
                     continue;
@@ -208,9 +207,9 @@ fn poller() {
     }
 }
 
-// ---------- Penyamaran, log, pekerja ----------
+// ---------- Masking, logging, worker ----------
 
-/// Suntikkan tombol netral (turun lalu naik) selagi Win masih ditahan.
+/// Inject a neutral key (down, then up) while Win is still held.
 unsafe fn inject_mask() {
     let t = now_ms();
     let last = LAST_MASK.load(Ordering::Relaxed);
@@ -251,7 +250,7 @@ unsafe fn foreground_desc() -> String {
     )
 }
 
-/// Pasang hook, jalankan pemantau dan thread pekerja.
+/// Install the hook and start the poller and worker thread.
 pub fn start(app: AppHandle) {
     let (tx, rx) = mpsc::channel::<Msg>();
     let _ = TX.set(tx);
@@ -266,7 +265,7 @@ pub fn start(app: AppHandle) {
                 Msg::Tap => {
                     super::toggle(&app);
                     if DEBUG {
-                        // Kalau Start menu lolos, window depan sesudah ketukan adalah miliknya.
+                        // If the Start menu slips through, the foreground window after the tap belongs to it.
                         thread::spawn(|| {
                             thread::sleep(Duration::from_millis(450));
                             eprintln!("[winkey] window depan 450 ms sesudah ketukan: {}", unsafe {

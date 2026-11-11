@@ -12,7 +12,7 @@ const RETRY_MS = 2 * 60 * 1000;
 const GEO_KEY = "edgeshell-geo";
 const WEATHER_KEY = "edgeshell-weather";
 
-// Kode cuaca WMO -> [teks, ikon siang, ikon malam]. Ikon = nama Material Symbols.
+// WMO weather code -> [text, daytime icon, nighttime icon]. Icons are Material Symbols names.
 // https://open-meteo.com/en/docs#weathervariables
 const WMO: Record<number, [string, string, string]> = {
   0: ["cerah", "sunny", "clear_night"],
@@ -60,11 +60,11 @@ function writeCache(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    /* tidak masalah */
+    /* no problem */
   }
 }
 
-/** Nama kota -> koordinat (di-cache, karena hampir tidak pernah berubah). */
+/** City name -> coordinates (cached because they almost never change). */
 async function geocode(city: string): Promise<Geo> {
   const cached = readCache<Geo>(GEO_KEY);
   if (cached && cached.query === city) return cached;
@@ -102,7 +102,7 @@ async function fetchCurrent(geo: Geo): Promise<Weather> {
   };
 }
 
-/** Cuaca kota di config. Diperbarui tiap 30 menit, dicoba ulang 2 menit setelah gagal. */
+/** Weather for the configured city. Updated every 30 minutes; retried 2 minutes after a failure. */
 export function useWeather(city: string): Weather | null {
   const [weather, setWeather] = useState<Weather | null>(() => readCache<Weather>(WEATHER_KEY));
 

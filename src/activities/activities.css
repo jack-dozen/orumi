@@ -1,7 +1,7 @@
-/* Activities: semua gaya di file ini (prefix .act), memakai token tema yang sudah ada. */
+/* Activities: all styles in this file use the .act prefix and existing theme tokens. */
 
-/* Panel dari tepi bawah, bentuk dan gerakannya sama dengan .launcher: window hanya seukuran
-   panel (desktop di sekitarnya tidak digelapkan), panel naik dari bawah saat dibuka. */
+/* A panel from the bottom edge, shaped and animated like .launcher: the window is only as large
+   as the panel (the surrounding desktop is not dimmed); the panel rises from the bottom when opened. */
 .act {
   position: absolute;
   inset: 0;
@@ -20,7 +20,7 @@
   pointer-events: auto;
 }
 
-/* ---------- Strip workspace (atas) ---------- */
+/* ---------- Workspace strip (top) ---------- */
 
 .act__top {
   position: absolute;
@@ -179,7 +179,7 @@
   font-size: 15px;
 }
 
-/* ---------- Kartu window ---------- */
+/* ---------- Window cards ---------- */
 
 .act-card {
   display: flex;
@@ -226,7 +226,7 @@
 
 .act-ws__blank,
 .act-card__blank {
-  /* ikon aplikasi di tengah kotak; huruf cadangan berasal dari .appimg--letter */
+  /* App icon centered in the tile; the fallback letter comes from .appimg--letter. */
   overflow: hidden;
 }
 
@@ -319,7 +319,7 @@
 }
 
 .act__viewport {
-  position: relative; /* offsetTop kotak dihitung terhadap daftar ini */
+  position: relative; /* The tile's offsetTop is measured relative to this list. */
   flex: 1;
   width: 100%;
   min-height: 0;
@@ -378,7 +378,7 @@
   padding: 0;
 }
 
-/* ---------- Rel huruf (27 titik: # dan A-Z) ---------- */
+/* ---------- Letter rail (27 dots: # and A-Z) ---------- */
 
 .act-rail {
   position: absolute;
@@ -421,7 +421,7 @@
   background: var(--outline);
 }
 
-/* Huruf aktif: titik memanjang dan berwarna, seperti penanda halaman sebelumnya. */
+/* Active letter: an elongated, colored dot, like the previous page indicator. */
 .act-rail__dot--on {
   height: 36px;
 }
@@ -440,7 +440,7 @@
   opacity: 0.35;
 }
 
-/* Huruf muncul di samping titik saat di-hover. */
+/* The letter appears beside the dot on hover. */
 .act-rail__dot::after {
   content: attr(data-letter);
   position: absolute;
@@ -467,7 +467,7 @@
   transform: translate(0, -50%);
 }
 
-/* ---------- Tombol ganti tampilan ---------- */
+/* ---------- View switch button ---------- */
 
 .act__switch {
   position: absolute;

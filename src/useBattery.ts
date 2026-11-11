@@ -7,7 +7,7 @@ export type BatteryStatus = {
   plugged: boolean;
 };
 
-/** Status baterai tiap 15 detik saat `active`. null = tidak ada baterai. */
+/** Battery status every 15 seconds while `active`. null = no battery. */
 export function useBattery(active: boolean): BatteryStatus | null {
   const [battery, setBattery] = useState<BatteryStatus | null>(null);
 
@@ -20,7 +20,7 @@ export function useBattery(active: boolean): BatteryStatus | null {
         const b = await invoke<BatteryStatus | null>("get_battery");
         if (!cancelled) setBattery(b);
       } catch {
-        /* coba lagi nanti */
+        /* try again later */
       }
     };
 

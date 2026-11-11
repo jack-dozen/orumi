@@ -1,7 +1,6 @@
-//! Pengganti Alt+Tab. Hook keyboard tingkat rendah hanya memutuskan "telan atau teruskan"
-//! dan mengirim pesan ke thread pekerja; semua kerja berat ada di thread pekerja, karena
-//! Windows mencabut hook yang lambat. Ada penjaga yang memasang ulang hook kalau tidak
-//! lagi menerima tombol.
+//! Alt+Tab replacement. The low-level keyboard hook only decides whether to "swallow or pass through"
+//! and sends messages to the worker thread; all heavy work runs there because Windows removes slow
+//! hooks. A watchdog reinstalls the hook if it stops receiving keystrokes.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -40,17 +39,17 @@ use crate::{
     winlist::{self, WindowEntry},
 };
 
-// ---------- Konstanta ----------
+// ---------- Constants ----------
 
 const WM_KEYDOWN: usize = 0x0100;
 const WM_KEYUP: usize = 0x0101;
 const WM_SYSKEYDOWN: usize = 0x0104;
 const WM_SYSKEYUP: usize = 0x0105;
-/// Pesan ke thread hook: pasang ulang hook (WM_APP + 1).
+/// Message to the hook thread: reinstall the hook (WM_APP + 1).
 const WM_REINSTALL: u32 = 0x8001;
 
 const LLKHF_INJECTED: u32 = 0x10;
-/// Windows menandai event keyboard yang terjadi saat Alt sedang ditekan dengan bit ini.
+/// Windows marks keyboard events that occur while Alt is held with this bit.
 const LLKHF_ALTDOWN: u32 = 0x20;
 
 const VK_TAB: u32 = 0x09;
@@ -67,25 +66,25 @@ const VK_RMENU: u32 = 0xA5;
 const VK_LWIN: u32 = 0x5B;
 const VK_RWIN: u32 = 0x5C;
 
-/// Panel baru muncul kalau Alt+Tab ditahan selama ini; ketukan cepat tidak menampilkan panel.
+/// The panel appears only if Alt+Tab is held this long; a quick tap does not show it.
 const SHOW_DELAY: Duration = Duration::from_millis(150);
-/// Setelah ini, kalau Alt ternyata sudah tidak ditekan, sesi dianggap selesai.
+/// After this, if Alt is no longer held, the session is considered finished.
 const ALT_POLL_GRACE: Duration = Duration::from_millis(300);
-/// Daftar window yang lebih lambat dari ini dicatat di terminal.
+/// Windows taking longer than this are logged in the terminal.
 const SLOW_LIST_MS: u128 = 40;
-/// Jarak minimum antar pemasangan ulang hook oleh penjaga.
+/// Minimum interval between hook reinstalls by the watchdog.
 const REINSTALL_COOLDOWN_MS: u64 = 5000;
 
-// ---------- Status bersama (hanya atomik; aman dipakai dari hook) ----------
+// ---------- Shared state (atomics only; safe to use from the hook) ----------
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
-/// Sesi Alt+Tab sedang berjalan.
+/// Whether an Alt+Tab session is in progress.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
-/// Tombol yang keydown-nya kita telan; keyup-nya harus ikut ditelan.
+/// Keys whose keydown we swallowed; their keyup must also be swallowed.
 static SWALLOWED: AtomicU8 = AtomicU8::new(0);
-/// Kapan hook terakhir melihat keydown Tab (ms sejak START). Dipakai penjaga.
+/// When the hook last saw a Tab keydown (ms since START). Used by the watchdog.
 static LAST_TAB_SEEN: AtomicU64 = AtomicU64::new(0);
-/// Id thread yang memegang hook (0 = belum jalan).
+/// ID of the thread holding the hook (0 = not running yet).
 static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
 static START: OnceLock<Instant> = OnceLock::new();
 
@@ -93,8 +92,8 @@ fn now_ms() -> u64 {
     START.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
-/// Status tombol langsung dari Windows. Lebih tepercaya daripada menghitung sendiri,
-/// karena event pelepasan yang terlewat tidak bisa membuat statusnya tersangkut.
+/// Key state read directly from Windows. More reliable than tracking it ourselves,
+/// because a missed key-up event cannot leave the state stuck.
 fn async_down(vk: u32) -> bool {
     unsafe { (GetAsyncKeyState(vk as i32) as u16) & 0x8000 != 0 }
 }
@@ -116,7 +115,7 @@ fn send(m: Msg) {
     }
 }
 
-/// Minta thread hook memasang ulang hook-nya.
+/// Ask the hook thread to reinstall its hook.
 fn reinstall() {
     let tid = HOOK_THREAD.load(Ordering::Relaxed);
     if tid != 0 {
@@ -126,8 +125,8 @@ fn reinstall() {
     }
 }
 
-/// Nyalakan/matikan penggantian Alt+Tab. Mematikan juga membatalkan sesi yang sedang berjalan;
-/// menyalakan lagi memasang ulang hook (jaga-jaga kalau Windows sudah mencabutnya).
+/// Enable/disable the Alt+Tab replacement. Disabling also cancels any active session;
+/// enabling reinstalls the hook in case Windows has removed it.
 pub fn set_enabled(on: bool) {
     let was = ENABLED.swap(on, Ordering::Relaxed);
     if !on {
@@ -156,8 +155,8 @@ fn mark_swallowed(vk: u32) {
     SWALLOWED.fetch_or(swallow_bit(vk), Ordering::Relaxed);
 }
 
-/// Keydown yang lolos berarti penanda lama sudah basi: hapus, supaya pelepasan tombol
-/// berikutnya tidak ikut tertelan.
+/// A keydown that gets through means the old marker is stale: remove it so the next
+/// key-up is not swallowed too.
 fn clear_swallowed(vk: u32) {
     let bit = swallow_bit(vk);
     if bit != 0 {
@@ -165,16 +164,16 @@ fn clear_swallowed(vk: u32) {
     }
 }
 
-/// true kalau keydown tombol ini kita telan (dan tandanya dihapus).
+/// true if we swallowed this key's keydown (and removed its marker).
 fn take_swallowed(vk: u32) -> bool {
     let bit = swallow_bit(vk);
     bit != 0 && SWALLOWED.fetch_and(!bit, Ordering::Relaxed) & bit != 0
 }
 
-/// Suntikkan satu tombol netral (VK 0xE8, tidak dipakai Windows). Tanpa ini, aplikasi aktif
-/// melihat "Alt ditekan lalu dilepas" (karena Tab kita telan) dan memunculkan menu bar-nya.
-/// Dipanggil dari thread pekerja, BUKAN dari callback hook: event suntikan melewati semua hook
-/// program lain, dan kalau itu terjadi di dalam callback, hook kita bisa dicabut Windows.
+/// Inject one neutral key (VK 0xE8, unused by Windows). Without it, the active app
+/// sees "Alt pressed and then released" (because we swallowed Tab) and opens its menu bar.
+/// Called from the worker thread, NOT from the hook callback: injected events pass through all
+/// other program hooks, and doing this inside the callback could cause Windows to remove our hook.
 unsafe fn mask_alt_menu() {
     let key = |flags: KEYBD_EVENT_FLAGS| INPUT {
         r#type: INPUT_KEYBOARD,
@@ -192,7 +191,7 @@ unsafe fn mask_alt_menu() {
     SendInput(&inputs, size_of::<INPUT>() as i32);
 }
 
-/// true = telan event ini (jangan teruskan ke aplikasi). Harus cepat dan tanpa panggilan berat.
+/// true = swallow this event (do not pass it to the app). Must be fast and avoid heavy calls.
 unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
     let vk = kb.vkCode;
     let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
@@ -212,7 +211,7 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
     let alt_flag = kb.flags.0 & LLKHF_ALTDOWN != 0;
     let is_alt_key = matches!(vk, VK_MENU | VK_LMENU | VK_RMENU);
 
-    // Alt dilepas: sesi selesai. Event Alt-up sendiri selalu diteruskan.
+    // Alt released: session ends. Always pass the Alt-up event through.
     if is_alt_key && up {
         if ACTIVE.swap(false, Ordering::Relaxed) {
             send(Msg::Commit);
@@ -220,18 +219,18 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
         return false;
     }
     if injected {
-        return false; // termasuk tombol netral milik kita sendiri
+        return false; // including our own neutral key
     }
 
-    // Lepas tombol yang keydown-nya sudah kita telan.
+    // Release keys whose keydown we already swallowed.
     if up {
         return take_swallowed(vk);
     }
 
     let active = ACTIVE.load(Ordering::Relaxed);
 
-    // Tombol apa pun tanpa Alt saat sesi aktif berarti Alt-up terlewat: akhiri sesi,
-    // lalu teruskan tombolnya apa adanya.
+    // Any key without Alt during an active session means Alt-up was missed: end the session,
+    // then pass the key through unchanged.
     if active && !alt_flag && !is_alt_key {
         ACTIVE.store(false, Ordering::Relaxed);
         send(Msg::Commit);
@@ -239,8 +238,8 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
     }
 
     let swallow = match vk {
-        // Hanya kalau Windows sendiri menandai Alt sedang ditekan, dan tanpa Ctrl/Win
-        // (Ctrl+Alt+Tab bawaan dibiarkan). Status Ctrl/Win/Shift dibaca langsung dari Windows.
+        // Only when Windows itself reports Alt as held, and without Ctrl/Win
+        // (leave built-in Ctrl+Alt+Tab alone). Read Ctrl/Win/Shift state directly from Windows.
         VK_TAB
             if alt_flag
                 && !async_down(VK_CONTROL)
@@ -291,7 +290,7 @@ fn install_hook() -> Option<HHOOK> {
     unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0).ok() }
 }
 
-// ---------- Thread pekerja ----------
+// ---------- Worker thread ----------
 
 struct Session {
     items: Vec<WindowEntry>,
@@ -308,7 +307,7 @@ struct ItemsPayload<'a> {
 
 fn show(app: &AppHandle, s: &mut Session) {
     s.shown = true;
-    // Isi dikirim dulu, baru panel ditampilkan, supaya tidak ada kedipan panel kosong.
+    // Send the contents before showing the panel to avoid flashing an empty panel.
     let _ = app.emit(
         "switcher-items",
         ItemsPayload { items: &s.items, index: s.index },
@@ -326,11 +325,11 @@ fn step(app: &AppHandle, session: &mut Option<Session>, delta: i32) {
     if s.shown {
         let _ = app.emit("switcher-select", s.index);
     } else {
-        show(app, s); // pengguna sedang berputar-putar: tampilkan sekarang
+        show(app, s); // user is cycling through items: show it now
     }
 }
 
-/// Akhiri sesi: sembunyikan panel dan pindah ke window yang dipilih.
+/// End the session: hide the panel and switch to the selected window.
 fn finish(app: &AppHandle, session: &mut Option<Session>) {
     let Some(s) = session.take() else { return };
     if s.shown {
@@ -352,7 +351,7 @@ fn cancel(app: &AppHandle, session: &mut Option<Session>) {
 fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
     match msg {
         Msg::Start { reverse } => {
-            // Pertama-tama tahan menu bar aplikasi aktif, selagi Alt masih ditekan.
+            // First, suppress the active app's menu bar while Alt is still held.
             unsafe { mask_alt_menu() };
 
             let t = Instant::now();
@@ -367,8 +366,8 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
                 return;
             }
             let n = items.len();
-            // Item pertama adalah window yang sedang aktif, jadi pilihan awal window berikutnya.
-            // Kalau window aktif tidak ada di daftar (mis. desktop), mulai dari yang pertama.
+            // The first item is the active window, so the initial selection is the next window.
+            // If the active window is not in the list (e.g. the desktop), start with the first item.
             let base = if items[0].focused { 1 } else { 0 };
             let index = if n == 1 {
                 0
@@ -396,7 +395,7 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
 fn worker(app: AppHandle, rx: Receiver<Msg>) {
     let mut session: Option<Session> = None;
     loop {
-        // Tanpa sesi: tidur sampai ada pesan (tidak ada polling saat idle).
+        // No session: sleep until a message arrives (no polling while idle).
         let msg = if session.is_some() {
             match rx.recv_timeout(Duration::from_millis(40)) {
                 Ok(m) => Some(m),
@@ -416,7 +415,7 @@ fn worker(app: AppHandle, rx: Receiver<Msg>) {
         let Some(s) = session.as_mut() else { continue };
         let age = s.started.elapsed();
         if age >= ALT_POLL_GRACE && !async_down(VK_MENU) {
-            // Alt-up terlewat (hook dibuang, desktop aman, dst.): anggap selesai.
+            // Alt-up was missed (hook removed, desktop is safe, etc.): consider the session finished.
             ACTIVE.store(false, Ordering::Relaxed);
             finish(&app, &mut session);
         } else if !s.shown && age >= SHOW_DELAY {
@@ -425,9 +424,9 @@ fn worker(app: AppHandle, rx: Receiver<Msg>) {
     }
 }
 
-/// Penjaga: kalau Alt+Tab ditekan secara fisik tapi hook tidak pernah melihat Tab, hook
-/// kemungkinan sudah dicabut Windows (atau window aktif berjalan sebagai administrator).
-/// Pasang ulang, paling sering sekali per REINSTALL_COOLDOWN_MS.
+/// Watchdog: if Alt+Tab is physically pressed but the hook never sees Tab, Windows may have
+/// removed the hook (or the active window may be running as administrator).
+/// Reinstall it no more than once per REINSTALL_COOLDOWN_MS.
 fn watchdog() {
     let mut last_reinstall: u64 = 0;
     loop {
@@ -451,13 +450,13 @@ fn watchdog() {
     }
 }
 
-/// Klik item di panel: pilih dan aktifkan window itu.
+/// Click a panel item to select and activate that window.
 #[tauri::command]
 pub fn switcher_pick(index: usize) {
     send(Msg::Pick(index));
 }
 
-/// Pasang hook dan jalankan thread pekerja serta penjaga.
+/// Install the hook and start the worker and watchdog threads.
 pub fn start(app: AppHandle) {
     let (tx, rx) = mpsc::channel::<Msg>();
     let _ = TX.set(tx);
@@ -465,8 +464,8 @@ pub fn start(app: AppHandle) {
     thread::spawn(watchdog);
 
     thread::spawn(|| unsafe {
-        // Thread hook harus segera dijadwalkan; kalau terlambat, callback melewati batas waktu
-        // dan Windows mencabut hook-nya.
+        // The hook thread must be scheduled immediately; if delayed, the callback times out
+        // and Windows removes the hook.
         let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
         HOOK_THREAD.store(GetCurrentThreadId(), Ordering::Relaxed);
 

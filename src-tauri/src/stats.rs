@@ -8,7 +8,7 @@ use serde::Serialize;
 use sysinfo::{Disks, ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::State;
 
-/// Seberapa sering info disk dibaca ulang.
+/// How often to reread disk information.
 const DISK_REFRESH: Duration = Duration::from_secs(30);
 
 #[derive(Serialize)]
@@ -31,7 +31,7 @@ pub struct StatsState(Mutex<Inner>);
 impl StatsState {
     pub fn new() -> Self {
         let mut sys = System::new().expect("gagal menginisialisasi sysinfo");
-        // Pembacaan CPU pertama selalu 0, jadi "dipanaskan" dulu.
+        // The first CPU reading is always 0, so warm it up first.
         sys.refresh_cpu_usage();
         sys.refresh_memory();
         Self(Mutex::new(Inner {
@@ -42,7 +42,7 @@ impl StatsState {
     }
 }
 
-/// (terpakai, total) dalam byte untuk drive C:, atau drive pertama kalau C: tidak ada.
+/// (used, total) in bytes for drive C:, or the first drive if C: is unavailable.
 fn read_system_disk() -> (u64, u64) {
     let Ok(disks) = Disks::new_with_refreshed_list() else {
         return (0, 0);
@@ -60,7 +60,7 @@ fn read_system_disk() -> (u64, u64) {
     }
 }
 
-/// async supaya tidak berjalan di main thread.
+/// Async so it does not run on the main thread.
 #[tauri::command]
 pub async fn get_stats(state: State<'_, StatsState>) -> Result<Stats, String> {
     let mut inner = state.0.lock().map_err(|e| e.to_string())?;
@@ -83,19 +83,19 @@ pub async fn get_stats(state: State<'_, StatsState>) -> Result<Stats, String> {
     })
 }
 
-// ---------- Proses teratas ----------
+// ---------- Top processes ----------
 
 #[derive(Serialize)]
 pub struct ProcEntry {
     name: String,
-    /// Persen dari seluruh CPU (sudah dibagi jumlah core).
+    /// Percentage of total CPU (already divided by the number of cores).
     cpu: f32,
-    /// Byte (working set), jumlah semua proses dengan nama ini.
+    /// Bytes (working set), total for all processes with this name.
     mem: u64,
     count: u32,
 }
 
-/// System khusus proses, terpisah supaya statistik dashboard tidak ikut memindai proses.
+/// Process-specific system, separate so dashboard statistics do not also scan processes.
 pub struct ProcState(Mutex<System>);
 
 impl ProcState {
@@ -110,7 +110,7 @@ const TOP_PROCESSES: usize = 6;
 pub async fn get_top_processes(state: State<'_, ProcState>) -> Result<Vec<ProcEntry>, String> {
     let mut sys = state.0.lock().map_err(|e| e.to_string())?;
 
-    // `let _` supaya tetap lolos compile baik hasilnya () maupun Result.
+    // Use `let _` so this compiles whether the result is () or Result.
     let _ = sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
@@ -121,7 +121,7 @@ pub async fn get_top_processes(state: State<'_, ProcState>) -> Result<Vec<ProcEn
         .map(|n| n.get())
         .unwrap_or(1) as f32;
 
-    // nama -> (cpu, memori, jumlah proses)
+    // name -> (cpu, memory, process count)
     let mut grouped: HashMap<String, (f32, u64, u32)> = HashMap::new();
     for p in sys.processes().values() {
         if p.pid().as_u32() == 0 {

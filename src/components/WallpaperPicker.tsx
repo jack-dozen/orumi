@@ -4,7 +4,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 type Item = { name: string; path: string; thumb: string };
 type List = { dir: string; items: Item[]; start: number | null; error: string | null };
 
-// Geometri carousel (satuan desain): kartu tengah lebar, strip sempit di kiri-kanan.
+// Carousel geometry (design units): wide center card, narrow strips on either side.
 const RADIUS = 5;
 const CENTER_W = 320;
 const STRIP_W = 56;
@@ -12,10 +12,10 @@ const GAP = 8;
 const WHEEL_COOLDOWN_MS = 90;
 const PRELOAD = 3;
 
-/** Modulo yang selalu non-negatif, supaya indeks berputar di kedua arah. */
+/** Always-nonnegative modulo, so the index wraps in both directions. */
 const mod = (n: number, m: number) => ((n % m) + m) % m;
 
-/** Posisi tengah slot (px) relatif ke tengah panggung. */
+/** Slot center position (px) relative to the center of the stage. */
 function slotX(offset: number): number {
   if (offset === 0) return 0;
   const dir = offset > 0 ? 1 : -1;
@@ -23,20 +23,20 @@ function slotX(offset: number): number {
   return dir * (CENTER_W / 2 + GAP + (n - 1) * (STRIP_W + GAP) + STRIP_W / 2);
 }
 
-/** Jumlah slot di tiap sisi untuk sejumlah gambar (folder kecil: lebih sedikit). */
+/** Number of slots on each side for a given image count (fewer for small folders). */
 const radiusFor = (count: number) => Math.min(RADIUS, Math.floor((count - 1) / 2));
 
-/** Lebar panel (satuan desain) yang pas untuk sejumlah gambar. */
+/** Panel width (design units) that fits a given image count. */
 function panelWidth(count: number): number {
   const span = CENTER_W + 2 * radiusFor(count) * (STRIP_W + GAP);
   return Math.max(span + 64, 380);
 }
 
 /**
- * Pengalih wallpaper bergaya carousel yang berputar tanpa ujung. Thumbnail berupa file
- * di disk yang dimuat lewat asset protocol. Posisi disimpan sebagai angka "virtual" yang
- * bebas bertambah/berkurang, dan slot memakai posisi virtual itu sebagai key, jadi
- * saat berputar melewati ujung daftar slot tetap meluncur, bukan dibuat ulang.
+ * An endless, rotating carousel-style wallpaper picker. Thumbnails are files
+ * on disk loaded through the asset protocol. Position is stored as an unbounded
+ * "virtual" number, and slots use that virtual position as their key, so
+ * slots keep sliding across the list boundary instead of being recreated.
  */
 export default function WallpaperPicker({
   onBack,
@@ -45,7 +45,7 @@ export default function WallpaperPicker({
 }: {
   onBack: () => void;
   onDone: () => void;
-  /** Melaporkan lebar panel yang pas (null = pakai lebar daftar biasa). */
+  /** Report the fitted panel width (null = use the regular list width). */
   onWidth?: (w: number | null) => void;
 }) {
   const [list, setList] = useState<List | null>(null);
@@ -57,7 +57,7 @@ export default function WallpaperPicker({
     invoke<List>("list_wallpapers", { thumbs: true })
       .then((r) => {
         setList(r);
-        setVirtual(r.start ?? 0); // mulai di wallpaper yang sedang aktif
+        setVirtual(r.start ?? 0); // start at the currently active wallpaper
       })
       .catch(() =>
         setList({ dir: "", items: [], start: null, error: "Gagal membaca folder wallpaper" }),
@@ -69,7 +69,7 @@ export default function WallpaperPicker({
   const active = count > 0 ? mod(virtual, count) : 0;
 
 
-  // Lebar panel mengikuti jumlah slot yang tampil.
+  // Panel width follows the number of visible slots.
   useEffect(() => {
     onWidth?.(list && !list.error && count > 0 ? panelWidth(count) : null);
   }, [list, count, onWidth]);
@@ -82,7 +82,7 @@ export default function WallpaperPicker({
     onDone();
   };
 
-  // Muat lebih dulu thumbnail yang sebentar lagi masuk ke layar.
+  // Preload thumbnails that are about to enter the screen.
   useEffect(() => {
     if (!list || count === 0) return;
     for (let d = RADIUS + 1; d <= RADIUS + PRELOAD; d++) {
@@ -143,7 +143,7 @@ export default function WallpaperPicker({
     );
   }
 
-  // Folder kecil: batasi jumlah slot supaya gambar yang sama tidak tampil dua kali.
+  // Small folder: limit the number of slots so the same image is not shown twice.
   const radius = radiusFor(count);
 
   const slots = [];

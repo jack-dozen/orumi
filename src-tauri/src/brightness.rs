@@ -1,6 +1,6 @@
-//! Brightness layar laptop: membaca lewat event WMI (tanpa polling, tanpa proses tambahan),
-//! menulis lewat WMI COM langsung. Diadaptasi dari Bloom (GPL-3.0): services.rs.
-//! Monitor eksternal (DDC/CI) belum didukung.
+//! Laptop screen brightness: read through WMI events (no polling or extra process),
+//! write directly through WMI COM. Adapted from Bloom (GPL-3.0): services.rs.
+//! External monitors (DDC/CI) are not supported yet.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -32,7 +32,7 @@ struct WmiMonitorBrightness {
     current_brightness: u8,
 }
 
-/// Dipicu Windows setiap kali brightness berubah, oleh apa pun.
+/// Triggered by Windows whenever brightness changes, regardless of the cause.
 #[derive(Deserialize, Debug)]
 #[serde(rename = "WmiMonitorBrightnessEvent")]
 #[serde(rename_all = "PascalCase")]
@@ -40,10 +40,10 @@ struct WmiMonitorBrightnessEvent {
     brightness: u8,
 }
 
-/// -1 = belum diketahui atau layar tidak mendukung.
+/// -1 = unknown or unsupported by the display.
 static CURRENT: AtomicI32 = AtomicI32::new(-1);
 static SUPPORTED: AtomicBool = AtomicBool::new(true);
-/// Kapan terakhir kita sendiri mengubah brightness (untuk mengabaikan event gema-nya).
+/// When we last changed brightness ourselves (used to ignore the echo event).
 static LAST_OWN_CHANGE_MS: AtomicU64 = AtomicU64::new(0);
 static SET_TX: OnceLock<Sender<u32>> = OnceLock::new();
 
@@ -54,7 +54,7 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// None = layar ini tidak mendukung kontrol brightness lewat WMI.
+/// None = this display does not support brightness control through WMI.
 #[tauri::command]
 pub fn get_brightness() -> Option<u8> {
     let v = CURRENT.load(Ordering::Relaxed);
@@ -74,7 +74,7 @@ pub fn set_brightness(percent: u8) {
     }
 }
 
-/// Memulai thread pembaca (event) dan thread penulis.
+/// Start the reader (event) and writer threads.
 pub fn start_watcher(app: AppHandle) {
     let (tx, rx) = channel::<u32>();
     let _ = SET_TX.set(tx);
@@ -95,7 +95,7 @@ pub fn start_watcher(app: AppHandle) {
                 Some(b) => b.current_brightness as i32,
                 None => {
                     SUPPORTED.store(false, Ordering::Relaxed);
-                    return; // tidak ada panel yang bisa diatur (PC desktop)
+                    return; // there is no panel to control (desktop PC)
                 }
             },
             Err(_) => {
@@ -111,7 +111,7 @@ pub fn start_watcher(app: AppHandle) {
             }
             last = b;
             CURRENT.store(b, Ordering::Relaxed);
-            // Gema dari slider kita sendiri tidak perlu memunculkan popup.
+            // Our own slider's echo does not need to show a popup.
             if now_ms().saturating_sub(LAST_OWN_CHANGE_MS.load(Ordering::Relaxed)) < 2000 {
                 return;
             }
@@ -119,7 +119,7 @@ pub fn start_watcher(app: AppHandle) {
             crate::overlay::show_popup(&app, "brightness");
         };
 
-        // Tombol brightness ditangani Windows/firmware; ikuti perubahannya lewat event.
+        // Brightness keys are handled by Windows/firmware; follow changes through events.
         if let Ok(events) = con.raw_notification::<WmiMonitorBrightnessEvent>(
             "SELECT * FROM WmiMonitorBrightnessEvent",
         ) {
@@ -129,7 +129,7 @@ pub fn start_watcher(app: AppHandle) {
             }
         }
 
-        // Cadangan kalau langganan event tidak tersedia atau berhenti.
+        // Fallback if the event subscription is unavailable or stops.
         loop {
             thread::sleep(Duration::from_millis(1500));
             if let Ok(rows) = con.query::<WmiMonitorBrightness>() {
@@ -141,7 +141,7 @@ pub fn start_watcher(app: AppHandle) {
     });
 }
 
-/// Thread penulis: hanya nilai terbaru yang dipakai, karena tiap tulis lambat.
+/// Writer thread: only the latest value is used because each write is slow.
 unsafe fn set_worker(rx: Receiver<u32>) {
     let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
 
@@ -162,7 +162,7 @@ unsafe fn set_worker(rx: Receiver<u32>) {
         }
     };
 
-    // Tanpa impersonation di proxy, WMI menolak dengan WBEM_E_ACCESS_DENIED.
+    // Without impersonation on the proxy, WMI rejects the call with WBEM_E_ACCESS_DENIED.
     // 10 = RPC_C_AUTHN_WINNT, 0 = RPC_C_AUTHZ_NONE.
     let _ = CoSetProxyBlanket(
         &services,
@@ -176,7 +176,7 @@ unsafe fn set_worker(rx: Receiver<u32>) {
     );
     let _ = EOAC_NONE;
 
-    // GetMethod hanya bekerja pada definisi kelas, bukan pada instance.
+    // GetMethod only works on class definitions, not instances.
     let params_class = {
         let mut class_def: Option<IWbemClassObject> = None;
         let mut in_cls: Option<IWbemClassObject> = None;

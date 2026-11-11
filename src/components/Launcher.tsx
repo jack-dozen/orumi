@@ -18,15 +18,15 @@ type WinEntry = {
   aumid: string;
 };
 
-/** Satu baris di daftar hasil, baik app, aksi, maupun window. */
+/** One result row, whether an app, action, or window. */
 type Item = {
   key: string;
   name: string;
   hint?: string;
   glyph: string;
-  /** Alamat ikon app ("aumid:..." atau "path:..."); kalau ada, dipakai menggantikan glyph. */
+  /** App icon address ("aumid:..." or "path:..."); when present, it replaces the glyph. */
   icon?: string;
-  /** true = glyph adalah nama ikon Material Symbols, bukan huruf. */
+  /** true = glyph is a Material Symbols icon name, not a letter. */
   symbol?: boolean;
   dangerous?: boolean;
   run: () => void;
@@ -54,10 +54,10 @@ const ACTIONS: ActionDef[] = [
 ];
 
 const MAX_SHOWN = 8;
-/** Lebar panel saat menampilkan daftar (satuan desain). */
+/** Panel width when displaying the list (design units). */
 const LIST_WIDTH = 640;
 
-/** Skor kecocokan nama dengan query. 0 = tidak cocok. */
+/** Name-to-query match score. 0 = no match. */
 function score(name: string, q: string): number {
   const n = name.toLowerCase();
   if (n === q) return 100;
@@ -87,7 +87,7 @@ export default function Launcher() {
   const inputRef = useRef<HTMLInputElement>(null);
   const openedAt = useRef(0);
 
-  // Panel mengikuti ukuran isinya: tinggi diukur dari konten, lebar ditentukan tampilan.
+  // The panel fits its contents: height is measured from content; width is set by the view.
   const innerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number | null>(null);
   useLayoutEffect(() => {
@@ -100,14 +100,14 @@ export default function Launcher() {
     return () => ro.disconnect();
   }, []);
 
-  // Muat daftar app sekali saat app mulai (butuh 1-2 detik).
+  // Load the app list once when the app starts (takes 1-2 seconds).
   useEffect(() => {
     invoke<AppEntry[]>("list_apps", { refresh: false })
       .then(setApps)
       .catch(() => {});
   }, []);
 
-  // Reset dan fokus ke kotak pencarian setiap kali launcher dibuka.
+  // Reset and focus the search box each time the launcher opens.
   useEffect(() => {
     if (!visible) return;
     openedAt.current = Date.now();
@@ -118,14 +118,14 @@ export default function Launcher() {
     return () => clearTimeout(id);
   }, [visible]);
 
-  // Kembali dari carousel wallpaper: kotak cari dimuat ulang, jadi fokuskan lagi.
+  // Returning from the wallpaper carousel remounts the search box, so focus it again.
   useEffect(() => {
     if (view !== "list") return;
     const id = setTimeout(() => inputRef.current?.focus(), 30);
     return () => clearTimeout(id);
   }, [view]);
 
-  // Klik di luar launcher (window kehilangan fokus) = tutup.
+  // Outside click on the launcher (window loses focus) = close.
   useEffect(() => {
     const onBlur = () => {
       if (Date.now() - openedAt.current > 400) close();
@@ -134,14 +134,14 @@ export default function Launcher() {
     return () => window.removeEventListener("blur", onBlur);
   }, []);
 
-  // Konfirmasi batal kalau pilihan atau teks berubah.
+  // Cancel confirmation if the selection or text changes.
   useEffect(() => {
     setArmed(null);
   }, [query, index, visible]);
 
   const mode = query.startsWith(">") ? "actions" : query.startsWith("@") ? "windows" : "apps";
 
-  // Muat daftar window setiap kali masuk mode "@".
+  // Load the window list each time "@" mode is entered.
   useEffect(() => {
     if (!visible || mode !== "windows") return;
     invoke<WinEntry[]>("list_windows")
@@ -221,15 +221,15 @@ export default function Launcher() {
     }));
   }, [apps, wins, query, mode]);
 
-  /** Jalankan item; aksi berbahaya butuh dua kali konfirmasi. */
+  /** Run an item; dangerous actions require two confirmations. */
   const activate = (item?: Item) => {
     if (!item) return;
     if (item.dangerous && armed !== item.key) {
       setArmed(item.key);
       return;
     }
-    // Wallpaper: pengalih bawaan membuka carousel di dalam launcher;
-    // mode "perintah luar" menjalankan perintah dari config lalu menutup launcher.
+    // Wallpaper: the built-in picker opens a carousel inside the launcher;
+    // "External command" mode runs the command from config, then closes the launcher.
     if (mode === "actions" && item.key === "wallpaper") {
       if (cfg?.wallpaper_switcher === "external") {
         close();
@@ -245,7 +245,7 @@ export default function Launcher() {
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowUp") {
-      // Daftar ditampilkan terbalik: ke atas = hasil yang kurang relevan.
+      // The list is displayed in reverse: moving up selects less relevant results.
       e.preventDefault();
       setIndex((i) => Math.min(i + 1, results.length - 1));
     } else if (e.key === "ArrowDown") {
@@ -275,7 +275,7 @@ export default function Launcher() {
     <div
       className="lroot"
       onPointerDown={(e) => {
-        // Klik di area transparan di luar panel = klik di luar: tutup.
+        // Clicking the transparent area outside the panel counts as an outside click: close.
         if (e.target === e.currentTarget) close();
       }}
     >

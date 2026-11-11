@@ -8,7 +8,7 @@ export type ProcEntry = {
   count: number;
 };
 
-/** Ambil proses teratas tiap 2 detik, hanya saat `active` = true. */
+/** Fetch the top processes every 2 seconds, only while `active` = true. */
 export function useProcesses(active: boolean): ProcEntry[] {
   const [procs, setProcs] = useState<ProcEntry[]>([]);
 
@@ -21,7 +21,7 @@ export function useProcesses(active: boolean): ProcEntry[] {
         const p = await invoke<ProcEntry[]>("get_top_processes");
         if (!cancelled) setProcs(p);
       } catch {
-        /* coba lagi di tick berikutnya */
+        /* try again on the next tick */
       }
     };
 

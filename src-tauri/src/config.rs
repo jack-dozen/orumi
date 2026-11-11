@@ -1,4 +1,4 @@
-//! Konfigurasi app: file JSON di folder config, plus hotkey global yang bisa diubah.
+//! App configuration: a JSON file in the config folder, plus configurable global hotkeys.
 
 use std::{fs, path::PathBuf, sync::Mutex};
 
@@ -29,9 +29,9 @@ impl Default for Hotkeys {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(default)]
 pub struct ColorSlot {
-    /// "auto" (dari wallpaper) atau "custom".
+    /// "auto" (from the wallpaper) or "custom".
     pub mode: String,
-    /// Warna yang dipakai kalau mode = "custom", format #rrggbb.
+    /// Color used when mode = "custom", in #rrggbb format.
     pub value: String,
 }
 
@@ -48,11 +48,11 @@ fn slot(value: &str) -> ColorSlot {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(default)]
 pub struct Colors {
-    /// Latar panel (bar, notch, launcher, overlay).
+    /// Panel background (bar, notch, launcher, overlay).
     pub bg0: ColorSlot,
-    /// Latar kartu.
+    /// Card background.
     pub bg1: ColorSlot,
-    /// Teks dan ikon.
+    /// Text and icons.
     pub fg: ColorSlot,
     pub accent: ColorSlot,
 }
@@ -73,21 +73,21 @@ impl Default for Colors {
 pub struct Config {
     pub ui_scale: f64,
     pub weather_city: String,
-    /// 0-100: seberapa kuat warna wallpaper terlihat di latar dan teks mode "auto".
+    /// 0-100: how strongly the wallpaper color tints the background and text in "auto" mode.
     pub bg_tint: u8,
     pub colors: Colors,
-    /// Folder wallpaper untuk pengalih bawaan. Kosong = folder Pictures.
+    /// Wallpaper folder for the built-in picker. Empty = Pictures folder.
     pub wallpaper_dir: String,
-    /// "builtin" (pengalih di launcher) atau "external" (jalankan perintah di bawah).
+    /// "builtin" (launcher picker) or "external" (run the command below).
     pub wallpaper_switcher: String,
     pub wallpaper_command: String,
-    /// Wallpaper terakhir yang diterapkan lewat app ini. Hanya diisi backend.
+    /// Most recently applied wallpaper from this app. Set by the backend only.
     pub last_wallpaper: String,
-    /// true = Alt+Tab diganti switcher kustom; false = Alt+Tab bawaan Windows.
+    /// true = replace Alt+Tab with the custom switcher; false = use the Windows default.
     pub alt_tab: bool,
-    /// true = taskbar Windows diset auto-hide selama edgeshell berjalan (dipulihkan saat keluar).
+    /// true = auto-hide the Windows taskbar while edgeshell runs (restored on exit).
     pub taskbar_autohide: bool,
-    /// "icons" atau "dots": tampilan daftar app terbuka di bar.
+    /// "icons" or "dots": how the open-app list appears in the bar.
     pub bar_app_style: String,
     pub hotkeys: Hotkeys,
 }
@@ -146,7 +146,7 @@ fn sanitize_slot(s: &mut ColorSlot, default: &ColorSlot) {
     }
 }
 
-/// Rapikan nilai supaya selalu valid, apa pun isi file atau kiriman UI-nya.
+/// Normalize values so they are always valid, regardless of file contents or UI input.
 fn sanitize(mut c: Config) -> Config {
     let d = Config::default();
     c.ui_scale = ((c.ui_scale.clamp(0.5, 1.5)) * 20.0).round() / 20.0;
@@ -177,7 +177,7 @@ pub fn load(app: &AppHandle) -> Config {
     let raw: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
     let mut cfg: Config = serde_json::from_value(raw.clone()).unwrap_or_default();
 
-    // Migrasi dari format lama (satu warna tema custom -> aksen custom).
+    // Migrate from the old format (one custom theme color -> custom accent).
     if raw.get("colors").is_none()
         && raw.get("theme_mode").and_then(|v| v.as_str()) == Some("custom")
     {
@@ -199,9 +199,9 @@ fn save(app: &AppHandle, cfg: &Config) -> Result<(), String> {
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-// ---------- Hotkey ----------
+// ---------- Hotkeys ----------
 
-/// Shortcut yang sedang terdaftar -> nama panel yang di-toggle.
+/// Registered shortcuts -> names of the panels they toggle.
 static HOTKEY_MAP: Mutex<Vec<(Shortcut, &'static str)>> = Mutex::new(Vec::new());
 
 fn parse_key(k: &str) -> Option<Code> {
@@ -234,7 +234,7 @@ fn parse_key(k: &str) -> Option<Code> {
     (1..=12).contains(&n).then(|| FKEYS[n - 1])
 }
 
-/// "Ctrl+Alt+J" -> Shortcut. Wajib memakai minimal satu modifier.
+/// "Ctrl+Alt+J" -> shortcut. Must include at least one modifier.
 fn parse_hotkey(text: &str) -> Option<Shortcut> {
     let mut mods = Modifiers::empty();
     let mut key: Option<Code> = None;
@@ -258,7 +258,7 @@ fn parse_hotkey(text: &str) -> Option<Shortcut> {
     Some(Shortcut::new(Some(mods), key?))
 }
 
-/// Daftarkan ulang semua hotkey. Mengembalikan peringatan (kosong = semua berhasil).
+/// Register all hotkeys again. Returns warnings (empty = all succeeded).
 fn apply_hotkeys(app: &AppHandle, hk: &Hotkeys) -> Vec<String> {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
@@ -289,7 +289,7 @@ fn apply_hotkeys(app: &AppHandle, hk: &Hotkeys) -> Vec<String> {
     warnings
 }
 
-/// Pasang plugin hotkey dan daftarkan hotkey dari config. Dipanggil sekali saat startup.
+/// Install the hotkey plugin and register configured hotkeys. Called once at startup.
 pub fn init_hotkeys(app: &AppHandle, hk: &Hotkeys) -> tauri::Result<()> {
     app.plugin(
         tauri_plugin_global_shortcut::Builder::new()
@@ -313,8 +313,8 @@ pub fn init_hotkeys(app: &AppHandle, hk: &Hotkeys) -> tauri::Result<()> {
     Ok(())
 }
 
-// ---------- Command ----------
-/// Simpan wallpaper terakhir yang diterapkan. Backend-only, jadi tidak lewat set_config.
+// ---------- Commands ----------
+/// Save the most recently applied wallpaper. Backend-only, so it does not go through set_config.
 pub fn remember_wallpaper(app: &AppHandle, path: &str) {
     let state = app.state::<ConfigState>();
     let snapshot = {
@@ -325,7 +325,7 @@ pub fn remember_wallpaper(app: &AppHandle, path: &str) {
     let _ = save(app, &snapshot);
 }
 
-/// Menu tray: nyalakan atau matikan Alt+Tab kustom.
+/// Tray menu: enable or disable the custom Alt+Tab switcher.
 pub fn toggle_alt_tab(app: &AppHandle) {
     let state = app.state::<ConfigState>();
     let snapshot = {
@@ -338,7 +338,7 @@ pub fn toggle_alt_tab(app: &AppHandle) {
     let _ = app.emit("config-changed", &snapshot);
 }
 
-/// Config terkini untuk modul Rust lain.
+/// Current config for other Rust modules.
 pub fn current(app: &AppHandle) -> Config {
     app.state::<ConfigState>()
         .0
@@ -360,11 +360,11 @@ pub fn set_config(
 ) -> Result<SaveResult, String> {
     let old = state.0.lock().map_err(|e| e.to_string())?.clone();
     let mut new = sanitize(config);
-    // Field milik backend: jangan sampai tertimpa salinan lama dari UI.
+    // Backend-owned field: do not let an old copy from the UI overwrite it.
     new.last_wallpaper = old.last_wallpaper.clone();
     let mut warnings = Vec::new();
 
-    // Hotkey baru yang gagal terdaftar: pertahankan yang lama.
+    // A new hotkey that failed to register: keep the old one.
     if new.hotkeys != old.hotkeys {
         let w = apply_hotkeys(&app, &new.hotkeys);
         if !w.is_empty() {

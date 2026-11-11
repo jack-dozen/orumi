@@ -14,17 +14,17 @@ import "./activities.css";
 
 type View = "ws" | "apps";
 
-/** Ambang gulir (touchpad dua jari) untuk dianggap satu gestur. */
+/** Scroll threshold (two-finger touchpad) for a gesture to be recognized. */
 const SWIPE_THRESHOLD = 80;
-/** Jeda setelah satu gestur dikenali, supaya inersia touchpad tidak memicu dua kali. */
+/** Delay after recognizing a gesture so touchpad inertia does not trigger it twice. */
 const SWIPE_LOCK_MS = 450;
-/** Klik di luar (blur) diabaikan sebentar setelah dibuka. */
+/** Ignore outside clicks (blur) briefly after opening. */
 const BLUR_GRACE_MS = 400;
 
 const thumbSrc = (t: string) => `data:image/jpeg;base64,${t}`;
 const letter = (s: string) => (s.trim().charAt(0) || "?").toUpperCase();
 
-/** Skor kecocokan nama dengan query (sama dengan aturan launcher). 0 = tidak cocok. */
+/** Name-to-query match score (same rules as the launcher). 0 = no match. */
 function score(name: string, q: string): number {
   const n = name.toLowerCase();
   if (n === q) return 100;
@@ -39,13 +39,13 @@ function score(name: string, q: string): number {
   return 0;
 }
 
-/** Jumlah kolom app grid menurut lebar panel (sebagian lebar dipakai rel huruf di kiri). */
+/** Number of app grid columns based on panel width (some width is used by the letter rail on the left). */
 const colsFor = (w: number) => Math.max(3, Math.min(9, Math.floor((w - 220) / 140)));
 
-/** Rel huruf: simbol/angka (#) lalu A-Z = 27 titik. */
+/** Letter rail: symbols/numbers (#), then A-Z = 27 dots. */
 const RAIL = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
-/** Huruf kelompok sebuah nama: A-Z (aksen dibuang), selain itu "#". */
+/** Letter group for a name: A-Z (accents removed), otherwise "#". */
 const groupOf = (name: string) => {
   const c = name.trim().charAt(0).normalize("NFD").charAt(0).toUpperCase();
   return c >= "A" && c <= "Z" ? c : "#";
@@ -53,7 +53,7 @@ const groupOf = (name: string) => {
 
 const byName = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
-/** Urutan daftar: kelompok "#" dulu, lalu A-Z, di dalam kelompok menurut nama. */
+/** List order: "#" group first, then A-Z, sorted by name within each group. */
 function compareApps(a: AppEntry, b: AppEntry) {
   const ga = groupOf(a.name);
   const gb = groupOf(b.name);
@@ -62,8 +62,8 @@ function compareApps(a: AppEntry, b: AppEntry) {
 }
 
 /**
- * Ikon app yang baru diminta ke Rust saat kotaknya mendekati area terlihat, supaya daftar
- * panjang tidak memicu ratusan permintaan ikon sekaligus. Setelah termuat, cache AppIcon dipakai.
+ * Request new app icons from Rust as their tiles approach the visible area, so a long list
+ * does not trigger hundreds of icon requests at once. Once loaded, the AppIcon cache is used.
  */
 function LazyAppIcon({
   target,
@@ -116,7 +116,7 @@ export default function Activities() {
   const openedAt = useRef(0);
   const wheel = useRef({ x: 0, y: 0, last: 0, lock: 0, fresh: true });
 
-  // Reset tampilan setiap kali dibuka.
+  // Reset the display each time it opens.
   useEffect(() => {
     if (openCount === 0) return;
     openedAt.current = Date.now();
@@ -132,7 +132,7 @@ export default function Activities() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Klik di luar / window kehilangan fokus = tutup.
+  // Outside click / window loses focus = close.
   useEffect(() => {
     const onBlur = () => {
       if (Date.now() - openedAt.current > BLUR_GRACE_MS) closeActivities();
@@ -141,14 +141,14 @@ export default function Activities() {
     return () => window.removeEventListener("blur", onBlur);
   }, []);
 
-  // Fokuskan kotak cari saat masuk tampilan app.
+  // Focus the search box when entering the app view.
   useEffect(() => {
     if (!visible || view !== "apps") return;
     const id = setTimeout(() => inputRef.current?.focus(), 30);
     return () => clearTimeout(id);
   }, [visible, view]);
 
-  // Keyboard global: Esc bertahap, dan mengetik langsung membuka pencarian.
+  // Global keyboard: Esc backs out step by step, and typing opens search immediately.
   useEffect(() => {
     if (!visible) return;
     const onKey = (e: KeyboardEvent) => {
@@ -201,9 +201,9 @@ export default function Activities() {
       .map((x) => x.a);
   }, [apps, sorted, query]);
 
-  // ---------- Gulir daftar dan rel huruf ----------
+  // ---------- List scrolling and letter rail ----------
 
-  /** Huruf aktif = kelompok pada baris paling atas yang terlihat. */
+  /** Active letter = the group on the topmost visible row. */
   const updateActive = useCallback(() => {
     const vp = viewportRef.current;
     if (!vp) return;
@@ -228,7 +228,7 @@ export default function Activities() {
     rafRef.current = requestAnimationFrame(updateActive);
   };
 
-  // Kembali ke atas saat dibuka atau pencarian berubah; hitung ulang huruf aktif.
+  // Return to the top when opened or when the search changes; recalculate the active letter.
   useEffect(() => {
     viewportRef.current?.scrollTo({ top: 0 });
     requestAnimationFrame(updateActive);
@@ -244,7 +244,7 @@ export default function Activities() {
     if (vp && el) vp.scrollTo({ top: Math.max(0, el.offsetTop - 4), behavior: "smooth" });
   };
 
-  /** Pastikan kotak ke-i terlihat (tanpa scrollIntoView, yang bisa menggeser panel). */
+  /** Ensure tile i is visible (without scrollIntoView, which could shift the panel). */
   const reveal = (i: number) => {
     const vp = viewportRef.current;
     const el = vp?.querySelector<HTMLElement>(`[data-idx="${i}"]`);
@@ -292,7 +292,7 @@ export default function Activities() {
   };
 
   const onInputKey = (e: React.KeyboardEvent) => {
-    // Panah dan Enter hanya untuk hasil pencarian (daftar datar); daftar biasa digulir.
+    // Arrow keys and Enter apply only to search results (a flat list); the regular list scrolls.
     if (!searching || list.length === 0) return;
     const step: Record<string, number> = {
       ArrowRight: 1,
@@ -308,7 +308,7 @@ export default function Activities() {
     }
   };
 
-  // Gestur touchpad: gulir atas = buka app grid, gulir bawah di paling atas daftar = kembali.
+  // Touchpad gestures: scroll up = open app grid; scroll down at the top of the list = go back.
   const onWheel = (e: React.WheelEvent) => {
     const s = wheel.current;
     const now = Date.now();
@@ -316,7 +316,7 @@ export default function Activities() {
     if (now - s.last > 160) {
       s.x = 0;
       s.y = 0;
-      // Gestur baru: hanya sah untuk "kembali" kalau daftar sudah di paling atas sejak awal.
+      // A new gesture is valid for "back" only if the list was already at the top.
       s.fresh = (viewportRef.current?.scrollTop ?? 0) <= 0;
     }
     s.last = now;
@@ -336,7 +336,7 @@ export default function Activities() {
       }
       return;
     }
-    // Daftar app menggulir sendiri; gulir ke bawah (jari turun) di paling atas = kembali.
+    // The app list scrolls independently; scroll down (finger moves down) at the top = go back.
     const top = viewportRef.current?.scrollTop ?? 0;
     if (s.fresh && top <= 0 && !searching && s.y < -SWIPE_THRESHOLD) {
       setView("ws");
@@ -347,7 +347,7 @@ export default function Activities() {
   const isBg = (e: React.PointerEvent) =>
     (e.target as HTMLElement).dataset.bg !== undefined;
 
-  // ---------- Tampilan ----------
+  // ---------- View ----------
 
   return (
     <div
@@ -471,7 +471,7 @@ export default function Activities() {
             >
               {list.map((a, idx) => {
                 const g = groupOf(a.name);
-                // Tiap kelompok huruf mulai di baris baru, supaya rel bisa melompat tepat ke sana.
+                // Start each letter group on a new row so the rail can jump to it precisely.
                 const first = !searching && (idx === 0 || groupOf(list[idx - 1].name) !== g);
                 return (
                   <button

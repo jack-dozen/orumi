@@ -9,10 +9,10 @@ import { useTheme } from "./theme";
 import "./App.css";
 import Activities from "./activities/Activities";
 
-/** Semua window memuat frontend yang sama; labelnya menentukan isinya. */
+/** All windows load the same frontend; the label determines their contents. */
 export default function App() {
   const label = getCurrentWindow().label;
-  // Window notch yang membaca wallpaper dan menghitung palet; yang lain hanya mengikuti.
+  // The notch window reads the wallpaper and calculates the palette; the others only follow.
   useTheme(label === "notch");
 
   if (label === "notch") return <Notch />;

@@ -36,7 +36,7 @@ const fmtMem = (bytes: number) =>
     ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
     : `${Math.round(bytes / 1024 ** 2)} MB`;
 
-/** Sel kalender sebulan penuh: null = kosong, angka = tanggal. */
+/** Calendar cell for a full month: null = empty, number = date. */
 function monthCells(now: Date): (number | null)[] {
   const first = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
   const total = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -251,7 +251,7 @@ export default function Notch() {
   const visible = useEdgeVisible("notch");
   const [tab, setTab] = useState<TabId>("dashboard");
 
-  // Data hanya diambil saat notch terlihat dan tab-nya memakainya.
+  // Fetch data only while the notch is visible and its tab uses it.
   const stats = useStats(visible && (tab === "dashboard" || tab === "system"));
   const media = useMedia(visible && (tab === "dashboard" || tab === "media"));
   const procs = useProcesses(visible && tab === "system");
@@ -261,15 +261,15 @@ export default function Notch() {
   const weather = useWeather(cfg?.weather_city ?? "Bandung");
   const [section, setSection] = useState<SettingsSection>("quick");
 
-  // Notch ditutup: kembalikan ke mode "tidak merebut fokus" (kalau sempat dipakai mengetik).
+  // Notch closed: return to "does not take focus" mode (if it was used for typing).
   useEffect(() => {
     if (!visible) invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
   }, [visible]);
 
-  // Window kehilangan fokus (klik ke app lain): lepas penahan "sedang mengetik".
+  // Window lost focus (clicked another app): release the "currently typing" focus hold.
   useEffect(() => {
     const onBlur = () => {
-      // Dialog warna native membuat window kehilangan fokus; jangan lepas penahan selama itu.
+      // The native color dialog makes the window lose focus; keep the focus hold during it.
       const el = document.activeElement as HTMLInputElement | null;
       if (el?.tagName === "INPUT" && el.type === "color") return;
       invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
@@ -278,7 +278,7 @@ export default function Notch() {
     return () => window.removeEventListener("blur", onBlur);
   }, []);
 
-  // Bar bisa meminta notch pindah ke tab tertentu (klik jam atau ikon WiFi).
+  // The bar can ask the notch to switch to a specific tab (clock or WiFi icon click).
   useEffect(() => {
     const unlisten = listen<string>("notch-tab", (e) => {
       const [t, sub] = e.payload.split("/");

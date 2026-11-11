@@ -5,7 +5,7 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{PostMessageW, HWND_BROADCAST, WM_SYSCOMMAND},
 };
 
-/// Supaya program yang dijalankan tidak memunculkan jendela konsol.
+/// Prevent the launched program from opening a console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const SC_MONITORPOWER: usize = 0xF170;
 
@@ -22,7 +22,7 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
 pub fn run_action(id: String) -> Result<(), String> {
     match id.as_str() {
         "lock" => run("rundll32.exe", &["user32.dll,LockWorkStation"]),
-        // Lewat .NET supaya benar-benar sleep (bukan hibernate walau hibernate aktif).
+        // Use .NET to perform an actual sleep (not hibernation, even when hibernation is enabled).
         "sleep" => run(
             "powershell",
             &[
@@ -39,7 +39,7 @@ pub fn run_action(id: String) -> Result<(), String> {
         "restart" => run("shutdown.exe", &["/r", "/t", "0"]),
         "logout" => run("shutdown.exe", &["/l"]),
         "display_off" => {
-            // Jeda sebentar: gerakan mouse saat menekan Enter bisa langsung menyalakan layar lagi.
+            // Brief delay: mouse movement while pressing Enter can immediately turn the display back on.
             thread::spawn(|| {
                 thread::sleep(Duration::from_millis(600));
                 unsafe {

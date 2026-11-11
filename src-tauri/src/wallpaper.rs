@@ -1,6 +1,6 @@
-//! Pengalih wallpaper: daftar gambar, thumbnail (cache di disk, dimuat lewat asset protocol),
-//! dan mengganti wallpaper desktop. Teknik cache + asset protocol terinspirasi proyek
-//! "carousel" (ditulis ulang, bukan disalin).
+//! Wallpaper picker: image list and thumbnails (cached on disk and loaded through the asset protocol),
+//! and desktop wallpaper changes. The cache and asset protocol approach was inspired by the
+//! "carousel" project (rewritten, not copied).
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_ITEMS: usize = 400;
-/// Gambar yang lebih besar dari ini dilewati (bisa menghabiskan memori saat didekode).
+/// Images larger than this are skipped (they may use too much memory when decoded).
 const MAX_FILE_BYTES: u64 = 80_000_000;
 const THUMB_W: u32 = 400;
 const THUMB_H: u32 = 225;
@@ -34,7 +34,7 @@ const THUMB_H: u32 = 225;
 pub struct WallpaperItem {
     name: String,
     path: String,
-    /// Path file thumbnail di disk (dimuat frontend lewat asset protocol). Kosong = belum ada.
+    /// Thumbnail file path on disk (loaded by the frontend through the asset protocol). Empty = not available.
     thumb: String,
 }
 
@@ -42,7 +42,7 @@ pub struct WallpaperItem {
 pub struct WallpaperList {
     dir: String,
     items: Vec<WallpaperItem>,
-    /// Indeks wallpaper yang sedang aktif (kalau ada di folder ini).
+    /// Index of the active wallpaper (if it is in this folder).
     start: Option<usize>,
     error: Option<String>,
 }
@@ -58,7 +58,7 @@ fn is_image(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Samakan bentuk path supaya bisa dibandingkan (awalan \\?\, garis miring, huruf besar-kecil).
+/// Normalize path format for comparison (\\?\ prefix, slash direction, case).
 fn norm(p: &str) -> String {
     p.trim_start_matches(r"\\?\").replace('/', "\\").to_lowercase()
 }
@@ -98,8 +98,8 @@ fn scan_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
 
 // ---------- Thumbnail ----------
 
-/// Lokasi thumbnail di cache. Kuncinya: path + ukuran + waktu ubah, jadi gambar
-/// yang diganti dibuat ulang otomatis.
+/// Thumbnail location in the cache. Keyed by path + size + modification time, so a changed image
+/// is automatically regenerated.
 fn thumb_target(cache_dir: &Path, path: &Path) -> Option<PathBuf> {
     let meta = fs::metadata(path).ok()?;
     if meta.len() == 0 || meta.len() > MAX_FILE_BYTES {
@@ -118,7 +118,7 @@ fn thumb_target(cache_dir: &Path, path: &Path) -> Option<PathBuf> {
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Buat thumbnail kalau belum ada. true = file thumbnail siap dipakai.
+/// Create a thumbnail if none exists. true = the thumbnail file is ready to use.
 fn ensure_thumb(path: &Path, target: &Path) -> bool {
     if fs::metadata(target).map(|m| m.len() > 0).unwrap_or(false) {
         return true;
@@ -138,13 +138,13 @@ fn ensure_thumb(path: &Path, target: &Path) -> bool {
     {
         return false;
     }
-    // Tulis lewat file sementara supaya cache tidak pernah berisi file setengah jadi.
+    // Write through a temporary file so the cache never contains an incomplete file.
     let tmp = target.with_extension(format!("{}.tmp", TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
     fs::write(&tmp, &buf).is_ok() && fs::rename(&tmp, target).is_ok()
 }
 
-/// Buat semua thumbnail yang belum ada, paralel dengan jumlah thread terbatas
-/// supaya komputer tetap responsif.
+/// Create all missing thumbnails in parallel with a limited number of threads
+/// so the computer remains responsive.
 fn make_thumbs(files: &[PathBuf], cache_dir: &Path, threads: usize) -> Vec<Option<PathBuf>> {
     let _ = fs::create_dir_all(cache_dir);
     let work = |p: &PathBuf| {
@@ -157,8 +157,8 @@ fn make_thumbs(files: &[PathBuf], cache_dir: &Path, threads: usize) -> Vec<Optio
     }
 }
 
-/// Siapkan thumbnail di latar belakang, beberapa detik setelah app jalan (dan setelah folder
-/// diganti), supaya pengalih wallpaper biasanya langsung siap saat dibuka.
+/// Prepare thumbnails in the background a few seconds after the app starts (and after the folder
+/// changes) so the wallpaper picker is usually ready as soon as it opens.
 pub fn warm(app: AppHandle) {
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(4));
@@ -172,10 +172,10 @@ pub fn warm(app: AppHandle) {
     });
 }
 
-// ---------- Daftar ----------
+// ---------- List ----------
 
-/// Daftar gambar di folder wallpaper. thumbs = false hanya menghitung (untuk status di settings)
-/// tanpa membuat thumbnail.
+/// List images in the wallpaper folder. thumbs = false only counts them (for settings status)
+/// without creating thumbnails.
 #[tauri::command]
 pub async fn list_wallpapers(thumbs: bool, app: AppHandle) -> Result<WallpaperList, String> {
     let cfg = crate::config::current(&app);
@@ -200,13 +200,13 @@ pub async fn list_wallpapers(thumbs: bool, app: AppHandle) -> Result<WallpaperLi
             _ => vec![None; files.len()],
         };
 
-        // Izinkan WebView membaca file thumbnail lewat asset protocol, satu per satu.
+        // Allow the WebView to read thumbnail files through the asset protocol, one at a time.
         let scope = scope_app.asset_protocol_scope();
         for t in thumb_paths.iter().flatten() {
             let _ = scope.allow_file(t);
         }
 
-        // Posisi awal: wallpaper aktif menurut Windows, atau terakhir yang diterapkan lewat app ini.
+        // Initial selection: wallpaper active according to Windows, or the last one applied through this app.
         let normalized: Vec<String> = files.iter().map(|p| norm(&p.to_string_lossy())).collect();
         let find = |target: &str| {
             let t = norm(target);
@@ -239,7 +239,7 @@ pub async fn list_wallpapers(thumbs: bool, app: AppHandle) -> Result<WallpaperLi
     .map_err(|e| e.to_string())
 }
 
-// ---------- Mengganti wallpaper ----------
+// ---------- Change wallpaper ----------
 
 #[tauri::command]
 pub fn set_wallpaper(path: String, app: AppHandle) -> Result<(), String> {
@@ -257,11 +257,11 @@ pub fn set_wallpaper(path: String, app: AppHandle) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     }
-    // Windows kadang melaporkan salinan internal, bukan file aslinya: simpan juga path yang
-    // kita terapkan supaya picker bisa membuka di posisi yang benar.
+    // Windows sometimes reports an internal copy instead of the original file: also save the path
+    // we applied so the picker can open at the correct position.
     crate::config::remember_wallpaper(&app, &path);
 
-    // Windows memperbarui file wallpaper secara asinkron: beri waktu sebelum warna dihitung ulang.
+    // Windows updates the wallpaper file asynchronously: wait before recalculating colors.
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(1200));
         let _ = app.emit("theme-refresh", ());
@@ -269,7 +269,7 @@ pub fn set_wallpaper(path: String, app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Mode "external": jalankan perintah pengalih wallpaper pilihan pengguna (dari config).
+/// "external" mode: run the user's chosen wallpaper-picker command (from config).
 #[tauri::command]
 pub fn run_wallpaper_command(app: AppHandle) -> Result<(), String> {
     let cmd = crate::config::current(&app).wallpaper_command;

@@ -1,9 +1,9 @@
 /* =========================================================
-   Token warna: palet Material 3 gelap (sementara).
-   Langkah berikutnya mengganti nilai ini dari wallpaper.
+   Color tokens: dark Material 3 palette (temporary).
+   The next step is to derive these values from the wallpaper.
    ========================================================= */
 
-   /* Font ikon hasil subset (scripts/make-icon-font.ps1): hanya ikon yang dipakai. */
+   /* Subset icon font (scripts/make-icon-font.ps1): only icons used by the app. */
    @font-face {
      font-family: "Material Symbols Rounded";
      font-style: normal;
@@ -47,7 +47,7 @@
   --on-error-container: #ffdad6;
 }
 
-/* ---------- Dasar ---------- */
+/* ---------- Base styles ---------- */
 
 html,
 body,
@@ -266,7 +266,7 @@ button {
   border-bottom-color: var(--primary);
 }
 
-/* ---------- Kartu ---------- */
+/* ---------- Cards ---------- */
 
 .card {
   box-sizing: border-box;
@@ -375,7 +375,7 @@ button {
   fill: var(--on-surface);
 }
 
-/* ---------- Cuaca ---------- */
+/* ---------- Weather ---------- */
 
 .weather {
   display: flex;
@@ -917,7 +917,7 @@ button {
   cursor: not-allowed;
 }
 
-/* ---------- Settings: aplikasi ---------- */
+/* ---------- Settings: apps ---------- */
 
 .settingsroot {
   height: 100%;
@@ -1093,7 +1093,7 @@ button {
   color: var(--primary);
 }
 
-/* ---------- Settings: warna ---------- */
+/* ---------- Settings: colors ---------- */
 
 .colorset {
   display: flex;
@@ -1180,7 +1180,7 @@ button {
   font-size: 12px;
 }
 
-/* ---------- Pengalih wallpaper ---------- */
+/* ---------- Wallpaper picker ---------- */
 
 .wpick {
   flex: 1;
@@ -1275,7 +1275,7 @@ button {
   text-align: center;
 }
 
-/* ---------- Pengalih wallpaper: carousel ---------- */
+/* ---------- Wallpaper picker: carousel ---------- */
 
 .cw-stage {
   position: relative;
@@ -1320,7 +1320,7 @@ button {
   user-select: none;
 }
 
-/* Lapisan di atas gambar: meredupkan slot samping, dan jadi bingkai di slot aktif. */
+/* Overlay on the image: dims side slots and frames the active slot. */
 .cw-slot::after {
   content: "";
   position: absolute;
@@ -1344,7 +1344,7 @@ button {
   box-shadow: inset 0 0 0 2px var(--primary);
 }
 
-/* ---------- Launcher: panel yang mengikuti isinya ---------- */
+/* ---------- Launcher: panel sized to its contents ---------- */
 
 .lroot {
   position: absolute;
@@ -1359,7 +1359,7 @@ button {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end; /* isi menempel di bawah selagi tinggi panel beranimasi */
+  justify-content: flex-end; /* Keep content bottom-aligned while the panel height animates. */
   background: var(--surface);
   border-radius: 28px 28px 0 0;
   overflow: hidden;
@@ -1476,7 +1476,7 @@ button {
   text-overflow: ellipsis;
 }
 
-/* ---------- Ikon aplikasi ---------- */
+/* ---------- App icons ---------- */
 
 .appimg {
   flex: none;
@@ -1484,7 +1484,7 @@ button {
   user-select: none;
 }
 
-/* Cadangan saat ikon belum ada: huruf di atas kotak berwarna. */
+/* Fallback when no icon is available: a letter on a colored tile. */
 .appimg--letter {
   display: flex;
   align-items: center;
@@ -1533,20 +1533,20 @@ button {
   opacity: 0.5;
 }
 
-/* Hasil paling relevan paling dekat dengan kotak cari. */
+/* The most relevant result is closest to the search box. */
 .launcher__list {
   flex-direction: column-reverse;
 }
 
-/* ---------- Pratinjau thumbnail ---------- */
+/* ---------- Thumbnail preview ---------- */
 
 .pvroot {
   position: absolute;
   inset: 0;
-  pointer-events: none; /* The window is larger than the card; only the card takes mouse events.*/
+  pointer-events: none; /* The window is larger than the card; only the card takes mouse events. */
 }
 
-/* Warna dan tepi kiri yang rata membuatnya terbaca sebagai perpanjangan bar. */
+/* The matching color and flush left edge make it read as an extension of the bar. */
 .pvcard {
   /* top, width and height are set inline from the Rust payload. */
   position: absolute;

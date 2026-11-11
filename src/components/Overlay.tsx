@@ -17,7 +17,7 @@ const POWER_ITEMS = [
   { id: "restart", label: "Restart", icon: "restart_alt", dangerous: true },
 ];
 
-/** Slider vertikal: seret atau klik untuk mengatur nilai 0-100. */
+/** Vertical slider: drag or click to set a value from 0 to 100. */
 function VSlider(props: {
   value: number;
   disabled?: boolean;
@@ -85,7 +85,7 @@ export default function Overlay() {
     autoTimer.current = window.setTimeout(closeOverlay, 1800);
   }, []);
 
-  // Perintah dari Rust: isi apa yang ditampilkan, dibuka manual atau popup otomatis.
+  // Command from Rust: content to display, opened manually or as an automatic popup.
   useEffect(() => {
     const unlisten = listen<{ mode: Mode; manual: boolean }>("overlay-mode", (e) => {
       window.clearTimeout(autoTimer.current);
@@ -100,7 +100,7 @@ export default function Overlay() {
     };
   }, [armAutoClose]);
 
-  // Volume berubah (tombol keyboard dsb.): perbarui slider, perpanjang popup.
+  // Volume changed (keyboard key, etc.): update the slider and extend the popup.
   useEffect(() => {
     const unlisten = listen<Vol>("volume-changed", (e) => {
       if (!draggingVol.current) setVol(e.payload);
@@ -111,7 +111,7 @@ export default function Overlay() {
     };
   }, [armAutoClose]);
 
-  // Brightness berubah (tombol Fn dsb.).
+  // Brightness changed (Fn key, etc.).
   useEffect(() => {
     const unlisten = listen<number>("brightness-changed", (e) => {
       if (!draggingBright.current) setBright(e.payload);
@@ -122,7 +122,7 @@ export default function Overlay() {
     };
   }, [armAutoClose]);
 
-  // Saat tampil, ambil nilai terkini sesuai isi yang ditampilkan.
+  // When shown, fetch the current value for the displayed content.
   useEffect(() => {
     if (!visible) return;
     if (mode === "mixer" || mode === "volume") {
@@ -137,7 +137,7 @@ export default function Overlay() {
     }
   }, [visible, mode]);
 
-  // Overlay manual menutup saat kehilangan fokus (klik di luar).
+  // A manual overlay closes when it loses focus (outside click).
   useEffect(() => {
     const onBlur = () => {
       if (manual.current && Date.now() - openedAt.current > 400) closeOverlay();
@@ -146,7 +146,7 @@ export default function Overlay() {
     return () => window.removeEventListener("blur", onBlur);
   }, []);
 
-  // Klik di area transparan window overlay (di luar pill) = klik di luar: tutup.
+  // Clicking the transparent area outside the overlay pill counts as an outside click: close.
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       if (!manual.current) return;
@@ -156,7 +156,7 @@ export default function Overlay() {
     return () => document.removeEventListener("pointerdown", onDown);
   }, []);
 
-  // Konfirmasi shutdown/restart batal sendiri setelah 3 detik atau saat overlay tertutup.
+  // Shutdown/restart confirmation cancels itself after 3 seconds or when the overlay closes.
   useEffect(() => {
     if (!armed) return;
     const id = setTimeout(() => setArmed(null), 3000);
@@ -166,7 +166,7 @@ export default function Overlay() {
     if (!visible) setArmed(null);
   }, [visible]);
 
-  // Overlay tertutup di tengah seret: jangan sisakan status "sedang diseret".
+  // If the overlay closes during a drag, clear the "being dragged" state.
   useEffect(() => {
     if (!visible) {
       draggingVol.current = false;

@@ -1,8 +1,7 @@
-//! Snapshot window terbuka + thumbnail statis (PrintWindow, diambil saat Activities dibuka).
+//! Snapshot of open windows + static thumbnails (PrintWindow, captured when Activities opens).
 //!
-//! Window yang diperkecil, tidak merespons, atau gagal ditangkap memakai thumbnail terakhir
-//! yang berhasil (cache per hwnd). Kalau belum pernah ada, `thumb` = None dan React
-//! menampilkan ikon huruf.
+//! Minimized, unresponsive, or uncapturable windows use their most recent successful thumbnail
+//! (cached per hwnd). If none exists, `thumb` = None and React shows a letter icon.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{collections::HashMap, ffi::c_void, io::Cursor, mem::size_of, sync::Mutex};
@@ -24,17 +23,17 @@ use crate::winlist::WindowEntry;
 
 const THUMB_W: u32 = 420;
 const THUMB_H: u32 = 280;
-/// Batas jumlah window yang ditangkap per pembukaan (sisanya hanya memakai cache).
+/// Maximum number of windows to capture per opening (the rest use the cache only).
 const MAX_CAPTURE: usize = 24;
 /// PW_RENDERFULLCONTENT: ikut menangkap window berbasis GPU (Chrome, Electron, UWP).
 const PW_RENDERFULLCONTENT: u32 = 2;
 
-/// Satu window untuk React: field WindowEntry (hwnd, title, exe, minimized, focused) + thumb.
+/// One window for React: WindowEntry fields (hwnd, title, exe, minimized, focused) + thumb.
 #[derive(Serialize)]
 pub struct SnapWindow {
     #[serde(flatten)]
     pub entry: WindowEntry,
-    /// JPEG base64 tanpa prefix "data:".
+    /// Base64 JPEG without the "data:" prefix.
     pub thumb: Option<String>,
 }
 
@@ -86,7 +85,7 @@ unsafe fn capture(hwnd: i64) -> Option<String> {
     let bmp = CreateCompatibleBitmap(screen, w, ht);
     let old = SelectObject(mem, bmp.into());
     let printed = PrintWindow(h, mem, PRINT_WINDOW_FLAGS(PW_RENDERFULLCONTENT)).as_bool();
-    // GetDIBits mensyaratkan bitmap tidak sedang dipilih di DC mana pun.
+    // GetDIBits requires the bitmap not to be selected into any DC.
     SelectObject(mem, old);
 
     let mut pixels = vec![0u8; (w as usize) * (ht as usize) * 4];
@@ -95,7 +94,7 @@ unsafe fn capture(hwnd: i64) -> Option<String> {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: size_of::<BITMAPINFOHEADER>() as u32,
                 biWidth: w,
-                biHeight: -ht, // negatif = baris dari atas ke bawah
+                biHeight: -ht, // negative = rows run from top to bottom
                 biPlanes: 1,
                 biBitCount: 32,
                 biCompression: 0, // BI_RGB
@@ -123,7 +122,7 @@ unsafe fn capture(hwnd: i64) -> Option<String> {
         return None;
     }
 
-    // BGRA -> RGBA, alpha dipaksa buram. Hasil hitam total = gagal (cloaked/terproteksi).
+    // BGRA -> RGBA, force alpha to opaque. A fully black result means failure (cloaked/protected).
     let mut any = false;
     for px in pixels.chunks_exact_mut(4) {
         px.swap(0, 2);

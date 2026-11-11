@@ -10,7 +10,7 @@ export type WifiStatus = {
   location_denied: boolean;
 };
 
-/** Status WiFi: diperbarui tiap 4 detik dan langsung saat Windows melaporkan perubahan. */
+/** WiFi status: updated every 4 seconds and immediately when Windows reports a change. */
 export function useWifi(active: boolean): WifiStatus | null {
   const [wifi, setWifi] = useState<WifiStatus | null>(null);
 
@@ -23,7 +23,7 @@ export function useWifi(active: boolean): WifiStatus | null {
         const s = await invoke<WifiStatus>("get_wifi");
         if (!cancelled) setWifi(s);
       } catch {
-        /* coba lagi nanti */
+        /* try again later */
       }
     };
 

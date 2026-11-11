@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 /**
- * True saat panel dengan label ini sedang ditampilkan oleh Rust.
+ * True while the panel with this label is being shown by Rust.
  *
- * Saat berubah menjadi true, kita menunggu dua frame sungguhan dulu sebelum mengubah
- * tampilan. Tanpa ini, pada pembukaan pertama WebView2 bisa baru menggambar frame
- * setelah animasi selesai, sehingga panel terlihat "loncat" tanpa meluncur.
- * Kalau tidak ada frame dalam 500 ms (WebView sedang tidak menggambar), tetap ditampilkan.
+ * When it becomes true, wait for two actual frames before changing the display.
+ * Otherwise, on the first opening WebView2 may not draw a frame until after the
+ * animation finishes, making the panel appear to "jump" instead of sliding in.
+ * If no frame arrives within 500 ms (WebView is not drawing), show it anyway.
  */
 export function useEdgeVisible(label: string): boolean {
   const [requested, setRequested] = useState(false);

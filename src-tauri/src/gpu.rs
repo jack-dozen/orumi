@@ -21,13 +21,13 @@ const PDH_SUCCESS: u32 = 0;
 struct Probe {
     query: PDH_HQUERY,
     counter: PDH_HCOUNTER,
-    /// Buffer dalam satuan u64 supaya alignment-nya cukup untuk struct PDH.
+    /// Buffer in u64 units so its alignment is sufficient for the PDH struct.
     buffer: Vec<u64>,
     last_collect: Option<Instant>,
 }
 
-// Handle PDH berupa pointer mentah sehingga tidak otomatis Send. Aman di sini karena
-// Probe hanya diakses lewat Mutex, jadi tidak pernah dipakai dua thread sekaligus.
+// The PDH handle is a raw pointer, so it is not automatically Send. It is safe here because
+// the probe is accessed only through a Mutex and is never used by two threads at once.
 unsafe impl Send for Probe {}
 
 impl Probe {
@@ -55,10 +55,10 @@ impl Probe {
         })
     }
 
-    /// Pemakaian GPU (0-100) dari adapter yang paling sibuk.
+    /// GPU usage (0-100) from the busiest adapter.
     unsafe fn read(&mut self) -> Option<f64> {
-        // Persen butuh dua sampel. Kalau pembacaan terakhir sudah lama,
-        // ambil sampel baru dulu supaya selisihnya tidak mencakup jeda yang panjang.
+        // A percentage requires two samples. If the last reading is old,
+        // take a fresh sample first so the difference does not include a long gap.
         let stale = self
             .last_collect
             .map_or(true, |t| t.elapsed() > Duration::from_secs(3));
@@ -74,7 +74,7 @@ impl Probe {
         }
         self.last_collect = Some(Instant::now());
 
-        // Panggilan pertama hanya untuk mengetahui ukuran buffer.
+        // The first call only determines the buffer size.
         let mut bytes: u32 = 0;
         let mut count: u32 = 0;
         let sized = PdhGetFormattedCounterArrayW(
@@ -107,16 +107,16 @@ impl Probe {
             count as usize,
         );
 
-        // (adapter, jenis engine) -> jumlah pemakaian seluruh proses
+        // (adapter, engine type) -> total usage across all processes
         let mut sums: HashMap<(String, String), f64> = HashMap::new();
         for item in items {
             let status = item.FmtValue.CStatus;
             if status != 0 && status != 1 {
-                continue; // 0 = data valid, 1 = data baru
+                continue; // 0 = valid data, 1 = new data
             }
             let Ok(name) = item.szName.to_string() else { continue };
 
-            // Contoh nama: pid_1234_luid_0x00000000_0x0000ABCD_phys_0_eng_0_engtype_3D
+            // Example name: pid_1234_luid_0x00000000_0x0000ABCD_phys_0_eng_0_engtype_3D
             let luid = name
                 .split("_luid_")
                 .nth(1)
@@ -151,7 +151,7 @@ impl GpuState {
     }
 }
 
-/// None = counter GPU tidak tersedia di PC ini.
+/// None = the GPU counter is unavailable on this PC.
 #[tauri::command]
 pub async fn get_gpu(state: State<'_, GpuState>) -> Result<Option<f64>, String> {
     let shared = state.0.clone();

@@ -1,7 +1,7 @@
-# Membuat font ikon Material Symbols Rounded yang hanya berisi ikon yang dipakai app.
-# Jalankan dari folder project:
+# Build a Material Symbols Rounded icon font containing only the icons used by the app.
+# Run from the project folder:
 #   powershell -ExecutionPolicy Bypass -File scripts\make-icon-font.ps1
-# Setiap kali menambah ikon baru di kode, tambahkan namanya ke daftar di bawah lalu jalankan ulang.
+# Whenever you add an icon in the code, add its name to the list below and rerun this script.
 
 $icons = @(
   "apps", "battery_1_bar", "battery_2_bar", "battery_3_bar", "battery_4_bar",
@@ -15,7 +15,7 @@ $icons = @(
   "chevron_right"
 )
 
-# Google mewajibkan daftar nama terurut abjad.
+# Google requires the names to be sorted alphabetically.
 $sorted = [string[]]($icons | Select-Object -Unique)
 [Array]::Sort($sorted, [StringComparer]::Ordinal)
 $names = $sorted -join ","
