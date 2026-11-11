@@ -9,7 +9,7 @@ use std::{
     io::Cursor,
     mem::size_of,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{atomic::{AtomicU64, Ordering}, Mutex},
     thread,
     time::Duration,
 };
@@ -26,7 +26,7 @@ use windows::Win32::{
             RGBQUAD,
         },
     },
-    UI::WindowsAndMessaging::{GetWindowRect, IsIconic, IsWindow},
+    UI::WindowsAndMessaging::{GetWindowRect, IsHungAppWindow, IsIconic, IsWindow},
 };
 
 use crate::edge::Panels;
@@ -52,6 +52,12 @@ const CAP_H: u32 = 248;
 
 static GEN: AtomicU64 = AtomicU64::new(0);
 static SEQ: AtomicU64 = AtomicU64::new(0);
+/// Bumped by every preview_open; lets a slow background refresh detect that it was superseded.
+static OPEN_SEQ: AtomicU64 = AtomicU64::new(0);
+/// A thumbnail younger than this is reused instead of capturing the window again.
+const CACHE_TTL: Duration = Duration::from_millis(1500);
+/// Last window rect sent to the preview window (x, y, w, h), to skip redundant moves.
+static LAST_WIN: Mutex<Option<[i64; 4]>> = Mutex::new(None);
 
 #[derive(Deserialize)]
 pub struct PreviewReq {
@@ -67,6 +73,23 @@ struct PreviewItem {
     icon: Option<String>,
     thumb: Option<String>,
     minimized: bool,
+}
+
+/// Event payload for the preview window.
+#[derive(Serialize, Clone)]
+struct PreviewPayload {
+    items: Vec<PreviewItem>,
+    /// Card geometry inside the preview window, in CSS px.
+    top: f64,
+    width: f64,
+    height: f64,
+}
+
+/// Where the card sits inside the preview window (CSS px).
+struct CardGeom {
+    top: f64,
+    width: f64,
+    height: f64,
 }
 
 fn cache_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -195,18 +218,47 @@ unsafe fn capture_jpeg(hwnd_raw: i64) -> Option<Vec<u8>> {
     result
 }
 
+/// Items built only from what is already on disk (last thumbnail, if any). No capture, so the
+/// card can appear immediately.
+fn cached_items(dir: &Path, reqs: &[PreviewReq]) -> Vec<PreviewItem> {
+    reqs.iter()
+        .map(|r| PreviewItem {
+            hwnd: r.hwnd,
+            title: r.title.clone(),
+            icon: r.icon.clone(),
+            thumb: files_for(dir, r.hwnd)
+                .pop()
+                .map(|p| p.to_string_lossy().into_owned()),
+            minimized: unsafe { IsIconic(HWND(r.hwnd as isize as *mut c_void)).as_bool() },
+        })
+        .collect()
+}
+
+/// Captures fresh thumbnails (in parallel). Windows whose last thumbnail is younger than
+/// CACHE_TTL, minimized windows, and hung windows are not captured.
 fn build_items(dir: &Path, reqs: Vec<PreviewReq>) -> Vec<PreviewItem> {
+    use rayon::prelude::*;
+
     let _ = fs::create_dir_all(dir);
-    reqs.into_iter()
+    reqs.into_par_iter()
         .map(|r| {
-            let minimized =
-                unsafe { IsIconic(HWND(r.hwnd as isize as *mut c_void)).as_bool() };
+            let hwnd = HWND(r.hwnd as isize as *mut c_void);
+            let minimized = unsafe { IsIconic(hwnd).as_bool() };
+
+            let cached = files_for(dir, r.hwnd).pop();
+            let fresh = cached.as_ref().is_some_and(|p| {
+                fs::metadata(p)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age < CACHE_TTL)
+            });
 
             let mut thumb: Option<PathBuf> = None;
-            if !minimized {
+            if !minimized && !fresh && !unsafe { IsHungAppWindow(hwnd).as_bool() } {
                 if let Some(jpg) = unsafe { capture_jpeg(r.hwnd) } {
                     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-                    // Nama file berubah tiap tangkapan: cara paling andal menembus cache gambar.
+                    // The file name changes on every capture: the most reliable way to bypass image caching.
                     let file = dir.join(format!("{}_{:010}.jpg", r.hwnd, seq));
                     if fs::write(&file, jpg).is_ok() {
                         for old in files_for(dir, r.hwnd) {
@@ -218,9 +270,9 @@ fn build_items(dir: &Path, reqs: Vec<PreviewReq>) -> Vec<PreviewItem> {
                     }
                 }
             }
-            // Diperkecil atau gagal: pakai tangkapan terakhir kalau pernah ada.
+            // Minimized, fresh enough, hung or failed: use the last capture if there is one.
             if thumb.is_none() {
-                thumb = files_for(dir, r.hwnd).pop();
+                thumb = cached;
             }
 
             PreviewItem {
@@ -240,29 +292,69 @@ fn card_size(n: usize) -> (f64, f64) {
     (2.0 * PV_PAD + n * PV_W + (n - 1.0) * PV_GAP, 2.0 * PV_PAD + PV_H + PV_TITLE)
 }
 
-/// Taruh window pratinjau menempel di kanan bar, sejajar ikon yang di-hover.
-fn position(app: &AppHandle, n: usize, anchor_y: f64) {
-    let Some(bar) = app.get_webview_window("bar") else { return };
-    let (Ok(pos), Ok(size), Ok(scale)) =
-        (bar.outer_position(), bar.outer_size(), bar.scale_factor())
-    else {
-        return;
-    };
+/// Keeps the preview window fixed (right of the bar, as tall as the bar, wide enough for
+/// MAX_ITEMS cards) and returns where the card should sit inside it. The card is moved with CSS
+/// so it can animate between icons; edge.rs only needs the card rectangle as its hit area.
+fn position(app: &AppHandle, n: usize, anchor_y: f64) -> Option<CardGeom> {
+    let bar = app.get_webview_window("bar")?;
+    let pos = bar.outer_position().ok()?;
+    let size = bar.outer_size().ok()?;
+    let scale = bar.scale_factor().ok()?;
     let u = scale * crate::edge::ui_scale();
-    let (w_css, h_css) = card_size(n);
-    let (w, h) = (w_css * u, h_css * u);
 
-    let x = pos.x as f64 + size.width as f64;
-    let mut y = pos.y as f64 + anchor_y * u - h / 2.0;
-    if let Ok(Some(m)) = bar.primary_monitor() {
-        let top = m.position().y as f64;
-        let bottom = top + m.size().height as f64;
-        y = y.clamp(top + 8.0 * u, (bottom - h - 8.0 * u).max(top));
+    let (card_w, card_h) = card_size(n);
+    let (max_w, _) = card_size(MAX_ITEMS);
+    let win_x = pos.x as f64 + size.width as f64;
+    let win_y = pos.y as f64;
+    let win_w = max_w * u;
+    let win_h = size.height as f64;
+
+    let win_h_css = win_h / u;
+    let top = (anchor_y - card_h / 2.0).clamp(8.0, (win_h_css - card_h - 8.0).max(8.0));
+
+    crate::edge::set_hit_rect("preview", Some((win_x, win_y + top * u, card_w * u, card_h * u)));
+
+    // Only move or resize the window when it actually changed.
+    let rect = [
+        win_x.round() as i64,
+        win_y.round() as i64,
+        win_w.round() as i64,
+        win_h.round() as i64,
+    ];
+    let changed = LAST_WIN
+        .lock()
+        .map(|mut l| {
+            let c = *l != Some(rect);
+            *l = Some(rect);
+            c
+        })
+        .unwrap_or(true);
+    if changed {
+        crate::edge::set_free_rect("preview", Some((win_x, win_y, win_w, win_h)));
+        let a = app.clone();
+        let _ = app.run_on_main_thread(move || crate::place_panel(&a, "preview"));
     }
 
-    crate::edge::set_free_rect("preview", Some((x, y, w, h)));
-    let a = app.clone();
-    let _ = app.run_on_main_thread(move || crate::place_panel(&a, "preview"));
+    Some(CardGeom { top, width: card_w, height: card_h })
+}
+
+/// Grants asset access to the thumbnails, positions the card, and sends the payload to the UI.
+fn emit_items(app: &AppHandle, items: Vec<PreviewItem>, anchor_y: f64) -> Option<()> {
+    let scope = app.asset_protocol_scope();
+    for it in &items {
+        if let Some(t) = &it.thumb {
+            let _ = scope.allow_file(t);
+        }
+    }
+    let geom = position(app, items.len(), anchor_y)?;
+    let payload = PreviewPayload {
+        items,
+        top: geom.top,
+        width: geom.width,
+        height: geom.height,
+    };
+    let _ = app.emit_to("preview", "preview-data", &payload);
+    Some(())
 }
 
 fn close_now(app: &AppHandle) {
@@ -270,38 +362,49 @@ fn close_now(app: &AppHandle) {
     app.state::<Panels>().set("preview", false);
 }
 
-/// Dipanggil bar setelah kursor diam di sebuah ikon app.
+/// Called by the bar after the cursor rests on an app icon.
+/// Cache-first: the card appears right away with the last known thumbnails, then fresh
+/// thumbnails are captured in the background and swapped in (the UI preloads them).
 #[tauri::command]
 pub async fn preview_open(
     items: Vec<PreviewReq>,
     anchor_y: f64,
     app: AppHandle,
 ) -> Result<(), String> {
-    let generation = GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    // Cancels a pending preview_close_soon.
+    GEN.fetch_add(1, Ordering::SeqCst);
+    let open_seq = OPEN_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     let reqs: Vec<PreviewReq> = items.into_iter().take(MAX_ITEMS).collect();
     if reqs.is_empty() {
         return Ok(());
     }
     let Some(dir) = cache_dir(&app) else { return Ok(()) };
+    let _ = fs::create_dir_all(&dir);
 
-    let built = tauri::async_runtime::spawn_blocking(move || build_items(&dir, reqs))
+    // 1. Show now, using only what is already on disk.
+    let first = cached_items(&dir, &reqs);
+    if emit_items(&app, first.clone(), anchor_y).is_none() {
+        return Ok(());
+    }
+    app.state::<Panels>().set_transient("preview");
+
+    // 2. Capture in the background.
+    let dir_bg = dir.clone();
+    let built = tauri::async_runtime::spawn_blocking(move || build_items(&dir_bg, reqs))
         .await
         .map_err(|e| e.to_string())?;
 
-    // Kursor sudah pindah atau menjauh selagi menangkap: batalkan.
-    if GEN.load(Ordering::SeqCst) != generation {
+    // Superseded by a newer preview_open, or closed in the meantime: drop the result.
+    if OPEN_SEQ.load(Ordering::SeqCst) != open_seq || !app.state::<Panels>().is_open("preview") {
         return Ok(());
     }
-
-    let scope = app.asset_protocol_scope();
-    for it in &built {
-        if let Some(t) = &it.thumb {
-            let _ = scope.allow_file(t);
-        }
+    let changed = built
+        .iter()
+        .zip(&first)
+        .any(|(a, b)| a.thumb != b.thumb || a.minimized != b.minimized);
+    if changed {
+        let _ = emit_items(&app, built, anchor_y);
     }
-    position(&app, built.len(), anchor_y);
-    let _ = app.emit_to("preview", "preview-data", &built);
-    app.state::<Panels>().set_transient("preview");
     Ok(())
 }
 

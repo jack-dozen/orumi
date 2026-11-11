@@ -136,6 +136,26 @@ pub fn set_free_rect(label: &'static str, rect: Option<(f64, f64, f64, f64)>) {
     }
 }
 
+/// Logical hit area (physical px: x, y, w, h) of a free window, for windows that are larger than
+/// what they show (the preview window is bigger than its card so the card can move inside it).
+static HIT_RECT: Mutex<Vec<(&'static str, (f64, f64, f64, f64))>> = Mutex::new(Vec::new());
+
+fn hit_rect(label: &str) -> Option<(f64, f64, f64, f64)> {
+    HIT_RECT
+        .lock()
+        .ok()
+        .and_then(|l| l.iter().find(|(k, _)| *k == label).map(|(_, r)| *r))
+}
+
+pub fn set_hit_rect(label: &'static str, rect: Option<(f64, f64, f64, f64)>) {
+    if let Ok(mut l) = HIT_RECT.lock() {
+        l.retain(|(k, _)| *k != label);
+        if let Some(r) = rect {
+            l.push((label, r));
+        }
+    }
+}
+
 /// Launcher berganti tampilan: "wallpaper" melebar, selain itu kembali ke ukuran biasa.
 #[tauri::command]
 pub fn launcher_view(view: String, app: AppHandle) {
@@ -435,7 +455,8 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             let over_preview = panels
                 .iter()
                 .any(|q| q.spec.label == "preview" && q.visible)
-                && free_rect("preview")
+                && hit_rect("preview")
+                    .or_else(|| free_rect("preview"))
                     .map(|(x, y, w, h)| Rect { x, y, w, h }.contains(cursor.x, cursor.y))
                     .unwrap_or(false);
 
@@ -461,7 +482,11 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     }
                     if flag_has(&TRANSIENT, p.spec.label) && !flag_has(&HELD, p.spec.label) {
                         let (win_rect, _) = layout(&p.spec, m);
-                        if win_rect.contains(cursor.x, cursor.y) {
+                        // A free window may have a smaller logical hit area than the window itself.
+                        let hit = hit_rect(p.spec.label)
+                            .map(|(x, y, w, h)| Rect { x, y, w, h })
+                            .unwrap_or(win_rect);
+                        if hit.contains(cursor.x, cursor.y) {
                             p.pin_entered = true;
                             p.outside_since = None;
                         } else {
