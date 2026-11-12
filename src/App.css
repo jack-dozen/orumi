@@ -1398,6 +1398,8 @@ button {
   box-sizing: border-box;
   max-width: 100%;
   max-height: 100%;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   scrollbar-width: none;
   background: var(--surface);
@@ -1405,6 +1407,8 @@ button {
 
   transform: translateY(100%);
   transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Own compositor layer: the slide-in runs without main-thread work. */
+  will-change: transform;
 }
 
 .swpanel::-webkit-scrollbar {
@@ -1413,6 +1417,30 @@ button {
 
 .swpanel--visible {
   transform: translateY(0);
+}
+
+/* Animation variants (see SWITCHER_ANIM in Switcher.tsx). */
+.swpanel--fade {
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 110ms linear;
+}
+
+.swpanel--fade.swpanel--visible {
+  opacity: 1;
+  transform: none;
+}
+
+.swpanel--none {
+  opacity: 0;
+  transform: none;
+  transition: none;
+}
+
+.swpanel--none.swpanel--visible {
+  opacity: 1;
 }
 
 /* Columns, row height, gap and padding are set inline from the Rust layout. */

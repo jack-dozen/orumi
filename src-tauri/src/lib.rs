@@ -145,6 +145,9 @@ pub fn run() {
             activities::ws_switch,
             activities::ws_move_window,
             altswitch::switcher_pick,
+            altswitch::switcher_set_previews,
+            altswitch::switcher_get_previews,
+            altswitch::dev_log,
             tray_flyout::tray_toggle,
             icons::app_icon,
             previews::preview_open,
@@ -215,9 +218,10 @@ pub fn run() {
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
             wallpaper::warm(app.handle().clone());
+            activities::init(app.handle())?;
+            // Install the swallowing Alt+Tab hook last so it is first in the low-level hook chain.
             altswitch::set_enabled(cfg.alt_tab);
             altswitch::start(app.handle().clone());
-            activities::init(app.handle())?;
 
             // --- Global hotkeys (from config) ---
             config::init_hotkeys(app.handle(), &cfg.hotkeys)?;

@@ -119,6 +119,8 @@ export default function AppSettings() {
   const [note, setNote] = useState("");
   const [ok, setOk] = useState("");
   const [resetKey, setResetKey] = useState(0); // force the hotkey field to reload the saved value
+  const [previews, setPreviews] = useState(true);
+  const [previewModePending, setPreviewModePending] = useState(false);
 
   // The local fields follow the saved config.
   useEffect(() => {
@@ -126,6 +128,20 @@ export default function AppSettings() {
     setScale(Math.round(cfg.ui_scale * 100));
     setCity(cfg.weather_city);
   }, [cfg]);
+
+  useEffect(() => {
+    let active = true;
+    invoke<boolean>("switcher_get_previews")
+      .then((enabled) => {
+        if (active) setPreviews(enabled);
+      })
+      .catch((error) => {
+        if (active) setNote(`Gagal membaca mode pratinjau Alt+Tab: ${String(error)}`);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (!cfg) return <div className="card card--placeholder card--fill">memuat…</div>;
 
@@ -146,6 +162,19 @@ export default function AppSettings() {
   const setHotkey = (which: keyof Config["hotkeys"]) => async (v: string) => {
     const warnings = await save({ hotkeys: { ...cfg.hotkeys, [which]: v } });
     if (warnings.length === 0) setOk(`Hotkey ${v} terdaftar di Windows.`);
+  };
+
+  const setPreviewMode = async (enabled: boolean) => {
+    setPreviewModePending(true);
+    setNote("");
+    try {
+      await invoke("switcher_set_previews", { enabled });
+      setPreviews(enabled);
+    } catch (error) {
+      setNote(`Gagal mengubah mode pratinjau Alt+Tab: ${String(error)}`);
+    } finally {
+      setPreviewModePending(false);
+    }
   };
 
   return (
@@ -196,6 +225,28 @@ export default function AppSettings() {
               onClick={() => save({ alt_tab: false })}
             >
               Bawaan Windows
+            </button>
+          </div>
+        </Row>
+        <Row label="Tampilan Alt+Tab">
+          <div className="segmented segmented--small">
+            <button
+              type="button"
+              className={previews ? "segmented__on" : ""}
+              aria-pressed={previews}
+              disabled={previewModePending}
+              onClick={() => setPreviewMode(true)}
+            >
+              Pratinjau
+            </button>
+            <button
+              type="button"
+              className={!previews ? "segmented__on" : ""}
+              aria-pressed={!previews}
+              disabled={previewModePending}
+              onClick={() => setPreviewMode(false)}
+            >
+              Ikon saja
             </button>
           </div>
         </Row>
