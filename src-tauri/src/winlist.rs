@@ -1,5 +1,5 @@
-//! Daftar window aplikasi dan pemantauan perubahannya.
-//! Aturan filter dan pola SetWinEventHook diadaptasi dari Bloom (GPL-3.0): services.rs.
+//! App window list and change monitoring.
+//! The filtering rules and SetWinEventHook pattern are adapted from Bloom (GPL-3.0): services.rs.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -27,7 +27,7 @@ use windows::{
             WindowsAndMessaging::{
                 DispatchMessageW, EnumWindows, GetClassNameW, GetForegroundWindow, GetMessageW,
                 GetWindow, GetWindowLongW, GetWindowTextLengthW, GetWindowTextW,
-                GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow,
+                GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SwitchToThisWindow,
                 ShowWindow, TranslateMessage, GWL_EXSTYLE, GW_OWNER, MSG, SW_MINIMIZE,
                 SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
             },
@@ -35,19 +35,36 @@ use windows::{
     },
 };
 
+use windows::{
+    core::GUID,
+    Win32::{
+        Foundation::PROPERTYKEY,
+        System::Com::{
+            CoInitializeEx, CoTaskMemFree, CoUninitialize,
+            StructuredStorage::{PropVariantClear, PropVariantToStringAlloc},
+            COINIT_MULTITHREADED,
+        },
+        UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow},
+    },
+};
+
 #[derive(Serialize)]
 pub struct WindowEntry {
-    hwnd: i64,
-    title: String,
-    /// Nama program tanpa .exe. Kosong untuk app Store (dibungkus ApplicationFrameHost).
-    exe: String,
-    minimized: bool,
-    /// Window ini sedang di depan (foreground).
-    focused: bool,
+    pub hwnd: i64,
+    pub title: String,
+    /// Program name without .exe. Empty for Store apps (wrapped by ApplicationFrameHost).
+    pub exe: String,
+    pub minimized: bool,
+    /// This window is in the foreground.
+    pub focused: bool,
+    /// Full program path (empty for Store apps). Used to fetch the icon.
+    pub path: String,
+    /// AppUserModelID, only for Store apps. Used to fetch the icon.
+    pub aumid: String,
 }
 
-/// Nama file program (misalnya "chrome.exe"), atau kosong kalau tidak bisa dibaca.
-unsafe fn process_file_name(pid: u32) -> String {
+/// Full program path (e.g. C:\...\chrome.exe), or empty if it cannot be read.
+unsafe fn process_path(pid: u32) -> String {
     let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
         return String::new();
     };
@@ -64,11 +81,40 @@ unsafe fn process_file_name(pid: u32) -> String {
     if !ok {
         return String::new();
     }
-    let path = String::from_utf16_lossy(&buf[..len as usize]);
-    Path::new(&path)
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default()
+    String::from_utf16_lossy(&buf[..len as usize])
+}
+
+/// Window AppUserModelID (the identity used by the taskbar). For Store apps, this is the only way
+/// to get the icon because the window is owned by ApplicationFrameHost.
+unsafe fn window_aumid_inner(hwnd: HWND) -> Option<String> {
+    // System.AppUserModel.ID = {9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5
+    let key = PROPERTYKEY {
+        fmtid: GUID {
+            data1: 0x9F4C2855,
+            data2: 0x9F79,
+            data3: 0x4B39,
+            data4: [0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3],
+        },
+        pid: 5,
+    };
+    let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd).ok()?;
+    let mut prop = store.GetValue(&key).ok()?;
+    let text = PropVariantToStringAlloc(&prop).ok().map(|pwstr| {
+        let value = String::from_utf16_lossy(pwstr.as_wide()).trim().to_string();
+        CoTaskMemFree(Some(pwstr.0 as _));
+        value
+    });
+    let _ = PropVariantClear(&mut prop);
+    text.filter(|s| !s.is_empty())
+}
+
+unsafe fn window_aumid(hwnd: HWND) -> Option<String> {
+    let com = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+    let result = window_aumid_inner(hwnd);
+    if com {
+        CoUninitialize();
+    }
+    result
 }
 
 unsafe fn class_name(hwnd: HWND) -> String {
@@ -77,21 +123,21 @@ unsafe fn class_name(hwnd: HWND) -> String {
     String::from_utf16_lossy(&buf[..n.max(0) as usize])
 }
 
-/// Window lain yang terlihat di layar memilikinya (dialog "Save As", "Find", dst).
+/// Other visible windows own it (e.g. "Save As" or "Find" dialogs).
 unsafe fn has_visible_owner(hwnd: HWND) -> bool {
     GetWindow(hwnd, GW_OWNER)
         .map(|o| !o.0.is_null() && IsWindowVisible(o).as_bool())
         .unwrap_or(false)
 }
 
-/// Kembalikan entri kalau ini window yang layak tampil di daftar "alt-tab".
+/// Return an entry if this window belongs in the "alt-tab" list.
 unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEntry> {
     if !IsWindowVisible(hwnd).as_bool() {
         return None;
     }
 
-    // Window yang di-"cloak": desktop virtual lain dan app Store yang ditangguhkan.
-    // IsWindowVisible tetap true untuk mereka, jadi cek DWM diperlukan.
+    // Cloaked windows: other virtual desktops and suspended Store apps.
+    // IsWindowVisible remains true for them, so a DWM check is required.
     let mut cloaked: u32 = 0;
     let _ = DwmGetWindowAttribute(
         hwnd,
@@ -107,7 +153,7 @@ unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEnt
     if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
         return None;
     }
-    // Dialog milik window lain tidak dihitung sendiri, kecuali ia meminta tombol taskbar.
+    // A dialog owned by another window is not counted separately unless it requests a taskbar button.
     if ex_style & WS_EX_APPWINDOW.0 == 0 && has_visible_owner(hwnd) {
         return None;
     }
@@ -126,7 +172,7 @@ unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEnt
         return None;
     }
 
-    // Window kita sendiri (bar, notch, launcher, overlay).
+    // Our own windows (bar, notch, launcher, overlay).
     let mut pid: u32 = 0;
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
     if pid == my_pid {
@@ -134,12 +180,16 @@ unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEnt
     }
 
     let class = class_name(hwnd);
-    // Jendela inti app Store; yang dipakai pengguna adalah ApplicationFrameWindow-nya.
+    // Core Store app window; users interact with its ApplicationFrameWindow.
     if class == "Windows.UI.Core.CoreWindow" {
         return None;
     }
 
-    let file = process_file_name(pid);
+    let path = process_path(pid);
+    let file = Path::new(&path)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let lower = file.to_lowercase();
     let is_explorer_window = class == "CabinetWClass" || class == "ExploreWClass";
 
@@ -163,12 +213,19 @@ unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEnt
             .unwrap_or_default()
     };
 
+    let is_store_frame = exe.is_empty();
     Some(WindowEntry {
         hwnd: hwnd.0 as isize as i64,
         title,
-        exe,
         minimized: IsIconic(hwnd).as_bool(),
         focused: hwnd == foreground,
+        aumid: if is_store_frame {
+            window_aumid(hwnd).unwrap_or_default()
+        } else {
+            String::new()
+        },
+        path: if is_store_frame { String::new() } else { path },
+        exe,
     })
 }
 
@@ -186,22 +243,37 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     true.into()
 }
 
-/// Daftar window terbuka, urut dari yang paling atas di layar.
+/// Open windows, ordered from front to back. Synchronous; also used by Alt+Tab.
+pub fn collect_windows() -> Vec<WindowEntry> {
+    let mut ctx = Ctx {
+        list: Vec::new(),
+        my_pid: std::process::id(),
+        foreground: unsafe { GetForegroundWindow() },
+    };
+    unsafe {
+        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut Ctx as isize));
+    }
+    ctx.list
+}
+
 #[tauri::command]
 pub async fn list_windows() -> Result<Vec<WindowEntry>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let mut ctx = Ctx {
-            list: Vec::new(),
-            my_pid: std::process::id(),
-            foreground: unsafe { GetForegroundWindow() },
-        };
-        unsafe {
-            let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut Ctx as isize));
+    tauri::async_runtime::spawn_blocking(collect_windows)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Switch to a window like native Alt+Tab: restore it if minimized, then bring it to the foreground.
+/// Windows itself uses SwitchToThisWindow for Alt+Tab, and it is not blocked by focus rules
+/// (SetForegroundWindow is rejected if our process is not active).
+pub fn activate_window(hwnd: i64) {
+    unsafe {
+        let h = to_hwnd(hwnd);
+        if IsIconic(h).as_bool() {
+            let _ = ShowWindow(h, SW_RESTORE);
         }
-        ctx.list
-    })
-    .await
-    .map_err(|e| e.to_string())
+        SwitchToThisWindow(h, true);
+    }
 }
 
 fn to_hwnd(hwnd: i64) -> HWND {
@@ -229,11 +301,11 @@ pub fn minimize_window(hwnd: i64) {
     }
 }
 
-// ---------- Pemantauan perubahan ----------
+// ---------- Change monitoring ----------
 
 static EVENT_TX: OnceLock<mpsc::Sender<()>> = OnceLock::new();
 
-/// Callback harus secepat mungkin: hanya memberi tanda ke thread pekerja.
+/// The callback must be as fast as possible: only notify the worker thread.
 unsafe extern "system" fn on_event(
     _hook: HWINEVENTHOOK,
     _event: u32,
@@ -243,7 +315,7 @@ unsafe extern "system" fn on_event(
     _event_thread: u32,
     _event_time: u32,
 ) {
-    // Kontrol anak (tombol, slider) juga melaporkan event; yang kita mau hanya window induk.
+    // Child controls (buttons, sliders) also report events; we only want the parent window.
     if hwnd.0.is_null() || id_object != 0 || id_child != 0 {
         return;
     }
@@ -252,12 +324,12 @@ unsafe extern "system" fn on_event(
     }
 }
 
-/// Memancarkan event "windows-changed" saat daftar window mungkin berubah.
+/// Emit a "windows-changed" event when the window list may have changed.
 pub fn start_events(app: AppHandle) {
     let (tx, rx) = mpsc::channel::<()>();
     let _ = EVENT_TX.set(tx);
 
-    // Gabungkan rentetan event menjadi satu pemberitahuan.
+    // Coalesce a stream of events into one notification.
     thread::spawn(move || {
         while rx.recv().is_ok() {
             let start = Instant::now();
@@ -268,7 +340,7 @@ pub fn start_events(app: AppHandle) {
         }
     });
 
-    // Hook WinEvent butuh thread dengan message loop.
+    // The WinEvent hook requires a thread with a message loop.
     thread::spawn(|| unsafe {
         const EVENTS: [u32; 8] = [
             0x0003, // EVENT_SYSTEM_FOREGROUND

@@ -1,0 +1,511 @@
+/* Activities: all styles in this file use the .act prefix and existing theme tokens. */
+
+/* A panel from the bottom edge, shaped and animated like .launcher: the window is only as large
+   as the panel (the surrounding desktop is not dimmed); the panel rises from the bottom when opened. */
+.act {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  user-select: none;
+  color: var(--on-surface);
+  background: var(--surface);
+  border-radius: 28px 28px 0 0;
+  transform: translateY(100%);
+  pointer-events: none;
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.act--visible {
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* ---------- Workspace strip (top) ---------- */
+
+.act__top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 28px 32px 0;
+  display: flex;
+  justify-content: center;
+  transition:
+    transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.24s ease;
+}
+
+.act--apps .act__top {
+  transform: translateY(-120%);
+  opacity: 0;
+}
+
+.act__strip {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.act-ws {
+  position: relative;
+  width: 196px;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: var(--surface-container);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    outline-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.act-ws:hover {
+  background: var(--surface-container-high);
+}
+
+.act-ws--active {
+  outline-color: var(--primary);
+}
+
+.act-ws--drop {
+  outline-color: var(--tertiary, var(--primary));
+  background: var(--surface-container-high);
+}
+
+.act-ws__preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr;
+  gap: 4px;
+  height: 108px;
+  padding: 8px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.act-ws__preview img,
+.act-ws__blank {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: 6px;
+  object-fit: cover;
+  object-position: top left;
+}
+
+.act-ws__blank {
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  font-weight: 600;
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.act-ws__name {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+}
+
+.act-ws--active .act-ws__name {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.act-ws__count {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+/* ---------- Stage ---------- */
+
+.act__stage {
+  position: absolute;
+  inset: 0;
+}
+
+.act__wins,
+.act__apps {
+  position: absolute;
+  inset: 0;
+  transition:
+    transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.24s ease;
+}
+
+.act__wins {
+  padding: 190px 48px 84px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.act--apps .act__wins {
+  transform: translateY(-6%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.act__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 28px 24px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.act__empty {
+  margin: 0;
+  padding-top: 18vh;
+  text-align: center;
+  color: var(--on-surface-variant);
+  font-size: 15px;
+}
+
+/* ---------- Window cards ---------- */
+
+.act-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.act-card__shot {
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface-container);
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  transition:
+    outline-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.act-card:hover .act-card__shot {
+  outline-color: var(--outline);
+  transform: translateY(-2px);
+}
+
+.act-card--focused .act-card__shot {
+  outline-color: var(--primary);
+}
+
+.act-card__shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+  display: block;
+}
+
+.act-ws__blank,
+.act-card__blank {
+  /* App icon centered in the tile; the fallback letter comes from .appimg--letter. */
+  overflow: hidden;
+}
+
+.act-card__blank {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 44px;
+  font-weight: 600;
+  color: var(--on-secondary-container);
+  background: var(--secondary-container);
+}
+
+.act-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 2px;
+  min-width: 0;
+}
+
+.act-card__badge {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.act-card__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.act-card__tag {
+  flex: none;
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+/* ---------- App grid ---------- */
+
+.act__apps {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 36px 48px 84px 80px;
+  transform: translateY(8%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.act--apps .act__apps {
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.act__search {
+  width: min(420px, 80%);
+  height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 22px;
+  outline: 2px solid transparent;
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  font: inherit;
+  font-size: 15px;
+  text-align: center;
+  transition: outline-color 0.15s ease;
+}
+
+.act__search:focus {
+  outline-color: var(--primary);
+}
+
+.act__search::placeholder {
+  color: var(--on-surface-variant);
+}
+
+.act__viewport {
+  position: relative; /* The tile's offsetTop is measured relative to this list. */
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  margin-top: 36px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.act__grid {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.act-app__icon {
+  display: block;
+  line-height: 0;
+}
+
+.act-app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  border-radius: 18px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.act-app:hover,
+.act-app--sel {
+  background: var(--surface-container-high);
+}
+
+.act-app__name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.act__apps .act__empty {
+  position: absolute;
+  top: 38%;
+  left: 0;
+  right: 0;
+  padding: 0;
+}
+
+/* ---------- Letter rail (27 dots: # and A-Z) ---------- */
+
+.act-rail {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 2;
+}
+
+.act-rail__dot {
+  position: relative;
+  width: 26px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: height 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.act-rail__dot::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 5px;
+  background: var(--outline-variant);
+  transition:
+    height 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 0.15s ease,
+    background 0.2s ease;
+}
+
+.act-rail__dot:hover::before {
+  width: 12px;
+  background: var(--outline);
+}
+
+/* Active letter: an elongated, colored dot, like the previous page indicator. */
+.act-rail__dot--on {
+  height: 36px;
+}
+
+.act-rail__dot--on::before,
+.act-rail__dot--on:hover::before {
+  height: 30px;
+  background: var(--primary);
+}
+
+.act-rail__dot--empty {
+  cursor: default;
+}
+
+.act-rail__dot--empty::before {
+  opacity: 0.35;
+}
+
+/* The letter appears beside the dot on hover. */
+.act-rail__dot::after {
+  content: attr(data-letter);
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translate(-6px, -50%);
+  padding: 4px 11px;
+  border-radius: 12px;
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.act-rail__dot:hover::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+/* ---------- View switch button ---------- */
+
+.act__switch {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 18px 0 14px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.act__switch:hover {
+  background: var(--surface-container-highest);
+}
+
+.act button:focus-visible,
+.act__search:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .act,
+  .act__top,
+  .act__wins,
+  .act__apps,
+  .act-rail__dot,
+  .act-rail__dot::before,
+  .act-card__shot {
+    transition: none;
+  }
+}

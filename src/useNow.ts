@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-/** Waktu sekarang, diperbarui tiap detik. */
+/** Current time, updated every second. */
 export function useNow(): Date {
   const [now, setNow] = useState(() => new Date());
 

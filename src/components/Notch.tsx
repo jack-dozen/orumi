@@ -13,6 +13,8 @@ import Gauge from "./Gauge";
 import Icon from "./Icon";
 import { MediaTab, MiniPlayer } from "./Media";
 import WeatherCard from "./Weather";
+import { useConfig } from "../useConfig";
+import AppSettings, { ColorSettings } from "./Settings";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -34,7 +36,7 @@ const fmtMem = (bytes: number) =>
     ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
     : `${Math.round(bytes / 1024 ** 2)} MB`;
 
-/** Sel kalender sebulan penuh: null = kosong, angka = tanggal. */
+/** Calendar cell for a full month: null = empty, number = date. */
 function monthCells(now: Date): (number | null)[] {
   const first = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
   const total = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -175,7 +177,7 @@ function SystemTab({
   );
 }
 
-function SettingsTab({ wifi }: { wifi: WifiStatus | null }) {
+function QuickSettings({ wifi }: { wifi: WifiStatus | null }) {
   const openPage = (page: string) => invoke("open_settings_page", { page });
   const wifiOn = !!wifi?.adapter && wifi.connected;
 
@@ -209,22 +211,81 @@ function SettingsTab({ wifi }: { wifi: WifiStatus | null }) {
   );
 }
 
+type SettingsSection = "quick" | "app" | "color";
+
+function SettingsTab({
+  wifi,
+  section,
+  onSection,
+}: {
+  wifi: WifiStatus | null;
+  section: SettingsSection;
+  onSection: (s: SettingsSection) => void;
+}) {
+  const sections: [SettingsSection, string][] = [
+    ["quick", "Cepat"],
+    ["app", "Aplikasi"],
+    ["color", "Warna"],
+  ];
+  return (
+    <div className="settingsroot">
+      <div className="segmented">
+        {sections.map(([id, label]) => (
+          <button
+            key={id}
+            className={section === id ? "segmented__on" : ""}
+            onClick={() => onSection(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {section === "quick" && <QuickSettings wifi={wifi} />}
+      {section === "app" && <AppSettings />}
+      {section === "color" && <ColorSettings />}
+    </div>
+  );
+}
+
 export default function Notch() {
   const visible = useEdgeVisible("notch");
   const [tab, setTab] = useState<TabId>("dashboard");
 
-  // Data hanya diambil saat notch terlihat dan tab-nya memakainya.
+  // Fetch data only while the notch is visible and its tab uses it.
   const stats = useStats(visible && (tab === "dashboard" || tab === "system"));
   const media = useMedia(visible && (tab === "dashboard" || tab === "media"));
   const procs = useProcesses(visible && tab === "system");
   const gpu = useGpu(visible && (tab === "dashboard" || tab === "system"));
   const wifi = useWifi(visible && (tab === "system" || tab === "settings"));
-  const weather = useWeather();
+  const cfg = useConfig();
+  const weather = useWeather(cfg?.weather_city ?? "Bandung");
+  const [section, setSection] = useState<SettingsSection>("quick");
 
-  // Bar bisa meminta notch pindah ke tab tertentu (klik jam atau ikon WiFi).
+  // Notch closed: return to "does not take focus" mode (if it was used for typing).
+  useEffect(() => {
+    if (!visible) invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+  }, [visible]);
+
+  // Window lost focus (clicked another app): release the "currently typing" focus hold.
+  useEffect(() => {
+    const onBlur = () => {
+      // The native color dialog makes the window lose focus; keep the focus hold during it.
+      const el = document.activeElement as HTMLInputElement | null;
+      if (el?.tagName === "INPUT" && el.type === "color") return;
+      invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+    };
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, []);
+
+  // The bar can ask the notch to switch to a specific tab (clock or WiFi icon click).
   useEffect(() => {
     const unlisten = listen<string>("notch-tab", (e) => {
-      if (TABS.some((t) => t.id === e.payload)) setTab(e.payload as TabId);
+      const [t, sub] = e.payload.split("/");
+      if (TABS.some((x) => x.id === t)) setTab(t as TabId);
+      if (t === "settings" && (sub === "quick" || sub === "app" || sub === "color")) {
+        setSection(sub);
+      }
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -252,7 +313,9 @@ export default function Notch() {
         )}
         {tab === "media" && <MediaTab media={media} />}
         {tab === "system" && <SystemTab stats={stats} procs={procs} gpu={gpu} wifi={wifi} />}
-        {tab === "settings" && <SettingsTab wifi={wifi} />}
+        {tab === "settings" && (
+          <SettingsTab wifi={wifi} section={section} onSection={setSection} />
+        )}
       </div>
     </div>
   );

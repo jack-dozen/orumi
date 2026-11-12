@@ -1,7 +1,7 @@
 const R = 16;
 const C = 2 * Math.PI * R;
 
-/** Cincin persentase. value = null berarti data belum ada. */
+/** Percentage ring. value = null means no data is available. */
 export default function Gauge({ label, value }: { label: string; value: number | null }) {
   const pct = value === null ? 0 : Math.max(0, Math.min(100, value));
 

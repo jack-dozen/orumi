@@ -22,15 +22,15 @@ pub struct MediaInfo {
     playing: bool,
     position_ms: u64,
     duration_ms: u64,
-    /// Penanda lagu. Berubah = cover perlu diambil ulang.
+    /// Track marker. A change means the cover needs to be fetched again.
     art_key: String,
-    /// Cover (data URL). Hanya terisi saat art_key berubah dari yang sudah diketahui React.
+    /// Cover (data URL). Set only when art_key changes from the value already known to React.
     art: Option<String>,
 }
 
-/// Sesi media yang sedang aktif menurut Windows, kalau ada.
+/// Currently active media session according to Windows, if any.
 fn current_session() -> Option<GlobalSystemMediaTransportControlsSession> {
-    // Thread pekerja belum tentu sudah menyalakan WinRT.
+    // The worker thread may not have initialized WinRT yet.
     unsafe {
         let _ = RoInitialize(RO_INIT_MULTITHREADED);
     }
@@ -48,7 +48,7 @@ fn unix_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Waktu WinRT (100 ns sejak 1601) ke milidetik sejak 1970. 0 kalau tidak valid.
+/// Convert WinRT time (100 ns since 1601) to milliseconds since 1970. 0 if invalid.
 fn winrt_to_unix_ms(ticks: i64) -> u64 {
     const EPOCH_DIFF: i64 = 116_444_736_000_000_000;
     if ticks < EPOCH_DIFF {
@@ -114,8 +114,8 @@ fn read_media(known_art_key: Option<String>) -> Option<MediaInfo> {
             let duration = ((end - start).max(0) / 10_000) as u64;
             let mut position = ((pos - start).max(0) / 10_000) as u64;
 
-            // Posisi dari Windows adalah potret saat terakhir diperbarui;
-            // kalau sedang diputar, tambahkan waktu yang sudah berlalu.
+            // The position from Windows is a snapshot from its last update;
+            // if playback is active, add the elapsed time.
             if playing {
                 if let Ok(updated) = t.LastUpdatedTime() {
                     let updated_ms = winrt_to_unix_ms(updated.UniversalTime);
@@ -134,11 +134,11 @@ fn read_media(known_art_key: Option<String>) -> Option<MediaInfo> {
 
     let base_key = format!("{title}|{artist}|{album}");
     let (art_key, art) = if known_art_key.as_deref() == Some(base_key.as_str()) {
-        (base_key, None) // cover sudah dimiliki React
+        (base_key, None) // React already has the cover
     } else {
         match read_art(&props) {
             Some(a) => (base_key, Some(a)),
-            // Cover kadang telat muncul setelah lagu ganti: coba lagi di polling berikutnya.
+            // The cover sometimes appears late after a track change: try again on the next poll.
             None => (format!("{base_key}#noart"), None),
         }
     };

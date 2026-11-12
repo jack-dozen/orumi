@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
         "label": "bar",
         "title": "edgeshell-bar",
         "width": 72,
@@ -27,6 +28,7 @@
         "focus": false
       },
       {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
         "label": "notch",
         "title": "edgeshell-notch",
         "width": 820,
@@ -42,6 +44,7 @@
         "focus": false
       },
       {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
         "label": "launcher",
         "title": "edgeshell-launcher",
         "width": 640,
@@ -57,6 +60,7 @@
         "focus": false
       },
       {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
         "label": "overlay",
         "title": "edgeshell-overlay",
         "width": 150,
@@ -70,10 +74,61 @@
         "skipTaskbar": true,
         "resizable": false,
         "focus": false
+      },
+      {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
+        "label": "switcher",
+        "title": "edgeshell-switcher",
+        "width": 1200,
+        "height": 260,
+        "x": 0,
+        "y": 0,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
+      },
+      {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
+        "label": "activities",
+        "title": "edgeshell-activities",
+        "width": 1280,
+        "height": 720,
+        "x": 0,
+        "y": 0,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false,
+        "dragDropEnabled": false
+      },
+      {
+        "label": "preview",
+        "title": "edgeshell-preview",
+        "width": 300,
+        "height": 176,
+        "x": 0,
+        "y": 0,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site"
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": { "enable": true, "scope": [] }
     }
   },
   "bundle": {

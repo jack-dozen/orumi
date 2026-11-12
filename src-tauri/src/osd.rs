@@ -1,9 +1,9 @@
-//! Menyembunyikan flyout volume/brightness bawaan Windows 11.
-//! Diadaptasi dari Bloom (GPL-3.0): github.com/SehajveerSingh2005/bloom, services.rs.
+//! Hide the built-in Windows 11 volume/brightness flyout.
+//! Adapted from Bloom (GPL-3.0): github.com/SehajveerSingh2005/bloom, services.rs.
 //!
-//! Flyout-nya window `XamlExplorerHostIslandWindow` milik Explorer. Bukan disembunyikan,
-//! tapi dibuat transparan penuh dan tembus klik, jadi Windows tetap merasa
-//! menampilkannya sementara tidak ada yang terlihat.
+//! The flyout is Explorer's `XamlExplorerHostIslandWindow`. Instead of hiding it,
+//! make it fully transparent and click-through so Windows still considers it visible
+//! while nothing appears on screen.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -25,11 +25,11 @@ use windows::{
     },
 };
 
-/// false setelah restore() dipanggil, supaya thread tidak menyembunyikannya lagi saat keluar.
+/// false after restore() is called, so the thread does not hide it again on exit.
 static ACTIVE: AtomicBool = AtomicBool::new(true);
 
-/// Window kelas yang sama juga dipakai Alt+Tab dan Task View, tapi itu layar penuh,
-/// jadi dikecualikan lewat pengecekan ukuran.
+/// Windows of the same class are also used by Alt+Tab and Task View, but those are full-screen,
+/// so exclude them by checking their size.
 unsafe fn native_osd_windows() -> Vec<HWND> {
     let mut found = Vec::new();
     let Ok(tray) = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()) else {
@@ -68,8 +68,8 @@ unsafe fn set_suppressed(suppress: bool) {
     for hwnd in native_osd_windows() {
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
         let mut alpha = 255u8;
-        // Explorer tidak pernah menjadikan window ini layered, jadi layered dengan alpha 0
-        // pasti ulah kita, termasuk dari sesi sebelumnya yang crash.
+        // Explorer never makes this window layered, so a layered window with alpha 0
+        // must be ours, including one left by a previous crashed session.
         let suppressed = (ex_style & WS_EX_LAYERED.0) != 0
             && GetLayeredWindowAttributes(hwnd, None, Some(&mut alpha), None).is_ok()
             && alpha == 0;
@@ -92,7 +92,7 @@ unsafe fn set_suppressed(suppress: bool) {
     }
 }
 
-/// Jalankan terus: Explorer bisa membuat ulang window flyout kapan saja.
+/// Run continuously: Explorer may recreate the flyout window at any time.
 pub fn start() {
     thread::spawn(|| {
         while ACTIVE.load(Ordering::Relaxed) {
@@ -102,7 +102,7 @@ pub fn start() {
     });
 }
 
-/// Kembalikan flyout seperti semula. Dipanggil saat app keluar.
+/// Restore the flyout to its original state. Called when the app exits.
 pub fn restore() {
     ACTIVE.store(false, Ordering::Relaxed);
     unsafe { set_suppressed(false) };

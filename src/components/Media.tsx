@@ -53,7 +53,7 @@ function Cover({ art, className }: { art: string | null; className: string }) {
   );
 }
 
-/** Kartu kecil untuk dashboard. */
+/** Small card for the dashboard. */
 export function MiniPlayer({ media }: { media: MediaState }) {
   const { info, art } = media;
   if (!info) {
@@ -69,7 +69,7 @@ export function MiniPlayer({ media }: { media: MediaState }) {
   );
 }
 
-/** Tab media penuh. */
+/** Full media tab. */
 export function MediaTab({ media }: { media: MediaState }) {
   const { info, art } = media;
   if (!info) {

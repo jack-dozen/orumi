@@ -22,11 +22,11 @@ use windows::Win32::{
 
 use crate::edge::Panels;
 
-/// Isi overlay yang sedang aktif: "power", "mixer", "volume", atau "brightness".
+/// Content of the active overlay: "power", "mixer", "volume", or "brightness".
 static CURRENT_MODE: Mutex<String> = Mutex::new(String::new());
-/// Kapan dan isi apa yang terakhir ditutup (untuk mencegah klik tombol yang sama membuka ulang).
+/// When and what content was last closed (to prevent the same button click from reopening it).
 static LAST_CLOSE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
-/// true = overlay sedang tampil sebagai popup otomatis (bukan dibuka manual).
+/// true = the overlay is shown as an automatic popup (not opened manually).
 static AUTO_POPUP: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize, Clone)]
@@ -50,8 +50,8 @@ fn show(app: &AppHandle, mode: &str, manual: bool) {
     app.state::<Panels>().set("overlay", true);
 }
 
-/// Popup otomatis (tombol keyboard). Tidak mengganggu overlay yang dibuka manual,
-/// tapi boleh menggantikan popup otomatis lain (volume -> brightness).
+/// Automatic popup (keyboard key). Does not interfere with a manually opened overlay,
+/// but may replace another automatic popup (volume -> brightness).
 pub fn show_popup(app: &AppHandle, mode: &str) {
     let open = app.state::<Panels>().is_open("overlay");
     if !open || AUTO_POPUP.load(Ordering::Relaxed) {
@@ -59,15 +59,15 @@ pub fn show_popup(app: &AppHandle, mode: &str) {
     }
 }
 
-/// Dipanggil dari bar: buka overlay dengan isi `mode`, atau tutup kalau isi yang sama sudah terbuka.
+/// Called from the bar: open an overlay with `mode` content, or close it if the same content is already open.
 #[tauri::command]
 pub fn overlay_toggle(mode: String, app: AppHandle, panels: State<'_, Panels>) {
     if panels.is_open("overlay") && current_mode() == mode {
         overlay_close(panels);
         return;
     }
-    // Klik tombol yang sama tepat setelah overlay menutup sendiri (karena kehilangan fokus)
-    // dianggap sebagai klik untuk menutup, bukan membuka ulang.
+    // Clicking the same button immediately after the overlay closes itself (due to focus loss)
+    // counts as a close click, not a request to reopen it.
     if let Ok(last) = LAST_CLOSE.lock() {
         if let Some((at, m)) = last.as_ref() {
             if *m == mode && at.elapsed() < Duration::from_millis(350) {
@@ -131,7 +131,7 @@ pub async fn set_volume(percent: f32) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-/// Pantau perubahan volume/mute (termasuk dari tombol keyboard) dan munculkan popup volume.
+/// Watch for volume/mute changes (including keyboard keys) and show the volume popup.
 pub fn start_volume_watcher(app: AppHandle) {
     thread::spawn(move || unsafe {
         let mut ep = endpoint();
@@ -141,7 +141,7 @@ pub fn start_volume_watcher(app: AppHandle) {
         loop {
             thread::sleep(Duration::from_millis(250));
 
-            // Perangkat audio default bisa berganti (headphone dicolok): ambil ulang berkala.
+            // The default audio device can change (headphones plugged in): refresh periodically.
             if ep.is_none() || acquired.elapsed() > Duration::from_secs(5) {
                 ep = endpoint();
                 acquired = Instant::now();
@@ -165,7 +165,7 @@ pub fn start_volume_watcher(app: AppHandle) {
     });
 }
 
-/// Dipanggil dari ikon speaker di overlay. Popup/slider ikut diperbarui oleh watcher volume.
+/// Called from the speaker icon in the overlay. The volume watcher also updates the popup/slider.
 #[tauri::command]
 pub async fn toggle_mute() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(|| unsafe {

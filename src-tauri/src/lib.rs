@@ -1,16 +1,25 @@
-mod apps;
-mod edge;
-mod media;
-mod stats;
 mod actions;
-mod winlist;
-mod overlay;
-mod brightness;
-mod gpu;
-mod osd;
-mod wifi;
+mod apps;
 mod battery;
+mod brightness;
+mod config;
+mod edge;
+mod gpu;
+mod media;
+mod osd;
+mod overlay;
+mod stats;
 mod theme;
+mod wifi;
+mod winlist;
+mod wallpaper;
+mod altswitch;
+mod tray_flyout;
+mod activities;
+mod taskbar;
+mod icons;
+mod previews;
+mod capture;
 
 use std::{
     collections::HashMap,
@@ -21,12 +30,11 @@ use edge::{Edge, PanelSpec, Panels};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager,
+    AppHandle, Emitter, Manager,
 };
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-/// Daftar semua panel. Overlay nanti tinggal ditambah di sini.
-const PANELS: [PanelSpec; 4] = [
+/// List of all panels.
+const PANELS: [PanelSpec; 6] = [
     PanelSpec {
         label: "bar",
         edge: Edge::Left,
@@ -46,7 +54,7 @@ const PANELS: [PanelSpec; 4] = [
     PanelSpec {
         label: "launcher",
         edge: Edge::Bottom,
-        size: (640.0, 520.0),
+        size: (1040.0, 520.0),
         trigger_len: None,
         hover: false,
         focus: true,
@@ -59,16 +67,92 @@ const PANELS: [PanelSpec; 4] = [
         hover: false,
         focus: false,
     },
+    PanelSpec {
+        label: "switcher",
+        edge: Edge::Bottom,
+        size: (1200.0, 260.0),
+        trigger_len: None,
+        hover: false,
+        focus: false,
+    },
+    PanelSpec {
+        label: "preview",
+        edge: Edge::Free,
+        size: (0.0, 0.0),
+        trigger_len: None,
+        hover: true, // use auto-close behavior for panels opened by clicking
+        focus: false,
+    },
 ];
+
+/// Apply size, position, and zoom to all panels. Called at startup and when the scale changes.
+pub fn apply_layout(app: &AppHandle) {
+    for spec in PANELS {
+        if let Some(window) = app.get_webview_window(spec.label) {
+            let _ = edge::place(&window, &spec);
+            let _ = window.set_zoom(edge::ui_scale());
+        }
+    }
+}
+
+/// Reposition one panel (e.g. after its size changes).
+pub fn place_panel(app: &AppHandle, label: &str) {
+    if let Some(spec) = PANELS.iter().find(|s| s.label == label) {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = edge::place(&window, spec);
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Launch as the recovery watchdog (see taskbar.rs): no UI and no Tauri.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--guard") {
+        taskbar::run_guard(&args);
+        return;
+    }
+
     tauri::Builder::default()
-    // Harus plugin pertama. Instance kedua langsung keluar; instance pertama diam saja.
-    .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        // Must be the first plugin. A second instance exits immediately; the first stays idle.
+        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("orumi-state")
+                .setup(|app, _api| {
+                    let cfg = config::load(app);
+                    app.manage(config::ConfigState::new(cfg));
+                    app.manage(stats::StatsState::new());
+                    app.manage(stats::ProcState::new());
+                    app.manage(gpu::GpuState::new());
+                    app.manage(apps::AppsState::new());
+                    let flags: HashMap<_, _> = PANELS
+                        .iter()
+                        .map(|s| (s.label, Arc::new(AtomicBool::new(false))))
+                        .collect();
+                    app.manage(Panels(flags));
+                    Ok(())
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             edge::toggle_panel,
             edge::set_panel,
+            edge::panel_activation,
+            edge::launcher_view,
+            activities::activities_toggle,
+            activities::activities_close,
+            activities::ws_list,
+            activities::ws_switch,
+            activities::ws_move_window,
+            altswitch::switcher_pick,
+            tray_flyout::tray_toggle,
+            icons::app_icon,
+            previews::preview_open,
+            previews::preview_keep,
+            previews::preview_close_soon,
+            previews::preview_close,
+            config::get_config,
+            config::set_config,
             stats::get_stats,
             stats::get_top_processes,
             gpu::get_gpu,
@@ -76,92 +160,67 @@ pub fn run() {
             wifi::open_settings_page,
             battery::get_battery,
             theme::wallpaper_stamp,
-            theme::wallpaper_image,
+            theme::wallpaper_pixels,
             theme::set_theme,
             theme::get_theme,
+            wallpaper::list_wallpapers,
+            wallpaper::set_wallpaper,
+            wallpaper::run_wallpaper_command,
             media::get_media,
             media::media_control,
             media::media_seek,
             apps::list_apps,
             apps::launch_app,
             actions::run_action,
-            actions::run_action,
             winlist::list_windows,
-            winlist::focus_window,
             winlist::focus_window,
             winlist::minimize_window,
             overlay::overlay_toggle,
             overlay::overlay_close,
             overlay::get_volume,
             overlay::set_volume,
-            overlay::set_volume,
             overlay::toggle_mute,
             brightness::get_brightness,
             brightness::set_brightness
         ])
         .setup(|app| {
-            app.manage(stats::StatsState::new());
-            app.manage(stats::ProcState::new());
-            app.manage(gpu::GpuState::new());
-            app.manage(apps::AppsState::new());
+            let cfg = config::load(app.handle());
+            edge::set_ui_scale(cfg.ui_scale);
+            capture::clear_cache(app.handle());
+            taskbar::spawn_guard(app.handle());
+            taskbar::apply(app.handle(), cfg.taskbar_autohide);
+            app.manage(config::ConfigState::new(cfg.clone()));
 
-            // --- Semua panel ---
-            let mut flags = HashMap::new();
+            // --- All panels ---
             let mut watched = Vec::new();
             for spec in PANELS {
                 let window = app
                     .get_webview_window(spec.label)
                     .unwrap_or_else(|| panic!("window '{}' tidak ada di tauri.conf.json", spec.label));
-                let pinned = Arc::new(AtomicBool::new(false));
-                flags.insert(spec.label, pinned.clone());
+                let pinned = app.state::<Panels>().0[spec.label].clone();
 
                 edge::place(&window, &spec)?;
-                window.set_zoom(edge::UI_SCALE)?;
-                if spec.hover && !spec.focus {
-                    edge::set_no_activate(&window); // bar dan notch
+                window.set_zoom(edge::ui_scale())?;
+                if (spec.hover && !spec.focus) || spec.label == "switcher" {
+                    edge::set_activatable(&window, false); // bar, notch, and switcher
                 }
-                window.set_ignore_cursor_events(true)?; // awalnya click-through
+                window.set_ignore_cursor_events(true)?; // initially click-through
                 watched.push((window, spec, pinned));
             }
             edge::start_all(app.handle().clone(), watched);
-            app.manage(Panels(flags));
+
             overlay::start_volume_watcher(app.handle().clone());
             brightness::start_watcher(app.handle().clone());
             osd::start();
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
+            wallpaper::warm(app.handle().clone());
+            altswitch::set_enabled(cfg.alt_tab);
+            altswitch::start(app.handle().clone());
+            activities::init(app.handle())?;
 
-            // --- Hotkey global ---
-            let ctrl_alt = Modifiers::CONTROL | Modifiers::ALT;
-            let bar_key = Shortcut::new(Some(ctrl_alt), Code::KeyB);
-            let notch_key = Shortcut::new(Some(ctrl_alt), Code::KeyN);
-            let launcher_key = Shortcut::new(Some(ctrl_alt), Code::KeyJ);
-            app.handle().plugin(
-                tauri_plugin_global_shortcut::Builder::new()
-                    .with_handler(move |app, shortcut, event| {
-                        if event.state() != ShortcutState::Pressed {
-                            return;
-                        }
-                        let panels = app.state::<Panels>();
-                        if shortcut == &bar_key {
-                            panels.toggle("bar");
-                        } else if shortcut == &notch_key {
-                            panels.toggle("notch");
-                        } else if shortcut == &launcher_key {
-                            panels.toggle("launcher");
-                        }
-                    })
-                    .build(),
-            )?;
-            for (key, name) in [
-                (bar_key, "Ctrl+Alt+B"),
-                (notch_key, "Ctrl+Alt+N"),
-                (launcher_key, "Ctrl+Alt+J"),
-            ] {
-                if let Err(e) = app.global_shortcut().register(key) {
-                    eprintln!("Hotkey {name} gagal didaftarkan (mungkin dipakai app lain): {e}");
-                }
-            }
+            // --- Global hotkeys (from config) ---
+            config::init_hotkeys(app.handle(), &cfg.hotkeys)?;
 
             // --- Tray icon ---
             let bar_item =
@@ -170,8 +229,20 @@ pub fn run() {
                 MenuItem::with_id(app, "toggle_notch", "Tampilkan / sembunyikan notch", true, None::<&str>)?;
             let launcher_item =
                 MenuItem::with_id(app, "toggle_launcher", "Buka launcher", true, None::<&str>)?;
+            let settings_item =
+                MenuItem::with_id(app, "settings", "Pengaturan", true, None::<&str>)?;
+            let alt_item = MenuItem::with_id(
+                app,
+                "toggle_alt_tab",
+                "Nyalakan/matikan Alt+Tab kustom",
+                true,
+                None::<&str>,
+            )?;
             let quit_item = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&bar_item, &notch_item, &launcher_item, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[&bar_item, &notch_item, &launcher_item, &settings_item, &alt_item, &quit_item],
+            )?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("ikon app tidak ada").clone())
                 .tooltip("edgeshell")
@@ -180,6 +251,11 @@ pub fn run() {
                     "toggle_bar" => app.state::<Panels>().toggle("bar"),
                     "toggle_notch" => app.state::<Panels>().toggle("notch"),
                     "toggle_launcher" => app.state::<Panels>().toggle("launcher"),
+                    "settings" => {
+                        let _ = app.emit_to("notch", "notch-tab", "settings/app");
+                        app.state::<Panels>().set_transient("notch");
+                    }
+                    "toggle_alt_tab" => config::toggle_alt_tab(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -189,10 +265,11 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
-            // Kembalikan flyout Windows di jalur keluar mana pun (termasuk menu tray).
+        .run(|app, event| {
+            // Restore the Windows flyout and taskbar on normal exit (including the tray menu).
             if let tauri::RunEvent::Exit = event {
                 osd::restore();
+                taskbar::restore(app);
             }
         });
 }

@@ -8,21 +8,31 @@ export type WinEntry = {
   exe: string;
   minimized: boolean;
   focused: boolean;
+  path: string;
+  aumid: string;
 };
 
-/** Satu aplikasi = satu titik di bar, berapa pun jumlah window-nya. */
+/** Icon address for a window: AppUserModelID (Store app) or program path. */
+export function windowIconTarget(w: { aumid: string; path: string }): string | null {
+  if (w.aumid) return `aumid:${w.aumid}`;
+  if (w.path) return `path:${w.path}`;
+  return null;
+}
+
+/** One app = one dot in the bar, regardless of the number of windows. */
 export type AppGroup = {
   key: string;
   name: string;
   windows: WinEntry[];
   focused: boolean;
   allMinimized: boolean;
+  icon: string | null;
 };
 
-/** App yang sedang terbuka. Diperbarui saat Windows melaporkan perubahan window. */
+/** Open apps. Updated when Windows reports a window change. */
 export function useWindows(active: boolean): AppGroup[] {
   const [groups, setGroups] = useState<AppGroup[]>([]);
-  const order = useRef<string[]>([]); // urutan stabil: app baru ditambah di belakang
+  const order = useRef<string[]>([]); // stable order: new apps are appended to the end
   const lastFocused = useRef<number | null>(null);
 
   useEffect(() => {
@@ -34,8 +44,8 @@ export function useWindows(active: boolean): AppGroup[] {
         const list = await invoke<WinEntry[]>("list_windows");
         if (cancelled) return;
 
-        // Kalau window kita sendiri yang di depan (launcher, bar), tidak ada yang "focused"
-        // di daftar: pertahankan app terakhir yang fokus selama window-nya masih ada.
+        // If one of our windows is in front (launcher, bar), none are "focused" in the list:
+        // keep the last focused app as long as its window still exists.
         const fg = list.find((w) => w.focused)?.hwnd;
         if (fg !== undefined) lastFocused.current = fg;
         else if (!list.some((w) => w.hwnd === lastFocused.current)) lastFocused.current = null;
@@ -59,6 +69,7 @@ export function useWindows(active: boolean): AppGroup[] {
             return {
               key,
               name: windows[0].exe || windows[0].title,
+              icon: windowIconTarget(windows[0]),
               windows,
               focused: windows.some((w) => w.focused),
               allMinimized: windows.every((w) => w.minimized),
@@ -66,7 +77,7 @@ export function useWindows(active: boolean): AppGroup[] {
           }),
         );
       } catch {
-        /* coba lagi pada event berikutnya */
+        /* try again on the next event */
       }
     };
 

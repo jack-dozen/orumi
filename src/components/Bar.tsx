@@ -1,22 +1,25 @@
+import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
 import { useBattery, type BatteryStatus } from "../useBattery";
+import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useNow } from "../useNow";
 import { useWifi } from "../useWifi";
-import { useWindows, type AppGroup } from "../useWindows";
+import { useWindows, windowIconTarget, type AppGroup } from "../useWindows";
+import AppIcon from "./AppIcon";
 import Icon from "./Icon";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Pilih tab di notch, lalu buka (atau tutup) notch-nya. */
+/** Select a notch tab, then open (or close) the notch. */
 async function notchTab(tab: string, toggle: boolean) {
   await emitTo("notch", "notch-tab", tab);
   if (toggle) invoke("toggle_panel", { label: "notch" });
   else invoke("set_panel", { label: "notch", open: true });
 }
 
-/** Klik titik app: pindah ke app itu; kalau sudah fokus, minimalkan atau ganti window. */
+/** Click an app to switch to it; if already focused, minimize it or switch windows. */
 function onAppClick(g: AppGroup) {
   if (!g.focused) {
     invoke("focus_window", { hwnd: g.windows[0].hwnd }).catch(() => {});
@@ -47,9 +50,42 @@ function batteryIcon(b: BatteryStatus): string {
 export default function Bar() {
   const visible = useEdgeVisible("bar");
   const now = useNow();
+  const cfg = useConfig();
   const wifi = useWifi(visible);
   const battery = useBattery(visible);
   const groups = useWindows(visible);
+  const asIcons = (cfg?.bar_app_style ?? "icons") === "icons";
+  const previewOpen = useEdgeVisible("preview");
+  const hoverTimer = useRef<number | undefined>(undefined);
+
+  // Bar hidden: close the thumbnail preview.
+  useEffect(() => {
+    if (!visible) invoke("preview_close").catch(() => {});
+  }, [visible]);
+
+  const hoverApp = (g: AppGroup) => (e: ReactMouseEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    window.clearTimeout(hoverTimer.current);
+    // Hover intent: wait briefly; if the preview is already open, update its contents almost immediately.
+    hoverTimer.current = window.setTimeout(
+      () => {
+        const r = el.getBoundingClientRect();
+        invoke("preview_open", {
+          items: g.windows.slice(0, 4).map((w) => ({
+            hwnd: w.hwnd,
+            title: w.title,
+            icon: windowIconTarget(w),
+          })),
+          anchorY: r.top + r.height / 2,
+        }).catch(() => {});
+      },
+      previewOpen ? 60 : 260,
+    );
+  };
+  const leaveApp = () => {
+    window.clearTimeout(hoverTimer.current);
+    invoke("preview_close_soon").catch(() => {});
+  };
 
   const wifiOn = !!wifi?.adapter && wifi.connected;
   const wifiTitle = !wifi
@@ -76,22 +112,49 @@ export default function Bar() {
       </div>
 
       <div className="bar__apps">
-        {groups.map((g) => {
+      {groups.map((g) => {
           const shown = g.windows.find((w) => w.focused) ?? g.windows[0];
-          return (
+          const label = `${g.name}${g.windows.length > 1 ? ` (${g.windows.length})` : ""}`;
+          const click = () => {
+            invoke("preview_close").catch(() => {});
+            onAppClick(g);
+          };
+          return asIcons ? (
+            <div
+              key={g.key}
+              className={`appicon ${g.focused ? "appicon--focus" : ""} ${
+                g.allMinimized ? "appicon--min" : ""
+              }`}
+              title={`${label} — ${shown.title}`}
+              onClick={click}
+              onMouseEnter={hoverApp(g)}
+              onMouseLeave={leaveApp}
+            >
+              <AppIcon target={g.icon} fallback={g.name.charAt(0).toUpperCase()} size={24} />
+            </div>
+          ) : (
             <div
               key={g.key}
               className={`appdot ${g.focused ? "appdot--focus" : ""} ${
                 g.allMinimized ? "appdot--min" : ""
               }`}
-              title={`${g.name}${g.windows.length > 1 ? ` (${g.windows.length})` : ""} — ${shown.title}`}
-              onClick={() => onAppClick(g)}
+              title={`${label} — ${shown.title}`}
+              onClick={click}
+              onMouseEnter={hoverApp(g)}
+              onMouseLeave={leaveApp}
             />
           );
         })}
       </div>
 
       <div className="bar__group">
+        <div
+          className="bar__item"
+          title="Ikon tray (ikon tersembunyi)"
+          onClick={() => invoke("tray_toggle").catch(() => {})}
+        >
+          <Icon name="chevron_right" size={22} />
+        </div>
         <div className="bar__item bar__clock" onClick={() => notchTab("dashboard", true)}>
           {pad(now.getHours())}
           <br />

@@ -1,5 +1,5 @@
-//! Status WiFi (SSID, sinyal) lewat WLAN API, dengan pembaruan berbasis notifikasi.
-//! Diadaptasi dari Bloom (GPL-3.0): github.com/SehajveerSingh2005/bloom, wifi.rs.
+//! WiFi status (SSID, signal) through the WLAN API, with notification-based updates.
+//! Adapted from Bloom (GPL-3.0): github.com/SehajveerSingh2005/bloom, wifi.rs.
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::sync::OnceLock;
@@ -23,17 +23,17 @@ use windows::{
 
 #[derive(Serialize)]
 pub struct WifiStatus {
-    /// Ada adapter WiFi di PC ini.
+    /// A WiFi adapter is present on this PC.
     adapter: bool,
     connected: bool,
     ssid: Option<String>,
-    /// Kualitas sinyal 0-100 versi Windows (bukan dBm).
+    /// Windows signal quality from 0 to 100 (not dBm).
     signal: u32,
-    /// Windows menolak akses (biasanya izin lokasi untuk app desktop mati).
+    /// Windows denied access (usually because location permission for desktop apps is disabled).
     location_denied: bool,
 }
 
-/// Handle klien WLAN, ditutup otomatis.
+/// WLAN client handle, closed automatically.
 struct Client(HANDLE);
 
 impl Client {
@@ -44,7 +44,7 @@ impl Client {
         (rc == 0).then(|| Client(handle))
     }
 
-    /// Adapter WiFi pertama (seperti quick settings Windows, satu adapter saja).
+    /// First WiFi adapter (like Windows quick settings, which uses only one adapter).
     fn interface(&self) -> Option<GUID> {
         let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
         let rc = unsafe { WlanEnumInterfaces(self.0, None, &mut list) };
@@ -111,7 +111,7 @@ fn read_status() -> WifiStatus {
         } else if rc == ERROR_ACCESS_DENIED.0 {
             st.location_denied = true;
         }
-        // Gagal dengan ERROR_INVALID_STATE kalau tidak tersambung: itu normal.
+        // ERROR_INVALID_STATE when disconnected is expected.
         if !data.is_null() {
             WlanFreeMemory(data);
         }
@@ -152,7 +152,7 @@ unsafe extern "system" fn on_notification(
     }
 }
 
-/// Mendaftar notifikasi WLAN supaya tampilan langsung berubah saat tersambung atau putus.
+/// Register WLAN notifications so the display updates immediately when connecting or disconnecting.
 pub fn start_notifications(app: AppHandle) {
     let _ = APP.set(app);
     std::thread::spawn(|| {
@@ -169,15 +169,15 @@ pub fn start_notifications(app: AppHandle) {
             )
         };
         if rc == 0 {
-            // Handle harus tetap terbuka selama app hidup: menutupnya mencabut callback.
+            // Keep the handle open while the app runs: closing it removes the callback.
             std::mem::forget(client);
         }
     });
 }
 
-// ---------- Halaman Pengaturan Windows ----------
+// ---------- Windows Settings pages ----------
 
-/// page: "wifi" atau "location".
+/// page: "wifi" or "location".
 #[tauri::command]
 pub fn open_settings_page(page: String) -> Result<(), String> {
     use windows::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};

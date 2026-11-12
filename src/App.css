@@ -1,7 +1,32 @@
 /* =========================================================
-   Token warna: palet Material 3 gelap (sementara).
-   Langkah berikutnya mengganti nilai ini dari wallpaper.
+   Color tokens: dark Material 3 palette (temporary).
+   The next step is to derive these values from the wallpaper.
    ========================================================= */
+
+   /* Subset icon font (scripts/make-icon-font.ps1): only icons used by the app. */
+   @font-face {
+     font-family: "Material Symbols Rounded";
+     font-style: normal;
+     font-weight: 400;
+     font-display: block;
+     src: url("./assets/material-symbols-rounded.woff2") format("woff2");
+   }
+
+   .material-symbols-rounded {
+     font-family: "Material Symbols Rounded";
+     font-weight: normal;
+     font-style: normal;
+     letter-spacing: normal;
+     text-transform: none;
+     display: inline-block;
+     white-space: nowrap;
+     word-wrap: normal;
+     direction: ltr;
+     font-feature-settings: "liga";
+     -webkit-font-feature-settings: "liga";
+     -webkit-font-smoothing: antialiased;
+   }
+
 :root {
   --surface: #101418;
   --surface-container: #1c2024;
@@ -22,7 +47,7 @@
   --on-error-container: #ffdad6;
 }
 
-/* ---------- Dasar ---------- */
+/* ---------- Base styles ---------- */
 
 html,
 body,
@@ -241,7 +266,7 @@ button {
   border-bottom-color: var(--primary);
 }
 
-/* ---------- Kartu ---------- */
+/* ---------- Cards ---------- */
 
 .card {
   box-sizing: border-box;
@@ -350,7 +375,7 @@ button {
   fill: var(--on-surface);
 }
 
-/* ---------- Cuaca ---------- */
+/* ---------- Weather ---------- */
 
 .weather {
   display: flex;
@@ -890,4 +915,748 @@ button {
 .vslider--disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ---------- Settings: apps ---------- */
+
+.settingsroot {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settingsroot > .card {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.segmented {
+  align-self: flex-start;
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 16px;
+  background: var(--surface-container-high);
+}
+
+.segmented button {
+  padding: 4px 14px;
+  border-radius: 13px;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+}
+
+.segmented__on {
+  background: var(--primary-container);
+  color: var(--on-primary-container) !important;
+  font-weight: 600;
+}
+
+.segmented--small button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.appset {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  padding: 14px 22px;
+}
+
+.appset__col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+.appset__title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.srow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.srow__label {
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.srow__ctl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.srow input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.sinput {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--outline-variant);
+  border-radius: 12px;
+  outline: none;
+  background: var(--surface-container);
+  color: var(--on-surface);
+  font: inherit;
+  font-size: 13px;
+}
+
+.sinput:focus {
+  border-color: var(--primary);
+}
+
+.scolor {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
+.hotkey {
+  width: 100%;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--surface-container);
+  border: 1px solid var(--outline-variant);
+  font-size: 13px;
+  text-align: left;
+}
+
+.hotkey:hover {
+  border-color: var(--outline);
+}
+
+.hotkey--on {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.hotkeyfield {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.hotkey__cap {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: var(--on-surface-variant);
+  background: var(--surface-container);
+  border: 1px solid var(--outline-variant);
+}
+
+.hotkey__cap:hover {
+  color: var(--on-surface);
+}
+
+.hotkey__cap--on {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.appset__col {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  justify-content: center;
+  justify-content: safe center;
+}
+
+.hotkeynote {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--on-surface-variant);
+}
+
+.hotkeynote--ok {
+  color: var(--primary);
+}
+
+/* ---------- Settings: colors ---------- */
+
+.colorset {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px;
+}
+
+.colorgrid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.colorcard {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--surface-container-highest);
+}
+
+.colorcard__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.colorcard__note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--on-surface-variant);
+}
+
+.colorcard__ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--outline);
+}
+
+.hexinput {
+  width: 74px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.colorfoot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.colorfoot input[type="range"] {
+  flex: 1;
+  accent-color: var(--primary);
+}
+
+.colorfoot--off {
+  opacity: 0.5;
+}
+
+.linkbtn {
+  flex-shrink: 0;
+  color: var(--primary);
+  text-decoration: underline;
+  font-size: 12px;
+}
+
+/* ---------- Wallpaper picker ---------- */
+
+.wpick {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  outline: none;
+}
+
+.wpick__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.wp {
+  flex: none;
+  box-sizing: border-box;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface-container-high);
+  cursor: pointer;
+  transition:
+    width 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 200ms;
+}
+
+.wp img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.wp__empty {
+  width: 100%;
+  height: 100%;
+  background: var(--surface-container-highest);
+}
+
+.wp--ghost {
+  background: transparent;
+  cursor: default;
+}
+
+.wp--c0 {
+  width: 200px;
+  height: 113px;
+  outline: 2px solid var(--primary);
+}
+
+.wp--c1 {
+  width: 110px;
+  height: 62px;
+  opacity: 0.75;
+}
+
+.wp--c2 {
+  width: 60px;
+  height: 34px;
+  opacity: 0.45;
+}
+
+.wpick__title {
+  max-width: 100%;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wpick__hint,
+.wpick__dir {
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.wpick__msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 16px;
+  font-size: 14px;
+  color: var(--on-surface-variant);
+  text-align: center;
+}
+
+/* ---------- Wallpaper picker: carousel ---------- */
+
+.cw-stage {
+  position: relative;
+  width: 100%;
+  height: 188px;
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent 0%, #000 6%, #000 94%, transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    #000 6%,
+    #000 94%,
+    transparent 100%
+  );
+}
+
+.cw-slot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  height: 180px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-container-high);
+  cursor: pointer;
+  contain: paint layout;
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, width;
+}
+
+.cw-slot img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Overlay on the image: dims side slots and frames the active slot. */
+.cw-slot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  pointer-events: none;
+  transition: background 200ms, box-shadow 200ms;
+}
+
+.cw-slot:hover::after {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.cw-slot--active {
+  cursor: pointer;
+}
+
+.cw-slot--active::after,
+.cw-slot--active:hover::after {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+/* ---------- Launcher: panel sized to its contents ---------- */
+
+.lroot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+}
+
+.lpanel {
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end; /* Keep content bottom-aligned while the panel height animates. */
+  background: var(--surface);
+  border-radius: 28px 28px 0 0;
+  overflow: hidden;
+
+  transform: translateY(100%);
+  transition:
+    transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.lpanel--visible {
+  transform: translateY(0);
+}
+
+.lpanel__inner {
+  flex: none;
+  box-sizing: border-box;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---------- Alt+Tab ---------- */
+
+.swroot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+}
+
+.swpanel {
+  box-sizing: border-box;
+  max-width: calc(100% - 24px);
+  padding: 14px;
+  background: var(--surface);
+  border-radius: 28px 28px 0 0;
+
+  transform: translateY(100%);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.swpanel--visible {
+  transform: translateY(0);
+}
+
+.swrow {
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.switem {
+  flex: none;
+  width: 118px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px 10px;
+  border-radius: 18px;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.switem:hover {
+  background: var(--surface-container-high);
+}
+
+.switem--min {
+  opacity: 0.6;
+}
+
+.switem--active,
+.switem--active:hover {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  opacity: 1;
+}
+
+.swtile {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.swname {
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.swtitle {
+  max-width: 100%;
+  font-size: 11px;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- App icons ---------- */
+
+.appimg {
+  flex: none;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* Fallback when no icon is available: a letter on a colored tile. */
+.appimg--letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 28%;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  font-weight: 700;
+}
+
+.appicon {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    background 150ms,
+    opacity 200ms;
+}
+
+.appicon:hover {
+  background: var(--surface-container-high);
+}
+
+.appicon--focus {
+  background: var(--secondary-container);
+}
+
+.appicon--focus::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 11px;
+  bottom: 11px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.appicon--min {
+  opacity: 0.5;
+}
+
+/* The most relevant result is closest to the search box. */
+.launcher__list {
+  flex-direction: column-reverse;
+}
+
+/* ---------- Thumbnail preview ---------- */
+
+.pvroot {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* The window is larger than the card; only the card takes mouse events. */
+}
+
+/* The matching color and flush left edge make it read as an extension of the bar. */
+.pvcard {
+  /* top, width and height are set inline from the Rust payload. */
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: auto;
+  box-sizing: border-box;
+  padding: 12px;
+  display: flex;
+  background: var(--surface);
+  border-radius: 0 24px 24px 0;
+
+  /* Closed: clipped to nothing at the card's vertical center, flush with the bar edge. */
+  clip-path: inset(50% 100% 50% 0 round 0 24px 24px 0);
+  transition: clip-path 200ms cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.pvcard--visible {
+  /* Open: the visible area grows from the bar edge to the full card. */
+  clip-path: inset(0 0 0 0 round 0 24px 24px 0);
+  /* top and width stay animated here so moving between icons keeps morphing. */
+  transition:
+    clip-path 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.pvitems { display: flex; gap: 10px; flex: none; }
+/* Content replaced while the card is shown: fade the new set in. */
+.pvitems--swap { animation: pvswap 220ms ease-out; }
+@keyframes pvswap { from { opacity: 0; } to { opacity: 1; } }
+
+.pvitem {
+  width: 220px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 200ms 70ms;
+}
+
+.pvcard--visible .pvitem {
+  opacity: 1;
+}
+
+.pvthumb {
+  position: relative;
+  width: 220px;
+  height: 124px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface-container-high);
+  transition: box-shadow 150ms;
+}
+
+.pvitem:hover .pvthumb {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.pvthumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  /* Plays when the image first replaces the icon placeholder (not on later refreshes). */
+  animation: pvimg 160ms ease-out;
+}
+
+@keyframes pvimg {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pvthumb__empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pvbadge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+}
+
+.pvtitle {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.pvtitle span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

@@ -1,4 +1,4 @@
-//! Wallpaper aktif dan penyimpanan tema (token warna) yang dibagi ke semua window.
+//! Active wallpaper and theme (color token) storage shared by all windows.
 
 use std::{ffi::c_void, fs, sync::Mutex, time::UNIX_EPOCH};
 
@@ -8,10 +8,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SystemParametersInfoW, SPI_GETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
 };
 
-/// Tema terakhir (JSON token), supaya window yang baru memuat bisa langsung memakainya.
+/// Most recent theme (JSON tokens), so newly loaded windows can use it immediately.
 static THEME: Mutex<Option<String>> = Mutex::new(None);
 
-/// Path file wallpaper aktif, atau None kalau warna polos / tidak ada.
+/// Active wallpaper file path, or None if the color is plain or absent.
 fn wallpaper_path() -> Option<String> {
     let mut buf = [0u16; 520];
     unsafe {
@@ -28,7 +28,12 @@ fn wallpaper_path() -> Option<String> {
     (!path.is_empty()).then_some(path)
 }
 
-/// Penanda murah untuk mendeteksi wallpaper berganti (path + waktu ubah + ukuran).
+/// Active wallpaper path according to Windows (for other modules).
+pub fn current_wallpaper_path() -> Option<String> {
+    wallpaper_path()
+}
+
+/// Cheap marker for detecting wallpaper changes (path + modification time + size).
 #[tauri::command]
 pub fn wallpaper_stamp() -> Option<String> {
     let path = wallpaper_path()?;
@@ -37,7 +42,7 @@ pub fn wallpaper_stamp() -> Option<String> {
     Some(format!("{path}|{secs}|{}", meta.len()))
 }
 
-/// Isi wallpaper sebagai data URL. Hanya dipanggil saat stempelnya berubah.
+/// Wallpaper contents as a data URL. Called only when its stamp changes.
 #[tauri::command]
 pub async fn wallpaper_image() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -62,7 +67,7 @@ pub async fn wallpaper_image() -> Result<Option<String>, String> {
     .map_err(|e| e.to_string())
 }
 
-/// Dipanggil window notch setelah menghitung palet: simpan dan siarkan ke semua window.
+/// Called by the notch after calculating the palette: save and broadcast it to all windows.
 #[tauri::command]
 pub fn set_theme(json: String, app: AppHandle) {
     if let Ok(mut t) = THEME.lock() {
@@ -74,4 +79,39 @@ pub fn set_theme(json: String, app: AppHandle) {
 #[tauri::command]
 pub fn get_theme() -> Option<String> {
     THEME.lock().ok().and_then(|t| t.clone())
+}
+
+/// Small sample of active wallpaper pixels (RGBA, base64) for extracting dominant colors.
+/// Resize the image here, not in the WebView: decoding and processing a 4K wallpaper
+/// can briefly use hundreds of MB in JavaScript.
+#[derive(serde::Serialize)]
+pub struct SmallImage {
+    width: u32,
+    height: u32,
+    data: String,
+}
+
+#[tauri::command]
+pub async fn wallpaper_pixels() -> Result<Option<SmallImage>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = wallpaper_path()?;
+        let meta = fs::metadata(&path).ok()?;
+        if meta.len() == 0 || meta.len() > 80_000_000 {
+            return None;
+        }
+        let img = image::ImageReader::open(&path)
+            .ok()?
+            .with_guessed_format()
+            .ok()?
+            .decode()
+            .ok()?;
+        let small = img.thumbnail(128, 128).to_rgba8();
+        Some(SmallImage {
+            width: small.width(),
+            height: small.height(),
+            data: STANDARD.encode(small.as_raw()),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
