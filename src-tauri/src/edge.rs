@@ -262,6 +262,7 @@ pub fn panel_activation(
             let _ = window.set_focus();
         }
     }
+    crate::altswitch::ensure_hook("panel activation");
 }
 
 struct Rect {
@@ -431,6 +432,7 @@ pub fn set_activatable(window: &WebviewWindow, activatable: bool) {
 
 /// Update the window on the main thread: reset position, click-through and focus, then notify React.
 fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool, spec: &PanelSpec) {
+    let app_handle = app.clone();
     let window = window.clone();
     let event = event.to_string();
     let spec = *spec;
@@ -455,8 +457,24 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
             let _ = window.set_focus();
         }
         let _ = window.emit(event.as_str(), show);
-        if !show && spec.label == "launcher" {
-            crate::altswitch::launcher_closed();
+        if spec.label != "switcher" {
+            if !show {
+                // If an ORUMI panel (launcher, notch, bar) still holds foreground focus when closing,
+                // restore focus to the last active external window so the hidden WebView2 window does
+                // not keep keyboard focus.
+                let panels = app_handle.state::<Panels>();
+                if !panels.is_open("launcher") && !crate::activities::is_open() {
+                    crate::winlist::restore_external_foreground_if_ours();
+                }
+            }
+            crate::altswitch::ensure_hook(if show { "panel opened" } else { "panel closed" });
+            if show && spec.label == "launcher" {
+                // Launcher.tsx focuses its <input> after 60 ms; refresh the hook once more afterward.
+                thread::spawn(|| {
+                    thread::sleep(Duration::from_millis(80));
+                    crate::altswitch::ensure_hook("launcher input focused");
+                });
+            }
         }
         if DEBUG_SHOW && show && spec.label == "switcher" {
             eprintln!(
