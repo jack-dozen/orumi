@@ -13,7 +13,7 @@ export type SnapWindow = {
   /** AppUserModelID (Store app) and program path, used to fetch the icon. */
   aumid: string;
   path: string;
-  /** JPEG base64 without a prefix; null if the window cannot be captured. */
+  /** Absolute path of the thumbnail file (use convertFileSrc); null if there is none. */
   thumb: string | null;
 };
 

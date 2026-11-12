@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import Icon from "../components/Icon";
 import AppIcon from "../components/AppIcon";
 import {
@@ -21,7 +21,7 @@ const SWIPE_LOCK_MS = 450;
 /** Ignore outside clicks (blur) briefly after opening. */
 const BLUR_GRACE_MS = 400;
 
-const thumbSrc = (t: string) => `data:image/jpeg;base64,${t}`;
+const thumbSrc = (t: string) => convertFileSrc(t);
 const letter = (s: string) => (s.trim().charAt(0) || "?").toUpperCase();
 
 /** Name-to-query match score (same rules as the launcher). 0 = no match. */

@@ -108,7 +108,7 @@ fn size_override(label: &str) -> Option<(f64, f64)> {
         .and_then(|l| l.iter().find(|(k, _)| *k == label).map(|(_, s)| *s))
 }
 
-fn set_size_override(label: &'static str, size: Option<(f64, f64)>) {
+pub fn set_size_override(label: &'static str, size: Option<(f64, f64)>) {
     if let Ok(mut l) = SIZE_OVERRIDE.lock() {
         l.retain(|(k, _)| *k != label);
         if let Some(s) = size {

@@ -4,7 +4,9 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
+    collections::HashMap,
     mem::size_of,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
@@ -35,7 +37,8 @@ use windows::Win32::{
 };
 
 use crate::{
-    edge::Panels,
+    capture,
+    edge::{self, Panels},
     winlist::{self, WindowEntry},
 };
 
@@ -75,6 +78,17 @@ const SLOW_LIST_MS: u128 = 40;
 /// Minimum interval between hook reinstalls by the watchdog.
 const REINSTALL_COOLDOWN_MS: u64 = 5000;
 
+// Grid geometry (design units = CSS px). The window is sized to fit the grid when it opens.
+const CARD_W: f64 = 200.0;
+const CARD_H: f64 = 158.0;
+const GRID_GAP: f64 = 10.0;
+const GRID_PAD: f64 = 16.0;
+/// The panel is at most this wide, and at most this fraction of the screen width.
+const MAX_PANEL_W: f64 = 1800.0;
+const MAX_W_FRACTION: f64 = 0.92;
+/// Maximum panel height as a fraction of the screen; extra rows scroll inside the panel.
+const MAX_H_FRACTION: f64 = 0.70;
+
 // ---------- Shared state (atomics only; safe to use from the hook) ----------
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
@@ -102,6 +116,8 @@ enum Msg {
     Start { reverse: bool },
     Next { reverse: bool },
     Step(i32),
+    /// Up/down: move by one grid row.
+    StepRow(i32),
     Cancel,
     Commit,
     Pick(usize),
@@ -260,12 +276,20 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
             send(Msg::Cancel);
             true
         }
-        VK_LEFT | VK_UP if active => {
+        VK_LEFT if active => {
             send(Msg::Step(-1));
             true
         }
-        VK_RIGHT | VK_DOWN if active => {
+        VK_RIGHT if active => {
             send(Msg::Step(1));
+            true
+        }
+        VK_UP if active => {
+            send(Msg::StepRow(-1));
+            true
+        }
+        VK_DOWN if active => {
+            send(Msg::StepRow(1));
             true
         }
         _ => false,
@@ -297,22 +321,155 @@ struct Session {
     index: usize,
     shown: bool,
     started: Instant,
+    layout: GridLayout,
+    /// Window size (design units) that fits the grid.
+    window: (f64, f64),
+}
+
+/// Grid geometry sent to the UI (CSS px).
+#[derive(Clone, Copy, Serialize)]
+struct GridLayout {
+    cols: usize,
+    rows: usize,
+    card_w: f64,
+    card_h: f64,
+    gap: f64,
+    pad: f64,
+}
+
+/// Columns and rows for `n` windows on a screen of `screen` design units, plus the window size
+/// that fits them. Many windows wrap into several balanced rows, like the native Alt+Tab.
+fn grid_layout(n: usize, screen: (f64, f64)) -> (GridLayout, (f64, f64)) {
+    let n = n.max(1);
+    let max_w = (screen.0 * MAX_W_FRACTION).min(MAX_PANEL_W);
+    let cols_max = (((max_w - 2.0 * GRID_PAD + GRID_GAP) / (CARD_W + GRID_GAP)).floor() as usize).max(1);
+    let rows_all = n.div_ceil(cols_max);
+    // Balance the rows instead of filling the first one and leaving a single card below.
+    let cols = n.div_ceil(rows_all);
+    let rows_max =
+        (((screen.1 * MAX_H_FRACTION - 2.0 * GRID_PAD + GRID_GAP) / (CARD_H + GRID_GAP)).floor() as usize).max(1);
+    let rows = rows_all.min(rows_max);
+
+    let w = cols as f64 * (CARD_W + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
+    let h = rows as f64 * (CARD_H + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
+    let layout = GridLayout {
+        cols,
+        rows: rows_all,
+        card_w: CARD_W,
+        card_h: CARD_H,
+        gap: GRID_GAP,
+        pad: GRID_PAD,
+    };
+    (layout, (w, h))
+}
+
+/// Primary monitor size in design units.
+fn screen_size(app: &AppHandle) -> Option<(f64, f64)> {
+    let m = app.get_webview_window("switcher")?.primary_monitor().ok()??;
+    let u = m.scale_factor() * edge::ui_scale();
+    let size = m.size();
+    Some((size.width as f64 / u, size.height as f64 / u))
+}
+
+/// One window for the UI: the WindowEntry fields plus the newest thumbnail file, if any.
+#[derive(Clone, Serialize)]
+struct SwItem<'a> {
+    #[serde(flatten)]
+    entry: &'a WindowEntry,
+    thumb: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
 struct ItemsPayload<'a> {
-    items: &'a [WindowEntry],
+    items: Vec<SwItem<'a>>,
     index: usize,
+    layout: GridLayout,
+}
+
+#[derive(Clone, Serialize)]
+struct ThumbPayload {
+    hwnd: i64,
+    thumb: String,
+}
+
+static CAPTURE_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+
+/// Small dedicated pool, so refreshing thumbnails cannot take every CPU core while the panel animates.
+fn capture_pool() -> &'static rayon::ThreadPool {
+    CAPTURE_POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .thread_name(|i| format!("switcher-capture-{i}"))
+            .build()
+            .expect("switcher capture thread pool")
+    })
+}
+
+/// Capture fresh thumbnails in the background and tell the UI about every file that changed.
+/// `known` is what the opening payload already contained.
+fn refresh_thumbs(app: &AppHandle, dir: PathBuf, known: HashMap<i64, PathBuf>, hwnds: Vec<i64>) {
+    let app = app.clone();
+    capture_pool().spawn(move || {
+        use rayon::prelude::*;
+        hwnds.par_iter().for_each(|&hwnd| {
+            let Some(path) = capture::refresh(&dir, hwnd) else { return };
+            if known.get(&hwnd) == Some(&path) {
+                return;
+            }
+            let _ = app.asset_protocol_scope().allow_file(&path);
+            let _ = app.emit(
+                "switcher-thumb",
+                ThumbPayload { hwnd, thumb: path.to_string_lossy().into_owned() },
+            );
+        });
+    });
 }
 
 fn show(app: &AppHandle, s: &mut Session) {
     s.shown = true;
+    let t = Instant::now();
+    // The window is sized to the grid before it appears.
+    edge::set_size_override("switcher", Some(s.window));
+
+    // Thumbnails already on disk are shown right away; fresh ones arrive later.
+    let dir = capture::cache_dir(app);
+    let latest = dir.as_deref().map(capture::latest_all).unwrap_or_default();
+    let scope = app.asset_protocol_scope();
+    let items: Vec<SwItem> = s
+        .items
+        .iter()
+        .map(|entry| {
+            let thumb = latest.get(&entry.hwnd).map(|p| {
+                let _ = scope.allow_file(p);
+                p.to_string_lossy().into_owned()
+            });
+            SwItem { entry, thumb }
+        })
+        .collect();
+
     // Send the contents before showing the panel to avoid flashing an empty panel.
     let _ = app.emit(
         "switcher-items",
-        ItemsPayload { items: &s.items, index: s.index },
+        ItemsPayload { items, index: s.index, layout: s.layout },
     );
     app.state::<Panels>().set("switcher", true);
+    let ms = t.elapsed().as_millis();
+    if ms >= SLOW_LIST_MS {
+        eprintln!("[alt+tab] preparing the panel took {ms} ms ({} items)", s.items.len());
+    }
+
+    if let Some(dir) = dir {
+        refresh_thumbs(app, dir, latest, s.items.iter().map(|e| e.hwnd).collect());
+    }
+}
+
+/// Tell the UI which item is selected (showing the panel first if it is not visible yet).
+fn select(app: &AppHandle, s: &mut Session) {
+    if s.shown {
+        let _ = app.emit("switcher-select", s.index);
+    } else {
+        show(app, s); // user is cycling through items: show it now
+    }
 }
 
 fn step(app: &AppHandle, session: &mut Option<Session>, delta: i32) {
@@ -322,11 +479,27 @@ fn step(app: &AppHandle, session: &mut Option<Session>, delta: i32) {
         return;
     }
     s.index = (((s.index as i32 + delta) % n + n) % n) as usize;
-    if s.shown {
-        let _ = app.emit("switcher-select", s.index);
-    } else {
-        show(app, s); // user is cycling through items: show it now
+    select(app, s);
+}
+
+/// Up/down: move one row, wrapping to the other end of the same column.
+fn step_row(app: &AppHandle, session: &mut Option<Session>, delta: i32) {
+    let Some(s) = session.as_mut() else { return };
+    let n = s.items.len();
+    if n == 0 {
+        return;
     }
+    let cols = s.layout.cols.max(1);
+    let cur = s.index;
+    s.index = if delta > 0 {
+        if cur + cols < n { cur + cols } else { cur % cols }
+    } else if cur >= cols {
+        cur - cols
+    } else {
+        let last_row_start = ((n - 1) / cols) * cols;
+        (last_row_start + cur % cols).min(n - 1)
+    };
+    select(app, s);
 }
 
 /// End the session: hide the panel and switch to the selected window.
@@ -376,10 +549,19 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
             } else {
                 base.min(n - 1)
             };
-            *session = Some(Session { items, index, shown: false, started: Instant::now() });
+            let (layout, window) = grid_layout(n, screen_size(app).unwrap_or((1536.0, 864.0)));
+            *session = Some(Session {
+                items,
+                index,
+                shown: false,
+                started: Instant::now(),
+                layout,
+                window,
+            });
         }
         Msg::Next { reverse } => step(app, session, if reverse { -1 } else { 1 }),
         Msg::Step(d) => step(app, session, d),
+        Msg::StepRow(d) => step_row(app, session, d),
         Msg::Cancel => cancel(app, session),
         Msg::Commit => finish(app, session),
         Msg::Pick(i) => {

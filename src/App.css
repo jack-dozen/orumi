@@ -1396,8 +1396,10 @@ button {
 
 .swpanel {
   box-sizing: border-box;
-  max-width: calc(100% - 24px);
-  padding: 14px;
+  max-width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
   background: var(--surface);
   border-radius: 28px 28px 0 0;
 
@@ -1405,72 +1407,80 @@ button {
   transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+.swpanel::-webkit-scrollbar {
+  display: none;
+}
+
 .swpanel--visible {
   transform: translateY(0);
 }
 
-.swrow {
-  display: flex;
-  gap: 8px;
-  overflow: hidden;
+/* Columns, row height, gap and padding are set inline from the Rust layout. */
+.swgrid {
+  display: grid;
+  box-sizing: border-box;
 }
 
-.switem {
-  flex: none;
-  width: 118px;
+.swcard {
   box-sizing: border-box;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 12px 8px 10px;
+  gap: 8px;
+  padding: 10px;
   border-radius: 18px;
   color: var(--on-surface-variant);
   cursor: pointer;
   transition: background 120ms;
 }
 
-.switem:hover {
+.swcard:hover {
   background: var(--surface-container-high);
 }
 
-.switem--min {
+.swcard--min {
   opacity: 0.6;
 }
 
-.switem--active,
-.switem--active:hover {
+.swcard--active,
+.swcard--active:hover {
   background: var(--secondary-container);
   color: var(--on-secondary-container);
   opacity: 1;
 }
 
-.swtile {
-  width: 52px;
-  height: 52px;
+.swthumb {
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 16px;
-  background: var(--primary-container);
-  color: var(--on-primary-container);
-  font-size: 24px;
-  font-weight: 700;
-}
-
-.swname {
-  max-width: 100%;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  border-radius: 10px;
+  background: var(--surface-container-high);
 }
 
-.swtitle {
-  max-width: 100%;
-  font-size: 11px;
-  opacity: 0.8;
+.swthumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  /* Plays when the image first replaces the icon placeholder (not on later refreshes). */
+  animation: pvimg 160ms ease-out;
+}
+
+.swlabel {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.swlabel span {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

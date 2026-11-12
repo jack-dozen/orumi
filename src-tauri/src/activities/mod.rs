@@ -81,7 +81,7 @@ pub fn show(app: &AppHandle) {
     }
     let app = app.clone();
     thread::spawn(move || {
-        let windows = thumbs::snapshot(winlist::collect_windows());
+        let windows = thumbs::snapshot(&app, winlist::collect_windows());
         let payload = serde_json::to_value(&windows).unwrap_or_default();
 
         let a = app.clone();

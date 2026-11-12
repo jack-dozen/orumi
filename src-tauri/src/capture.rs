@@ -7,6 +7,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
+    collections::HashMap,
     ffi::c_void,
     fs,
     io::Cursor,
@@ -76,6 +77,23 @@ fn files_for(dir: &Path, hwnd: i64) -> Vec<PathBuf> {
 /// Newest cached thumbnail of a window, if there is one. Never captures.
 pub fn latest(dir: &Path, hwnd: i64) -> Option<PathBuf> {
     files_for(dir, hwnd).pop()
+}
+
+/// Newest cached thumbnail of every window, from a single directory scan.
+pub fn latest_all(dir: &Path) -> HashMap<i64, PathBuf> {
+    let mut map: HashMap<i64, PathBuf> = HashMap::new();
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        let Some(stem) = name.strip_suffix(".jpg") else { continue };
+        let Some((hwnd, _seq)) = stem.split_once('_') else { continue };
+        let Ok(hwnd) = hwnd.parse::<i64>() else { continue };
+        // File names are zero-padded, so the greater name is the newer capture.
+        if map.get(&hwnd).is_none_or(|old| path > *old) {
+            map.insert(hwnd, path);
+        }
+    }
+    map
 }
 
 fn is_fresh(path: &Path) -> bool {
