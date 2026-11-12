@@ -140,7 +140,7 @@ pub fn set_free_rect(label: &'static str, rect: Option<(f64, f64, f64, f64)>) {
 /// what they show (the preview window is bigger than its card so the card can move inside it).
 static HIT_RECT: Mutex<Vec<(&'static str, (f64, f64, f64, f64))>> = Mutex::new(Vec::new());
 
-fn hit_rect(label: &str) -> Option<(f64, f64, f64, f64)> {
+pub fn hit_rect(label: &str) -> Option<(f64, f64, f64, f64)> {
     HIT_RECT
         .lock()
         .ok()
@@ -505,6 +505,11 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 }
 
                 let (win_rect, trigger_rect) = layout(&p.spec, m);
+                // A free window may be larger than what it shows: keep it open only while the
+                // cursor is over its logical hit area, not over the whole (transparent) window.
+                let win_rect = hit_rect(p.spec.label)
+                    .map(|(x, y, w, h)| Rect { x, y, w, h })
+                    .unwrap_or(win_rect);
 
                 if !p.visible {
                     if trigger_rect.contains(cursor.x, cursor.y) {

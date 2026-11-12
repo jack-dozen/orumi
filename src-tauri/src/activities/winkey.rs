@@ -62,7 +62,7 @@ const POLL_MS: u64 = 8;
 const MASK_DEDUPE_MS: u32 = 60;
 
 /// true = print diagnostic logs to stderr (see the `npm run tauri dev` console).
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 /// The hook saw another key (or another event) pressed while Win was held. Cleared by the poller

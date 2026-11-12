@@ -19,6 +19,7 @@ mod activities;
 mod taskbar;
 mod icons;
 mod previews;
+mod capture;
 
 use std::{
     collections::HashMap,
@@ -185,7 +186,7 @@ pub fn run() {
         .setup(|app| {
             let cfg = config::load(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
-            previews::clear_cache(app.handle());
+            capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
             taskbar::apply(app.handle(), cfg.taskbar_autohide);
             app.manage(config::ConfigState::new(cfg.clone()));
