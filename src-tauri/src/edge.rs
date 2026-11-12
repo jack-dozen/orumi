@@ -350,18 +350,40 @@ fn monitor_metrics(window: &WebviewWindow) -> Option<Metrics> {
     ))
 }
 
-/// Place the window at the correct position and size.
+/// Place the window at the correct position and size in a single atomic Win32 call.
 pub fn place(window: &WebviewWindow, spec: &PanelSpec) -> tauri::Result<()> {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER},
+    };
+
     if let Some(m) = monitor_metrics(window) {
         let (win, _) = layout(spec, m);
-        let size = PhysicalSize::new(win.w.round() as u32, win.h.round() as u32);
-        let pos = PhysicalPosition::new(win.x.round() as i32, win.y.round() as i32);
+        let w = win.w.round() as u32;
+        let h = win.h.round() as u32;
+        let x = win.x.round() as i32;
+        let y = win.y.round() as i32;
+        let size = PhysicalSize::new(w, h);
+        let pos = PhysicalPosition::new(x, y);
         // Every SetWindowPos makes WebView2 resize its surface, so skip what is already right.
-        if window.outer_size().ok() != Some(size) {
-            window.set_size(size)?;
-        }
-        if window.outer_position().ok() != Some(pos) {
-            window.set_position(pos)?;
+        if window.outer_size().ok() != Some(size) || window.outer_position().ok() != Some(pos) {
+            if let Ok(raw) = window.hwnd() {
+                let hwnd = HWND(raw.0 as isize as *mut c_void);
+                unsafe {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        None,
+                        x,
+                        y,
+                        w as i32,
+                        h as i32,
+                        SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            } else {
+                window.set_size(size)?;
+                window.set_position(pos)?;
+            }
         }
     }
     Ok(())

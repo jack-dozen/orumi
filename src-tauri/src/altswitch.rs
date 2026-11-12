@@ -431,8 +431,8 @@ struct GridLayout {
     pad: f64,
 }
 
-/// Columns and rows for `n` windows on a screen of `screen` design units, plus the window size
-/// that fits them. Many windows wrap into several balanced rows, like the native Alt+Tab.
+/// Columns and rows for `n` windows on a screen of `screen` design units, plus the fixed maximum
+/// window size for that screen so the native WebView2 window never resizes when `n` changes.
 fn grid_layout(n: usize, screen: (f64, f64)) -> (GridLayout, (f64, f64)) {
     let n = n.max(1);
     let max_w = (screen.0 * MAX_W_FRACTION).min(MAX_PANEL_W);
@@ -443,10 +443,9 @@ fn grid_layout(n: usize, screen: (f64, f64)) -> (GridLayout, (f64, f64)) {
     let rows_max =
         (((screen.1 * MAX_H_FRACTION - 2.0 * GRID_PAD + GRID_GAP) / (CARD_H + GRID_GAP)).floor() as usize)
             .max(1);
-    let rows = rows_all.min(rows_max);
 
-    let w = cols as f64 * (CARD_W + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
-    let h = rows as f64 * (CARD_H + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
+    let win_w = cols_max as f64 * (CARD_W + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
+    let win_h = rows_max as f64 * (CARD_H + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
     let layout = GridLayout {
         cols,
         rows: rows_all,
@@ -455,7 +454,7 @@ fn grid_layout(n: usize, screen: (f64, f64)) -> (GridLayout, (f64, f64)) {
         gap: GRID_GAP,
         pad: GRID_PAD,
     };
-    (layout, (w, h))
+    (layout, (win_w, win_h))
 }
 
 /// Primary monitor size in design units.
@@ -493,7 +492,7 @@ static CAPTURE_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
 fn capture_pool() -> &'static rayon::ThreadPool {
     CAPTURE_POOL.get_or_init(|| {
         rayon::ThreadPoolBuilder::new()
-            .num_threads(2)
+            .num_threads(1)
             .thread_name(|i| format!("switcher-capture-{i}"))
             .build()
             .expect("switcher capture thread pool")
@@ -503,33 +502,34 @@ fn capture_pool() -> &'static rayon::ThreadPool {
 /// Capture fresh thumbnails in the background and tell the UI about every file that changed.
 /// `known` is what the preparing payload already contained. Waits for the opening animation to
 /// finish first, and does nothing if the panel was closed in the meantime (a quick Alt+Tab tap
-/// never captures anything).
-fn refresh_thumbs(app: &AppHandle, dir: PathBuf, known: HashMap<i64, PathBuf>, hwnds: Vec<i64>) {
+/// never captures anything). Windows missing a cached thumbnail are captured first.
+fn refresh_thumbs(app: &AppHandle, dir: PathBuf, known: HashMap<i64, PathBuf>, mut hwnds: Vec<i64>) {
     let app = app.clone();
     capture_pool().spawn(move || {
-        use rayon::prelude::*;
         thread::sleep(REFRESH_DELAY);
-        hwnds.par_iter().for_each(|&hwnd| {
+        hwnds.sort_by_key(|h| known.contains_key(h));
+        for hwnd in hwnds {
             if !PANEL_OPEN.load(Ordering::Relaxed)
                 || !PREVIEWS_ENABLED.load(Ordering::Relaxed)
             {
                 return;
             }
-            let Some(path) = capture::refresh(&dir, hwnd) else { return };
+            let Some(path) = capture::refresh(&dir, hwnd) else { continue };
             if !PANEL_OPEN.load(Ordering::Relaxed)
                 || !PREVIEWS_ENABLED.load(Ordering::Relaxed)
             {
                 return;
             }
             if known.get(&hwnd) == Some(&path) {
-                return;
+                continue;
             }
-            let _ = app.asset_protocol_scope().allow_file(&path);
-            let _ = app.emit(
+            let _ = app.emit_to(
+                "switcher",
                 "switcher-thumb",
                 ThumbPayload { hwnd, thumb: path.to_string_lossy().into_owned() },
             );
-        });
+            thread::sleep(Duration::from_millis(8));
+        }
     });
 }
 
@@ -559,19 +559,16 @@ fn prepare(app: &AppHandle, s: &mut Session) {
         None
     };
     s.known = s.dir.as_deref().map(capture::latest_all).unwrap_or_default();
-    let scope = app.asset_protocol_scope();
     let items: Vec<SwItem> = s
         .items
         .iter()
         .map(|entry| {
-            let thumb = s.known.get(&entry.hwnd).map(|p| {
-                let _ = scope.allow_file(p);
-                p.to_string_lossy().into_owned()
-            });
+            let thumb = s.known.get(&entry.hwnd).map(|p| p.to_string_lossy().into_owned());
             SwItem { entry, thumb }
         })
         .collect();
-    let _ = app.emit(
+    let _ = app.emit_to(
+        "switcher",
         "switcher-items",
         ItemsPayload { items, index: s.index, layout: s.layout },
     );
@@ -589,7 +586,7 @@ fn prepare(app: &AppHandle, s: &mut Session) {
 fn show(app: &AppHandle, s: &mut Session) {
     s.shown = true;
     PANEL_OPEN.store(true, Ordering::Relaxed);
-    let _ = app.emit("switcher-select", s.index);
+    let _ = app.emit_to("switcher", "switcher-select", s.index);
     app.state::<Panels>().set("switcher", true);
     if DEBUG_TIMING {
         eprintln!("[alt+tab] panel requested {} ms after the key press", s.started.elapsed().as_millis());
@@ -615,7 +612,7 @@ fn hide_panel(app: &AppHandle) {
 /// Tell the UI which item is selected (showing the panel first if it is not visible yet).
 fn select(app: &AppHandle, s: &mut Session) {
     if s.shown {
-        let _ = app.emit("switcher-select", s.index);
+        let _ = app.emit_to("switcher", "switcher-select", s.index);
     } else {
         show(app, s); // user is cycling through items: show it now
     }
@@ -673,6 +670,7 @@ fn cancel(app: &AppHandle, session: &mut Option<Session>) {
 fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
     match msg {
         Msg::Start { reverse } => {
+            let started = Instant::now();
             // First, suppress the active app's menu bar while Alt is still held.
             unsafe { mask_alt_menu() };
 
@@ -703,7 +701,7 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
                 items,
                 index,
                 shown: false,
-                started: Instant::now(),
+                started,
                 layout,
                 window,
                 dir: None,
@@ -877,10 +875,24 @@ pub fn switcher_get_previews() -> bool {
 
 /// Install the hook and start the worker and watchdog threads.
 pub fn start(app: AppHandle) {
+    // Pre-size the switcher window once to its maximum grid bounds so the first Alt+Tab never
+    // triggers a WebView2 surface resize.
+    let (_, win) = grid_layout(1, screen_size(&app).unwrap_or((1536.0, 864.0)));
+    let size = (win.0.round() as i64, win.1.round() as i64);
+    if let Ok(mut l) = LAST_WINDOW.lock() {
+        *l = Some(size);
+    }
+    edge::set_size_override("switcher", Some(win));
+    crate::place_panel(&app, "switcher");
+
     let (tx, rx) = mpsc::channel::<Msg>();
     let _ = TX.set(tx);
     let (hook_ready_tx, hook_ready_rx) = mpsc::sync_channel(1);
-    thread::spawn(move || worker(app, rx));
+    thread::spawn(move || {
+        // Warm up the window metadata cache in the background at startup.
+        let _ = winlist::collect_windows();
+        worker(app, rx);
+    });
     thread::spawn(watchdog);
 
     thread::spawn(move || unsafe {

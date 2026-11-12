@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 
 /**
- * Shows a thumbnail. The file is decoded off-screen first (also on first mount), so the image is
- * ready when it is painted, and a changed file replaces the old one only once it is decoded.
+ * Shows a thumbnail. Initial mount uses async image decoding directly; when `src` changes later,
+ * the replacement is decoded off-screen first so the image never blinks blank.
  */
 export default function Thumb({ src }: { src: string }) {
   const [shown, setShown] = useState(src);
 
   useEffect(() => {
+    if (src === shown) return;
     let cancelled = false;
     const img = new Image();
     img.src = src;
@@ -20,7 +21,7 @@ export default function Thumb({ src }: { src: string }) {
     return () => {
       cancelled = true;
     };
-  }, [src]);
+  }, [src, shown]);
 
-  return <img src={shown} alt="" draggable={false} />;
+  return <img src={shown} alt="" decoding="async" draggable={false} />;
 }

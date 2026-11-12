@@ -1392,6 +1392,7 @@ button {
   display: flex;
   justify-content: center;
   align-items: flex-end;
+  pointer-events: none;
 }
 
 .swpanel {
@@ -1404,11 +1405,15 @@ button {
   scrollbar-width: none;
   background: var(--surface);
   border-radius: 28px 28px 0 0;
+  pointer-events: none;
 
-  transform: translateY(100%);
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 120ms ease-out;
   /* Own compositor layer: the slide-in runs without main-thread work. */
-  will-change: transform;
+  will-change: transform, opacity;
 }
 
 .swpanel::-webkit-scrollbar {
@@ -1416,7 +1421,9 @@ button {
 }
 
 .swpanel--visible {
+  opacity: 1;
   transform: translateY(0);
+  pointer-events: auto;
 }
 
 /* Animation variants (see SWITCHER_ANIM in Switcher.tsx). */
@@ -1494,8 +1501,6 @@ button {
   object-fit: contain;
   display: block;
   pointer-events: none;
-  /* Plays when the image first replaces the icon placeholder (not on later refreshes). */
-  animation: pvimg 160ms ease-out;
 }
 
 .swlabel {

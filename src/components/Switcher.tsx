@@ -41,6 +41,7 @@ export default function Switcher() {
   const [index, setIndex] = useState(0);
   // Newest thumbnail file per window: set by the opening payload, refreshed by "switcher-thumb".
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
+  const panelRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
   // Probe: when Rust first asked to show the panel in this session (see FRAME_PROBE).
   const shownAtRef = useRef<number | null>(null);
@@ -97,9 +98,21 @@ export default function Switcher() {
   }, [visible]);
 
   // Keep the selected card visible when there are more rows than fit on screen.
+  // Scroll the panel element directly via offsetTop instead of scrollIntoView() so a
+  // transformed panel never scrolls #root/body and causes a jump when opening.
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "nearest" });
-  }, [index, items]);
+    const panel = panelRef.current;
+    const card = activeRef.current;
+    if (!panel || !card) return;
+    const pad = layout?.pad ?? 16;
+    const top = card.offsetTop - pad;
+    const bottom = card.offsetTop + card.offsetHeight + pad;
+    if (top < panel.scrollTop) {
+      panel.scrollTop = top;
+    } else if (bottom > panel.scrollTop + panel.clientHeight) {
+      panel.scrollTop = bottom - panel.clientHeight;
+    }
+  }, [index, items, layout]);
 
   const gridStyle: CSSProperties | undefined = layout
     ? {
@@ -113,6 +126,7 @@ export default function Switcher() {
   return (
     <div className="swroot">
       <div
+        ref={panelRef}
         className={`swpanel swpanel--${SWITCHER_ANIM} ${visible ? "swpanel--visible" : ""}`}
       >
         <div className="swgrid" style={gridStyle}>
