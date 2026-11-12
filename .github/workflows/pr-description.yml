@@ -18,7 +18,7 @@ jobs:
 
       - name: Generate PR description
         id: pr-description
-        uses: octue/generate-pull-request-description@v1
+        uses: octue/generate-pull-request-description@1.0.0
         with:
           pull_request_url: ${{ github.event.pull_request.url }}
           api_token: ${{ secrets.GITHUB_TOKEN }}
