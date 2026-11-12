@@ -7,7 +7,10 @@ use std::{
     ffi::c_void,
     mem::size_of,
     path::Path,
-    sync::{mpsc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicIsize, Ordering},
+        mpsc, Mutex, OnceLock,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -151,6 +154,8 @@ struct MetaCache {
 }
 
 static META_CACHE: OnceLock<Mutex<MetaCache>> = OnceLock::new();
+/// Last foreground HWND belonging to another process (so focus can be restored when our panels close).
+static LAST_EXTERNAL_FG: AtomicIsize = AtomicIsize::new(0);
 
 fn meta_cache() -> &'static Mutex<MetaCache> {
     META_CACHE.get_or_init(|| Mutex::new(MetaCache::default()))
@@ -325,10 +330,19 @@ pub fn collect_windows() -> Vec<WindowEntry> {
     let mut guard = meta_cache().lock().ok();
     let cache = guard.as_deref_mut().unwrap_or(&mut fallback);
 
+    let my_pid = std::process::id();
+    let foreground = unsafe { GetForegroundWindow() };
+    let mut fg_pid: u32 = 0;
+    if !foreground.0.is_null() {
+        unsafe {
+            GetWindowThreadProcessId(foreground, Some(&mut fg_pid));
+        }
+    }
+
     let mut ctx = Ctx {
         list: Vec::new(),
-        my_pid: std::process::id(),
-        foreground: unsafe { GetForegroundWindow() },
+        my_pid,
+        foreground,
         cache,
         seen_hwnds: HashSet::new(),
         seen_pids: HashSet::new(),
@@ -336,10 +350,50 @@ pub fn collect_windows() -> Vec<WindowEntry> {
     unsafe {
         let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut Ctx<'_> as isize));
     }
-    let Ctx { list, cache, seen_hwnds, seen_pids, .. } = ctx;
+    let Ctx { mut list, cache, seen_hwnds, seen_pids, .. } = ctx;
     cache.wins.retain(|k, _| seen_hwnds.contains(k));
     cache.procs.retain(|k, _| seen_pids.contains(k));
+
+    if let Some(first_focused) = list.iter().find(|w| w.focused) {
+        LAST_EXTERNAL_FG.store(first_focused.hwnd as isize, Ordering::Relaxed);
+    } else if fg_pid == my_pid && !list.is_empty() {
+        // An ORUMI panel (e.g. launcher or notch) currently holds foreground focus: treat the
+        // previously active external window (or topmost non-minimized window) as focused so
+        // Alt+Tab switches away from it to the next window.
+        let last_ext = LAST_EXTERNAL_FG.load(Ordering::Relaxed) as i64;
+        if let Some(w) = list.iter_mut().find(|w| w.hwnd == last_ext && !w.minimized) {
+            w.focused = true;
+        } else if let Some(w) = list.iter_mut().find(|w| !w.minimized) {
+            w.focused = true;
+        }
+    }
     list
+}
+
+/// If an ORUMI window currently holds foreground focus, return focus to the last active external window.
+pub fn restore_external_foreground_if_ours() {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.0.is_null() {
+            return;
+        }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        if pid != std::process::id() {
+            return;
+        }
+        let target = LAST_EXTERNAL_FG.load(Ordering::Relaxed);
+        if target != 0 {
+            let h = HWND(target as *mut c_void);
+            if IsWindowVisible(h).as_bool() && !IsIconic(h).as_bool() {
+                SwitchToThisWindow(h, true);
+                return;
+            }
+        }
+        if let Some(first) = collect_windows().into_iter().find(|w| !w.minimized) {
+            SwitchToThisWindow(to_hwnd(first.hwnd), true);
+        }
+    }
 }
 
 #[tauri::command]
@@ -394,7 +448,7 @@ static EVENT_TX: OnceLock<mpsc::Sender<()>> = OnceLock::new();
 /// The callback must be as fast as possible: only notify the worker thread.
 unsafe extern "system" fn on_event(
     _hook: HWINEVENTHOOK,
-    _event: u32,
+    event: u32,
     hwnd: HWND,
     id_object: i32,
     id_child: i32,
@@ -404,6 +458,18 @@ unsafe extern "system" fn on_event(
     // Child controls (buttons, sliders) also report events; we only want the parent window.
     if hwnd.0.is_null() || id_object != 0 || id_child != 0 {
         return;
+    }
+    if event == 0x0003 {
+        // EVENT_SYSTEM_FOREGROUND: track external foreground windows and keep the Alt+Tab hook fresh.
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid != 0 && pid != std::process::id() {
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            if ex_style & WS_EX_TOOLWINDOW.0 == 0 && IsWindowVisible(hwnd).as_bool() {
+                LAST_EXTERNAL_FG.store(hwnd.0 as isize, Ordering::Relaxed);
+            }
+        }
+        crate::altswitch::ensure_hook("foreground event");
     }
     if let Some(tx) = EVENT_TX.get() {
         let _ = tx.send(());

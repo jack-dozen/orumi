@@ -76,9 +76,10 @@ const ALT_POLL_GRACE: Duration = Duration::from_millis(300);
 /// Windows taking longer than this are logged in the terminal.
 const SLOW_LIST_MS: u128 = 40;
 /// Minimum interval between hook reinstalls by the watchdog.
-const REINSTALL_COOLDOWN_MS: u64 = 5000;
-const WATCHDOG_POLL: Duration = Duration::from_millis(10);
-const MISSED_TAB_GRACE_MS: u64 = 40;
+const REINSTALL_COOLDOWN_MS: u64 = 200;
+const PROACTIVE_REINSTALL_DEBOUNCE_MS: u64 = 40;
+const WATCHDOG_POLL: Duration = Duration::from_millis(4);
+const MISSED_TAB_GRACE_MS: u64 = 0;
 const RECENT_TAB_SEEN_MS: u64 = 80;
 /// Let the panel settle before thumbnail capture can compete for CPU time.
 const REFRESH_DELAY: Duration = Duration::from_millis(400);
@@ -110,6 +111,10 @@ static ACTIVE: AtomicBool = AtomicBool::new(false);
 static SWALLOWED: AtomicU8 = AtomicU8::new(0);
 /// When the hook last saw a physical Tab keydown (ms since START). Used by the watchdog.
 static LAST_TAB_SEEN: AtomicU64 = AtomicU64::new(0);
+/// When the hook last saw a physical Alt keydown (ms since START). Used to recover the hook on Alt-down before Tab is pressed.
+static LAST_ALT_SEEN: AtomicU64 = AtomicU64::new(0);
+/// When a hook reinstall was last requested (ms since START), to debounce bursts of focus/panel events.
+static LAST_REINSTALL_REQ: AtomicU64 = AtomicU64::new(0);
 /// ID of the thread holding the hook (0 = not running yet).
 static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
 static START: OnceLock<Instant> = OnceLock::new();
@@ -167,6 +172,7 @@ fn send(m: Msg) {
 fn reinstall() {
     let tid = HOOK_THREAD.load(Ordering::Relaxed);
     if tid != 0 {
+        LAST_REINSTALL_REQ.store(now_ms().max(1), Ordering::Relaxed);
         unsafe {
             if let Err(error) = PostThreadMessageW(tid, WM_REINSTALL, WPARAM(0), LPARAM(0)) {
                 eprintln!("[alt+tab] gagal meminta hook dipasang ulang: {error}");
@@ -175,22 +181,37 @@ fn reinstall() {
     }
 }
 
+/// Proactively refresh the low-level keyboard hook after focus/panel/setting transitions so
+/// Alt+Tab never misses the first Tab keystroke or flashes the native Windows switcher.
+pub fn ensure_hook(reason: &'static str) {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    let now = now_ms().max(1);
+    let last = LAST_REINSTALL_REQ.load(Ordering::Relaxed);
+    if last != 0 && now.saturating_sub(last) < PROACTIVE_REINSTALL_DEBOUNCE_MS {
+        return;
+    }
+    LAST_REINSTALL_REQ.store(now, Ordering::Relaxed);
+    if DEBUG_TIMING {
+        eprintln!("[alt+tab] memastikan hook aktif ({reason})");
+    }
+    reinstall();
+}
+
 /// A launcher close can follow a focus transition that leaves the low-level hook detached.
 pub fn launcher_closed() {
-    if ENABLED.load(Ordering::Relaxed) {
-        eprintln!("[alt+tab] launcher ditutup; meminta hook dipasang ulang");
-        reinstall();
-    }
+    ensure_hook("launcher closed");
 }
 
 /// Enable/disable the Alt+Tab replacement. Disabling also cancels any active session;
-/// enabling reinstalls the hook in case Windows has removed it.
+/// enabling reinstalls the hook in case Windows or WebView2 has detached it.
 pub fn set_enabled(on: bool) {
-    let was = ENABLED.swap(on, Ordering::Relaxed);
+    let _was = ENABLED.swap(on, Ordering::Relaxed);
     if !on {
         ACTIVE.store(false, Ordering::Relaxed);
         send(Msg::Cancel);
-    } else if !was {
+    } else {
         reinstall();
     }
 }
@@ -280,8 +301,14 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
     let alt_async = (vk == VK_TAB || ACTIVE.load(Ordering::Relaxed)) && async_down(VK_MENU);
     let alt_down = alt_flag || alt_async;
 
+    let injected = kb.flags.0 & LLKHF_INJECTED != 0;
+    let is_alt_key = matches!(vk, VK_MENU | VK_LMENU | VK_RMENU);
+    if is_alt_key && down && !injected {
+        LAST_ALT_SEEN.store(now_ms(), Ordering::Relaxed);
+    }
+
     if vk == VK_TAB && down {
-        if kb.flags.0 & LLKHF_INJECTED == 0 {
+        if !injected {
             LAST_TAB_SEEN.store(now_ms(), Ordering::Relaxed);
         }
         let mut t = TRACE_PRESENT;
@@ -291,7 +318,7 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
             }
         };
         set(ENABLED.load(Ordering::Relaxed), TRACE_ENABLED);
-        set(kb.flags.0 & LLKHF_INJECTED != 0, TRACE_INJECTED);
+        set(injected, TRACE_INJECTED);
         set(alt_flag, TRACE_ALT_FLAG);
         set(alt_async, TRACE_ALT_ASYNC);
         set(async_down(VK_CONTROL), TRACE_CTRL);
@@ -302,9 +329,6 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
     if !ENABLED.load(Ordering::Relaxed) {
         return false;
     }
-
-    let injected = kb.flags.0 & LLKHF_INJECTED != 0;
-    let is_alt_key = matches!(vk, VK_MENU | VK_LMENU | VK_RMENU);
 
     // Alt released: session ends. Always pass the Alt-up event through.
     if is_alt_key && up {
@@ -674,6 +698,18 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
             // First, suppress the active app's menu bar while Alt is still held.
             unsafe { mask_alt_menu() };
 
+            // Close any open ORUMI interactive overlays (launcher, notch, overlay, activities)
+            // so pressing Alt+Tab while launcher/notch is open cleanly transitions to switching windows.
+            let panels = app.state::<Panels>();
+            for label in ["launcher", "notch", "overlay", "preview"] {
+                if panels.is_open(label) {
+                    panels.set(label, false);
+                }
+            }
+            if crate::activities::is_open() {
+                crate::activities::dismiss(app);
+            }
+
             let t = Instant::now();
             let items = winlist::collect_windows();
             let ms = t.elapsed().as_millis();
@@ -775,20 +811,25 @@ fn worker(app: AppHandle, rx: Receiver<Msg>) {
     }
 }
 
-/// Watchdog: if Alt+Tab is physically pressed but the hook never sees Tab, Windows may have
-/// removed the hook (or the active window may be running as administrator).
-/// Reinstall it no more than once per REINSTALL_COOLDOWN_MS.
+/// Watchdog:
+/// 1. As soon as Alt is pressed (`alt_down && !was_alt_down`), if the hook did not see Alt-down,
+///    reinstall the hook immediately BEFORE the user presses Tab so Tab is swallowed cleanly with zero flash.
+/// 2. If Alt+Tab is physically pressed and the hook still missed Tab, reinstall the hook, dismiss
+///    the native switcher immediately, and open the custom switcher.
 fn watchdog() {
     let mut last_reinstall: Option<u64> = None;
     let mut combo: Option<(u64, u64, bool)> = None;
+    let mut was_alt_down = false;
     loop {
         thread::sleep(WATCHDOG_POLL);
         if DIAG.swap(0, Ordering::Relaxed) & 1 != 0 {
             eprintln!("[alt+tab] Alt+Tab handed to Windows: Ctrl or Win was held down");
         }
+        let alt_down = async_down(VK_MENU);
+        let tab_down = async_down(VK_TAB);
         let trace = TAB_TRACE.swap(0, Ordering::Relaxed);
         let alt_context =
-            trace & (TRACE_ALT_FLAG | TRACE_ALT_ASYNC) != 0 || async_down(VK_MENU) && async_down(VK_TAB);
+            trace & (TRACE_ALT_FLAG | TRACE_ALT_ASYNC) != 0 || (alt_down && tab_down);
         if DEBUG_TIMING && trace & TRACE_PRESENT != 0 && alt_context {
             let f = |bit: u32| trace & bit != 0;
             eprintln!(
@@ -806,13 +847,32 @@ fn watchdog() {
         }
         if !ENABLED.load(Ordering::Relaxed) {
             combo = None;
-            continue;
-        }
-        if !(async_down(VK_MENU) && async_down(VK_TAB)) {
-            combo = None;
+            was_alt_down = false;
             continue;
         }
         let now = now_ms();
+        if alt_down && !was_alt_down && !tab_down {
+            let last_alt = LAST_ALT_SEEN.load(Ordering::Relaxed);
+            let hook_saw_alt = last_alt != 0 && now.saturating_sub(last_alt) <= RECENT_TAB_SEEN_MS;
+            if !hook_saw_alt {
+                eprintln!("[alt+tab] Alt-down terlewat oleh hook; memasang ulang hook sebelum Tab ditekan");
+                reinstall();
+                last_reinstall = Some(now);
+            }
+        }
+        was_alt_down = alt_down;
+
+        if !(alt_down && tab_down) {
+            combo = None;
+            continue;
+        }
+        if (!HANDLE_CTRL_ALT_TAB && async_down(VK_CONTROL))
+            || async_down(VK_LWIN)
+            || async_down(VK_RWIN)
+        {
+            combo = None;
+            continue;
+        }
         let last_tab_seen = LAST_TAB_SEEN.load(Ordering::Relaxed);
         let (started, seen_at_start, mut hook_saw_tab) = *combo.get_or_insert_with(|| {
             (
@@ -830,7 +890,7 @@ fn watchdog() {
             .unwrap_or(true);
         if !hook_saw_tab && now.saturating_sub(started) >= MISSED_TAB_GRACE_MS && cooldown_elapsed {
             last_reinstall = Some(now);
-            combo = None;
+            combo = Some((started, last_tab_seen, true));
             eprintln!("[alt+tab] Tab terlewat; memasang ulang hook");
             reinstall();
             if async_down(VK_MENU) && async_down(VK_TAB) {
@@ -866,6 +926,7 @@ pub fn switcher_pick(index: usize) {
 pub fn switcher_set_previews(enabled: bool) {
     PREVIEWS_ENABLED.store(enabled, Ordering::Relaxed);
     send(Msg::SetPreviews(enabled));
+    ensure_hook("preview mode changed");
 }
 
 #[tauri::command]
@@ -910,14 +971,19 @@ pub fn start(app: AppHandle) {
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             if msg.message == WM_REINSTALL {
+                // Install the new hook first so it is placed at the head of the hook chain
+                // before the old hook handle is removed (leaving zero unhooked gap).
+                let new_hook = install_hook();
                 if let Some(h) = hook.take() {
                     let _ = UnhookWindowsHookEx(h);
                 }
-                hook = install_hook();
-                eprintln!(
-                    "[alt+tab] hook dipasang ulang: {}",
-                    if hook.is_some() { "ok" } else { "gagal" }
-                );
+                hook = new_hook;
+                if DEBUG_TIMING {
+                    eprintln!(
+                        "[alt+tab] hook dipasang ulang: {}",
+                        if hook.is_some() { "ok" } else { "gagal" }
+                    );
+                }
                 continue;
             }
             let _ = TranslateMessage(&msg);
