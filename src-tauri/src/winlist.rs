@@ -3,10 +3,11 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::{
+    collections::{HashMap, HashSet},
     ffi::c_void,
     mem::size_of,
     path::Path,
-    sync::{mpsc, OnceLock},
+    sync::{mpsc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -27,9 +28,10 @@ use windows::{
             WindowsAndMessaging::{
                 DispatchMessageW, EnumWindows, GetClassNameW, GetForegroundWindow, GetMessageW,
                 GetWindow, GetWindowLongW, GetWindowTextLengthW, GetWindowTextW,
-                GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, SwitchToThisWindow,
-                ShowWindow, TranslateMessage, GWL_EXSTYLE, GW_OWNER, MSG, SW_MINIMIZE,
-                SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+                GetWindowThreadProcessId, IsHungAppWindow, IsIconic, IsWindowVisible,
+                SetForegroundWindow, ShowWindow, SwitchToThisWindow, TranslateMessage, GWL_EXSTYLE,
+                GW_OWNER, MSG, SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW,
+                WS_EX_TOOLWINDOW,
             },
         },
     },
@@ -130,9 +132,57 @@ unsafe fn has_visible_owner(hwnd: HWND) -> bool {
         .unwrap_or(false)
 }
 
+#[derive(Clone)]
+struct WinMeta {
+    pid: u32,
+    class: String,
+    path: String,
+    exe: String,
+    lower: String,
+    aumid: String,
+}
+
+#[derive(Default)]
+struct MetaCache {
+    /// pid -> (full path, exe stem, lowercase filename)
+    procs: HashMap<u32, (String, String, String)>,
+    /// hwnd -> static window metadata
+    wins: HashMap<isize, WinMeta>,
+}
+
+static META_CACHE: OnceLock<Mutex<MetaCache>> = OnceLock::new();
+
+fn meta_cache() -> &'static Mutex<MetaCache> {
+    META_CACHE.get_or_init(|| Mutex::new(MetaCache::default()))
+}
+
 /// Return an entry if this window belongs in the "alt-tab" list.
-unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEntry> {
+unsafe fn inspect(
+    hwnd: HWND,
+    my_pid: u32,
+    foreground: HWND,
+    cache: &mut MetaCache,
+    seen_hwnds: &mut HashSet<isize>,
+    seen_pids: &mut HashSet<u32>,
+) -> Option<WindowEntry> {
     if !IsWindowVisible(hwnd).as_bool() {
+        return None;
+    }
+
+    // Fast in-process checks first before DWM / cross-process queries.
+    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+    if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+        return None;
+    }
+    // A dialog owned by another window is not counted separately unless it requests a taskbar button.
+    if ex_style & WS_EX_APPWINDOW.0 == 0 && has_visible_owner(hwnd) {
+        return None;
+    }
+
+    // Our own windows (bar, notch, launcher, overlay, switcher, etc.).
+    let mut pid: u32 = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    if pid == 0 || pid == my_pid {
         return None;
     }
 
@@ -149,12 +199,74 @@ unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEnt
         return None;
     }
 
-    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-    if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+    // Skip hung windows before GetWindowTextW (which sends WM_GETTEXT and can block).
+    if IsHungAppWindow(hwnd).as_bool() {
         return None;
     }
-    // A dialog owned by another window is not counted separately unless it requests a taskbar button.
-    if ex_style & WS_EX_APPWINDOW.0 == 0 && has_visible_owner(hwnd) {
+
+    let key = hwnd.0 as isize;
+    seen_hwnds.insert(key);
+    seen_pids.insert(pid);
+
+    let meta = match cache.wins.get(&key) {
+        Some(m) if m.pid == pid => m.clone(),
+        _ => {
+            let class = class_name(hwnd);
+            let (path, exe, lower) = cache
+                .procs
+                .entry(pid)
+                .or_insert_with(|| {
+                    let p = process_path(pid);
+                    let file = Path::new(&p)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let low = file.to_lowercase();
+                    let stem = if low == "applicationframehost.exe" {
+                        String::new()
+                    } else {
+                        Path::new(&file)
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    };
+                    (p, stem, low)
+                })
+                .clone();
+            let is_store_frame =
+                lower == "applicationframehost.exe" && class == "ApplicationFrameWindow";
+            let aumid = if is_store_frame {
+                window_aumid(hwnd).unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let m = WinMeta {
+                pid,
+                class,
+                path: if is_store_frame { String::new() } else { path },
+                exe,
+                lower,
+                aumid,
+            };
+            cache.wins.insert(key, m.clone());
+            m
+        }
+    };
+
+    // Core Store app window; users interact with its ApplicationFrameWindow.
+    if meta.class == "Windows.UI.Core.CoreWindow" {
+        return None;
+    }
+
+    let is_explorer_window = meta.class == "CabinetWClass" || meta.class == "ExploreWClass";
+    if meta.lower == "conhost.exe"
+        || meta.lower == "shellexperiencehost.exe"
+        || meta.lower == "startmenuexperiencehost.exe"
+        || meta.lower == "searchhost.exe"
+        || meta.lower == "textinputhost.exe"
+        || (meta.lower == "explorer.exe" && !is_explorer_window)
+        || (meta.lower == "applicationframehost.exe" && meta.class != "ApplicationFrameWindow")
+    {
         return None;
     }
 
@@ -172,72 +284,36 @@ unsafe fn inspect(hwnd: HWND, my_pid: u32, foreground: HWND) -> Option<WindowEnt
         return None;
     }
 
-    // Our own windows (bar, notch, launcher, overlay).
-    let mut pid: u32 = 0;
-    GetWindowThreadProcessId(hwnd, Some(&mut pid));
-    if pid == my_pid {
-        return None;
-    }
-
-    let class = class_name(hwnd);
-    // Core Store app window; users interact with its ApplicationFrameWindow.
-    if class == "Windows.UI.Core.CoreWindow" {
-        return None;
-    }
-
-    let path = process_path(pid);
-    let file = Path::new(&path)
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let lower = file.to_lowercase();
-    let is_explorer_window = class == "CabinetWClass" || class == "ExploreWClass";
-
-    if lower == "conhost.exe"
-        || lower == "shellexperiencehost.exe"
-        || lower == "startmenuexperiencehost.exe"
-        || lower == "searchhost.exe"
-        || lower == "textinputhost.exe"
-        || (lower == "explorer.exe" && !is_explorer_window)
-        || (lower == "applicationframehost.exe" && class != "ApplicationFrameWindow")
-    {
-        return None;
-    }
-
-    let exe = if lower == "applicationframehost.exe" {
-        String::new()
-    } else {
-        Path::new(&file)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    };
-
-    let is_store_frame = exe.is_empty();
     Some(WindowEntry {
-        hwnd: hwnd.0 as isize as i64,
+        hwnd: key as i64,
         title,
         minimized: IsIconic(hwnd).as_bool(),
         focused: hwnd == foreground,
-        aumid: if is_store_frame {
-            window_aumid(hwnd).unwrap_or_default()
-        } else {
-            String::new()
-        },
-        path: if is_store_frame { String::new() } else { path },
-        exe,
+        aumid: meta.aumid,
+        path: meta.path,
+        exe: meta.exe,
     })
 }
 
-struct Ctx {
+struct Ctx<'a> {
     list: Vec<WindowEntry>,
     my_pid: u32,
     foreground: HWND,
+    cache: &'a mut MetaCache,
+    seen_hwnds: HashSet<isize>,
+    seen_pids: HashSet<u32>,
 }
 
 unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let ctx = &mut *(lparam.0 as *mut Ctx);
-    if let Some(entry) = inspect(hwnd, ctx.my_pid, ctx.foreground) {
+    let ctx = &mut *(lparam.0 as *mut Ctx<'_>);
+    if let Some(entry) = inspect(
+        hwnd,
+        ctx.my_pid,
+        ctx.foreground,
+        ctx.cache,
+        &mut ctx.seen_hwnds,
+        &mut ctx.seen_pids,
+    ) {
         ctx.list.push(entry);
     }
     true.into()
@@ -245,15 +321,25 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 
 /// Open windows, ordered from front to back. Synchronous; also used by Alt+Tab.
 pub fn collect_windows() -> Vec<WindowEntry> {
+    let mut fallback = MetaCache::default();
+    let mut guard = meta_cache().lock().ok();
+    let cache = guard.as_deref_mut().unwrap_or(&mut fallback);
+
     let mut ctx = Ctx {
         list: Vec::new(),
         my_pid: std::process::id(),
         foreground: unsafe { GetForegroundWindow() },
+        cache,
+        seen_hwnds: HashSet::new(),
+        seen_pids: HashSet::new(),
     };
     unsafe {
-        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut Ctx as isize));
+        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut Ctx<'_> as isize));
     }
-    ctx.list
+    let Ctx { list, cache, seen_hwnds, seen_pids, .. } = ctx;
+    cache.wins.retain(|k, _| seen_hwnds.contains(k));
+    cache.procs.retain(|k, _| seen_pids.contains(k));
+    list
 }
 
 #[tauri::command]

@@ -91,7 +91,7 @@ high-frequency threads once caused heap corruption (0xc0000374).
 | `icons.rs` | app icons via `IShellItemImageFactory` → PNG cache, dedicated COM STA thread; `app_icon(target)` with `aumid:<AppID>` or `path:<exe>`; `ICON_SIZE = 128`, `ICON_VERSION = 2` |
 | `previews.rs` | bar hover thumbnails: `PrintWindow` → JPEG in `app_cache_dir/previews/<hwnd>_<seq>.jpg`; `preview_open/keep/close_soon/close` with generation counter `GEN` |
 | `overlay.rs`, `brightness.rs`, `osd.rs` | volume (Core Audio) and popups; brightness (WMI events to read, COM worker to write, laptop panel only); hides the Windows 11 volume/brightness flyout |
-| `altswitch.rs` | custom Alt+Tab: `WH_KEYBOARD_LL` hook + worker + watchdog that re-installs the hook |
+| `altswitch.rs` | custom Alt+Tab: `WH_KEYBOARD_LL` hook + worker + watchdog; installs after the Activities hook so it runs first in the hook chain; re-installs after launcher close and rescues a missed Alt+Tab by dismissing the native switcher and starting the custom one |
 | `wallpaper.rs`, `theme.rs` | wallpaper list, thumbnail cache (rayon, background `warm`), `set_wallpaper`; theme from wallpaper (`wallpaper_pixels` downsized to 128 px in Rust), persist/broadcast theme |
 | `tray_flyout.rs` | `>` button in the bar opens the Windows hidden-icons flyout via UI Automation (moved next to the bar, best effort) |
 | `taskbar.rs` | taskbar auto-hide + `--guard` process (see 2.3) |
@@ -314,7 +314,7 @@ Priority is rough; "check" means suspected from reading code, not confirmed.
 - Unused command `wallpaper_image` can be removed.
 
 **Input and system**
-- First Alt+Tab after unlocking the screen uses the Windows default; re-install the hook when a session opens (~60 lines).
+- Alt+Tab hook recovery: launcher close requests a reinstall; watchdog polls for missed Alt+Tab presses and, while the chord is still held, dismisses the native switcher and starts the custom one. Desktop-switch recovery (lock/unlock) still needs verification.
 - Transparent areas of our windows capture clicks; a proper hit region (`SetWindowRgn`, see Bloom's `window_region.rs`) is not done.
 - Polling → events where possible (mouse hook for screen edges, `IAudioEndpointVolumeCallback`).
 - Security/stability todo (shared with vscroll-wm): re-install hooks after sleep and startup (chosen for the todo list),

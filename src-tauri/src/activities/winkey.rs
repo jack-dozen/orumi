@@ -255,6 +255,7 @@ pub fn start(app: AppHandle) {
     let (tx, rx) = mpsc::channel::<Msg>();
     let _ = TX.set(tx);
     let _ = T0.get_or_init(Instant::now);
+    let (hook_ready_tx, hook_ready_rx) = mpsc::sync_channel(1);
 
     thread::spawn(move || {
         for msg in rx {
@@ -283,12 +284,17 @@ pub fn start(app: AppHandle) {
 
     thread::spawn(poller);
 
-    thread::spawn(|| unsafe {
+    thread::spawn(move || unsafe {
         let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-        let Ok(hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0) else {
-            eprintln!("[activities] gagal memasang hook (pemantau tetap berjalan)");
-            return;
+        let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0) {
+            Ok(hook) => hook,
+            Err(error) => {
+                eprintln!("[activities] gagal memasang hook (pemantau tetap berjalan): {error}");
+                let _ = hook_ready_tx.send(false);
+                return;
+            }
         };
+        let _ = hook_ready_tx.send(true);
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
@@ -296,4 +302,8 @@ pub fn start(app: AppHandle) {
         }
         let _ = UnhookWindowsHookEx(hook);
     });
+
+    if let Err(error) = hook_ready_rx.recv_timeout(Duration::from_secs(2)) {
+        eprintln!("[activities] menunggu hook keyboard terlalu lama: {error}");
+    }
 }

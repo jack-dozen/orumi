@@ -21,6 +21,14 @@ type Item = {
 /** Grid geometry in CSS px. Rust computes it and sizes the window to fit. */
 type Layout = { cols: number; rows: number; card_w: number; card_h: number; gap: number; pad: number };
 
+// Dev aid: opening animation. "slide" = slides up from the bottom edge, "fade" = short fade with
+// a small rise, "none" = appears instantly. Edit and save: the dev server reloads it right away.
+const SWITCHER_ANIM: "slide" | "fade" | "none" = "slide";
+
+// Dev aid: logs frame timing for 600 ms after the panel appears (the terminal shows "[ui] ...").
+// Set to false when no longer needed.
+const FRAME_PROBE = true;
+
 /**
  * Alt+Tab display: a grid of window previews (several rows when there are many windows).
  * All logic (ordering, keys, selection) is in Rust; this component only renders the received
@@ -33,10 +41,14 @@ export default function Switcher() {
   const [index, setIndex] = useState(0);
   // Newest thumbnail file per window: set by the opening payload, refreshed by "switcher-thumb".
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
+  const panelRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
+  // Probe: when Rust first asked to show the panel in this session (see FRAME_PROBE).
+  const shownAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     const a = listen<{ items: Item[]; index: number; layout: Layout }>("switcher-items", (e) => {
+      shownAtRef.current = null;
       setItems(e.payload.items);
       setIndex(e.payload.index);
       setLayout(e.payload.layout);
@@ -44,7 +56,10 @@ export default function Switcher() {
       for (const it of e.payload.items) if (it.thumb) t[it.hwnd] = it.thumb;
       setThumbs(t);
     });
-    const b = listen<number>("switcher-select", (e) => setIndex(e.payload));
+    const b = listen<number>("switcher-select", (e) => {
+      if (shownAtRef.current === null) shownAtRef.current = performance.now();
+      setIndex(e.payload);
+    });
     const c = listen<{ hwnd: number; thumb: string }>("switcher-thumb", (e) =>
       setThumbs((m) => ({ ...m, [e.payload.hwnd]: e.payload.thumb })),
     );
@@ -55,10 +70,49 @@ export default function Switcher() {
     };
   }, []);
 
-  // Keep the selected card visible when there are more rows than fit on screen.
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "nearest" });
-  }, [index, items]);
+    if (!FRAME_PROBE || !visible) return;
+    const start = performance.now();
+    const lag = shownAtRef.current === null ? -1 : Math.round(start - shownAtRef.current);
+    let last = start;
+    let frames = 0;
+    let max = 0;
+    const slow: string[] = [];
+    let raf = 0;
+    const tick = (t: number) => {
+      const dt = t - last;
+      last = t;
+      frames++;
+      if (dt > max) max = dt;
+      if (dt > 24) slow.push(`${Math.round(t - start)}ms:+${Math.round(dt)}`);
+      if (t - start < 600) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        invoke("dev_log", {
+          line: `switcher open: asked->visible ${lag} ms, ${frames} frames in 600 ms, max gap ${Math.round(max)} ms, slow: [${slow.join(" ")}]`,
+        }).catch(() => {});
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [visible]);
+
+  // Keep the selected card visible when there are more rows than fit on screen.
+  // Scroll the panel element directly via offsetTop instead of scrollIntoView() so a
+  // transformed panel never scrolls #root/body and causes a jump when opening.
+  useEffect(() => {
+    const panel = panelRef.current;
+    const card = activeRef.current;
+    if (!panel || !card) return;
+    const pad = layout?.pad ?? 16;
+    const top = card.offsetTop - pad;
+    const bottom = card.offsetTop + card.offsetHeight + pad;
+    if (top < panel.scrollTop) {
+      panel.scrollTop = top;
+    } else if (bottom > panel.scrollTop + panel.clientHeight) {
+      panel.scrollTop = bottom - panel.clientHeight;
+    }
+  }, [index, items, layout]);
 
   const gridStyle: CSSProperties | undefined = layout
     ? {
@@ -71,7 +125,10 @@ export default function Switcher() {
 
   return (
     <div className="swroot">
-      <div className={`swpanel ${visible ? "swpanel--visible" : ""}`}>
+      <div
+        ref={panelRef}
+        className={`swpanel swpanel--${SWITCHER_ANIM} ${visible ? "swpanel--visible" : ""}`}
+      >
         <div className="swgrid" style={gridStyle}>
           {items.map((it, i) => {
             const name = it.exe || it.title;

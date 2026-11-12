@@ -40,7 +40,7 @@ const THUMB_H: u32 = 280;
 const PW_RENDERFULLCONTENT: u32 = 0x2;
 
 /// A thumbnail younger than this is reused instead of capturing the window again.
-const CACHE_TTL: Duration = Duration::from_millis(1500);
+const CACHE_TTL: Duration = Duration::from_millis(5000);
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -49,10 +49,13 @@ pub fn cache_dir(app: &AppHandle) -> Option<PathBuf> {
 }
 
 /// Clear the cache when the app starts: Windows may reuse window IDs.
+/// Also grants asset protocol access to the directory once so individual captures don't need
+/// per-file `allow_file` calls.
 pub fn clear_cache(app: &AppHandle) {
     if let Some(dir) = cache_dir(app) {
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::create_dir_all(&dir);
+        let _ = app.asset_protocol_scope().allow_directory(&dir, false);
     }
 }
 
@@ -189,39 +192,79 @@ unsafe fn capture_jpeg(hwnd_raw: i64) -> Option<Vec<u8>> {
             DIB_RGB_COLORS,
         ) != 0
         {
-            // BGRA -> RGBA; alpha is not meaningful here. A fully black result means the
-            // capture failed (cloaked or protected window).
-            let mut any_pixel = false;
-            for c in px.chunks_exact_mut(4) {
-                c.swap(0, 2);
-                c[3] = 255;
-                if c[0] | c[1] | c[2] != 0 {
-                    any_pixel = true;
+            let (iw, ih) = (w as u32, h as u32);
+            let (mut cx, mut cy, mut cw, mut ch) = (0u32, 0u32, iw, ih);
+            if frame.right > frame.left && frame.bottom > frame.top {
+                let x = (frame.left - win.left).max(0) as u32;
+                let y = (frame.top - win.top).max(0) as u32;
+                let fw = ((frame.right - frame.left) as u32).min(iw.saturating_sub(x));
+                let fh = ((frame.bottom - frame.top) as u32).min(ih.saturating_sub(y));
+                if fw > 10 && fh > 10 {
+                    (cx, cy, cw, ch) = (x, y, fw, fh);
                 }
             }
-            if let Some(img) =
-                image::RgbaImage::from_raw(w as u32, h as u32, px).filter(|_| any_pixel)
-            {
-                let (mut cx, mut cy, mut cw, mut ch) = (0u32, 0u32, img.width(), img.height());
-                if frame.right > frame.left && frame.bottom > frame.top {
-                    let x = (frame.left - win.left).max(0) as u32;
-                    let y = (frame.top - win.top).max(0) as u32;
-                    let fw = ((frame.right - frame.left) as u32).min(img.width().saturating_sub(x));
-                    let fh = ((frame.bottom - frame.top) as u32).min(img.height().saturating_sub(y));
-                    if fw > 10 && fh > 10 {
-                        (cx, cy, cw, ch) = (x, y, fw, fh);
+
+            // Fit inside (THUMB_W, THUMB_H) preserving aspect ratio, and downsample directly
+            // from the cropped BGRA buffer into an RGB thumbnail in one pass.
+            let scale = (THUMB_W as f64 / cw as f64)
+                .min(THUMB_H as f64 / ch as f64)
+                .min(1.0);
+            let tw = ((cw as f64 * scale).round() as u32).max(1);
+            let th = ((ch as f64 * scale).round() as u32).max(1);
+
+            let mut rgb_buf = vec![0u8; (tw * th * 3) as usize];
+            let mut any_pixel = false;
+            let stride = iw as usize * 4;
+
+            for ty in 0..th {
+                let sy0 = cy + (ty * ch) / th;
+                let sy1 = (cy + ((ty + 1) * ch) / th).min(cy + ch - 1);
+                let sy_mid = (sy0 + sy1) / 2;
+                let row0 = sy0 as usize * stride;
+                let row1 = sy_mid as usize * stride;
+                let out_row = ty as usize * tw as usize * 3;
+
+                for tx in 0..tw {
+                    let sx0 = cx + (tx * cw) / tw;
+                    let sx1 = (cx + ((tx + 1) * cw) / tw).min(cx + cw - 1);
+                    let sx_mid = (sx0 + sx1) / 2;
+
+                    let p00 = row0 + sx0 as usize * 4;
+                    let p01 = row0 + sx_mid as usize * 4;
+                    let p10 = row1 + sx0 as usize * 4;
+                    let p11 = row1 + sx_mid as usize * 4;
+
+                    let b = (px[p00] as u16 + px[p01] as u16 + px[p10] as u16 + px[p11] as u16) >> 2;
+                    let g = (px[p00 + 1] as u16
+                        + px[p01 + 1] as u16
+                        + px[p10 + 1] as u16
+                        + px[p11 + 1] as u16)
+                        >> 2;
+                    let r = (px[p00 + 2] as u16
+                        + px[p01 + 2] as u16
+                        + px[p10 + 2] as u16
+                        + px[p11 + 2] as u16)
+                        >> 2;
+
+                    if (r | g | b) != 0 {
+                        any_pixel = true;
                     }
+                    let dst = out_row + tx as usize * 3;
+                    rgb_buf[dst] = r as u8;
+                    rgb_buf[dst + 1] = g as u8;
+                    rgb_buf[dst + 2] = b as u8;
                 }
-                let cropped = image::imageops::crop_imm(&img, cx, cy, cw, ch).to_image();
-                let rgb = image::DynamicImage::ImageRgba8(cropped)
-                    .thumbnail(THUMB_W, THUMB_H)
-                    .to_rgb8();
-                let mut out = Cursor::new(Vec::new());
-                if image::DynamicImage::ImageRgb8(rgb)
-                    .write_to(&mut out, image::ImageFormat::Jpeg)
-                    .is_ok()
-                {
-                    result = Some(out.into_inner());
+            }
+
+            if any_pixel {
+                if let Some(rgb) = image::RgbImage::from_raw(tw, th, rgb_buf) {
+                    let mut out = Cursor::new(Vec::new());
+                    if image::DynamicImage::ImageRgb8(rgb)
+                        .write_to(&mut out, image::ImageFormat::Jpeg)
+                        .is_ok()
+                    {
+                        result = Some(out.into_inner());
+                    }
                 }
             }
         }

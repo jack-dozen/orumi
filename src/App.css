@@ -1392,19 +1392,28 @@ button {
   display: flex;
   justify-content: center;
   align-items: flex-end;
+  pointer-events: none;
 }
 
 .swpanel {
   box-sizing: border-box;
   max-width: 100%;
   max-height: 100%;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   scrollbar-width: none;
   background: var(--surface);
   border-radius: 28px 28px 0 0;
+  pointer-events: none;
 
-  transform: translateY(100%);
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 120ms ease-out;
+  /* Own compositor layer: the slide-in runs without main-thread work. */
+  will-change: transform, opacity;
 }
 
 .swpanel::-webkit-scrollbar {
@@ -1412,7 +1421,33 @@ button {
 }
 
 .swpanel--visible {
+  opacity: 1;
   transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* Animation variants (see SWITCHER_ANIM in Switcher.tsx). */
+.swpanel--fade {
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 110ms linear;
+}
+
+.swpanel--fade.swpanel--visible {
+  opacity: 1;
+  transform: none;
+}
+
+.swpanel--none {
+  opacity: 0;
+  transform: none;
+  transition: none;
+}
+
+.swpanel--none.swpanel--visible {
+  opacity: 1;
 }
 
 /* Columns, row height, gap and padding are set inline from the Rust layout. */
@@ -1466,8 +1501,6 @@ button {
   object-fit: contain;
   display: block;
   pointer-events: none;
-  /* Plays when the image first replaces the icon placeholder (not on later refreshes). */
-  animation: pvimg 160ms ease-out;
 }
 
 .swlabel {
