@@ -3,6 +3,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
 import AppIcon from "./AppIcon";
+import Thumb from "./Thumb";
 
 type Item = {
   hwnd: number;
@@ -13,26 +14,6 @@ type Item = {
 };
 
 type Payload = { items: Item[]; top: number; width: number; height: number };
-
-/** Shows the thumbnail; a changed file is preloaded first so the image never blinks blank. */
-function Thumb({ src }: { src: string }) {
-  const [shown, setShown] = useState(src);
-
-  useEffect(() => {
-    if (src === shown) return;
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (!cancelled) setShown(src);
-    };
-    img.src = src;
-    return () => {
-      cancelled = true;
-    };
-  }, [src, shown]);
-
-  return <img src={shown} alt="" draggable={false} />;
-}
 
 /** Window preview that grows from the bar edge. Rust sends its data when an icon is hovered. */
 export default function Preview() {

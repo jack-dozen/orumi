@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { saveConfig, useConfig, type Config } from "../useConfig";
 
-/** The notch normally does not take focus; temporarily allow it to receive focus for typing. */
+/**
+ * Temporarily allow the current panel to receive keyboard focus for typing. Only the bar and notch
+ * need this (the backend ignores other labels); the launcher already takes focus.
+ */
 const activate = (enable: boolean) =>
-  invoke("panel_activation", { label: "notch", enable }).catch(() => {});
+  invoke("panel_activation", { label: getCurrentWindow().label, enable }).catch(() => {});
 
 type Info = { dir: string; count: number; error: string | null };
 

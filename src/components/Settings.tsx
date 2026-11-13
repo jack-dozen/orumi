@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { saveConfig, useConfig, type ColorSlot, type Config } from "../useConfig";
 import Icon from "./Icon";
 import WallpaperSettings from "./WallpaperSettings";
 
-/** The notch normally does not take focus; temporarily allow it to receive focus for typing. */
+/**
+ * Temporarily allow the current panel to receive keyboard focus for typing. Only the bar and notch
+ * need this (the backend ignores other labels); the launcher already takes focus.
+ */
 const activate = (enable: boolean) =>
-  invoke("panel_activation", { label: "notch", enable }).catch(() => {});
+  invoke("panel_activation", { label: getCurrentWindow().label, enable }).catch(() => {});
 
 /** Timeout for waiting on a key combination before capture is canceled. */
 const CAPTURE_TIMEOUT_MS = 6000;
@@ -119,6 +123,8 @@ export default function AppSettings() {
   const [note, setNote] = useState("");
   const [ok, setOk] = useState("");
   const [resetKey, setResetKey] = useState(0); // force the hotkey field to reload the saved value
+  const [previews, setPreviews] = useState(true);
+  const [previewModePending, setPreviewModePending] = useState(false);
 
   // The local fields follow the saved config.
   useEffect(() => {
@@ -126,6 +132,20 @@ export default function AppSettings() {
     setScale(Math.round(cfg.ui_scale * 100));
     setCity(cfg.weather_city);
   }, [cfg]);
+
+  useEffect(() => {
+    let active = true;
+    invoke<boolean>("switcher_get_previews")
+      .then((enabled) => {
+        if (active) setPreviews(enabled);
+      })
+      .catch((error) => {
+        if (active) setNote(`Gagal membaca mode pratinjau Alt+Tab: ${String(error)}`);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (!cfg) return <div className="card card--placeholder card--fill">memuat…</div>;
 
@@ -146,6 +166,19 @@ export default function AppSettings() {
   const setHotkey = (which: keyof Config["hotkeys"]) => async (v: string) => {
     const warnings = await save({ hotkeys: { ...cfg.hotkeys, [which]: v } });
     if (warnings.length === 0) setOk(`Hotkey ${v} terdaftar di Windows.`);
+  };
+
+  const setPreviewMode = async (enabled: boolean) => {
+    setPreviewModePending(true);
+    setNote("");
+    try {
+      await invoke("switcher_set_previews", { enabled });
+      setPreviews(enabled);
+    } catch (error) {
+      setNote(`Gagal mengubah mode pratinjau Alt+Tab: ${String(error)}`);
+    } finally {
+      setPreviewModePending(false);
+    }
   };
 
   return (
@@ -199,17 +232,45 @@ export default function AppSettings() {
             </button>
           </div>
         </Row>
+        <Row label="Tampilan Alt+Tab">
+          <div className="segmented segmented--small">
+            <button
+              type="button"
+              className={previews ? "segmented__on" : ""}
+              aria-pressed={previews}
+              disabled={previewModePending}
+              onClick={() => setPreviewMode(true)}
+            >
+              Pratinjau
+            </button>
+            <button
+              type="button"
+              className={!previews ? "segmented__on" : ""}
+              aria-pressed={!previews}
+              disabled={previewModePending}
+              onClick={() => setPreviewMode(false)}
+            >
+              Ikon saja
+            </button>
+          </div>
+        </Row>
         <Row label="Taskbar Windows">
           <div className="segmented segmented--small">
             <button
-              className={cfg.taskbar_autohide ? "segmented__on" : ""}
-              onClick={() => save({ taskbar_autohide: true })}
+              className={cfg.taskbar_autohide && !cfg.taskbar_hidden ? "segmented__on" : ""}
+              onClick={() => save({ taskbar_autohide: true, taskbar_hidden: false })}
             >
               Auto-hide
             </button>
             <button
-              className={!cfg.taskbar_autohide ? "segmented__on" : ""}
-              onClick={() => save({ taskbar_autohide: false })}
+              className={cfg.taskbar_hidden ? "segmented__on" : ""}
+              onClick={() => save({ taskbar_autohide: true, taskbar_hidden: true })}
+            >
+              Sembunyi
+            </button>
+            <button
+              className={!cfg.taskbar_autohide && !cfg.taskbar_hidden ? "segmented__on" : ""}
+              onClick={() => save({ taskbar_autohide: false, taskbar_hidden: false })}
             >
               Biarkan
             </button>

@@ -12,7 +12,7 @@ $icons = @(
   "pause", "play_arrow", "power_settings_new", "radio", "rainy", "refresh", "restart_alt",
   "schedule", "settings", "skip_next", "skip_previous", "sunny", "thunderstorm", "tune",
   "volume_down", "volume_off", "volume_up", "wallpaper", "weather_snowy", "wifi", "wifi_off",
-  "chevron_right"
+  "chevron_right", "bluetooth", "bluetooth_disabled", "airplanemode_active", "do_not_disturb_on"
 )
 
 # Google requires the names to be sorted alphabetically.

@@ -81,7 +81,7 @@ pub fn show(app: &AppHandle) {
     }
     let app = app.clone();
     thread::spawn(move || {
-        let windows = thumbs::snapshot(winlist::collect_windows());
+        let windows = thumbs::snapshot(&app, winlist::collect_windows());
         let payload = serde_json::to_value(&windows).unwrap_or_default();
 
         let a = app.clone();
@@ -99,6 +99,7 @@ pub fn show(app: &AppHandle) {
             let _ = window.set_always_on_top(true);
             let _ = window.set_focus();
             let _ = a.emit_to(LABEL, "activities-open", payload);
+            crate::altswitch::ensure_hook("activities opened");
         });
     });
 }
@@ -109,6 +110,7 @@ pub fn hide(app: &AppHandle) {
     }
     // React plays the close animation; hide the window afterward.
     let _ = app.emit_to(LABEL, "activities-close", ());
+    crate::altswitch::ensure_hook("activities closing");
     let app = app.clone();
     thread::spawn(move || {
         thread::sleep(CLOSE_ANIM);
@@ -121,6 +123,8 @@ pub fn hide(app: &AppHandle) {
             if let Some(window) = a.get_webview_window(LABEL) {
                 let _ = window.hide();
             }
+            crate::winlist::restore_external_foreground_if_ours();
+            crate::altswitch::ensure_hook("activities hidden");
         });
     });
 }

@@ -16,6 +16,7 @@ mod wallpaper;
 mod altswitch;
 mod tray_flyout;
 mod activities;
+mod quick;
 mod taskbar;
 mod icons;
 mod previews;
@@ -139,12 +140,16 @@ pub fn run() {
             edge::set_panel,
             edge::panel_activation,
             edge::launcher_view,
+            edge::notch_set_height,
             activities::activities_toggle,
             activities::activities_close,
             activities::ws_list,
             activities::ws_switch,
             activities::ws_move_window,
             altswitch::switcher_pick,
+            altswitch::switcher_set_previews,
+            altswitch::switcher_get_previews,
+            altswitch::dev_log,
             tray_flyout::tray_toggle,
             icons::app_icon,
             previews::preview_open,
@@ -158,6 +163,8 @@ pub fn run() {
             gpu::get_gpu,
             wifi::get_wifi,
             wifi::open_settings_page,
+            quick::quick_get,
+            quick::quick_set,
             battery::get_battery,
             theme::wallpaper_stamp,
             theme::wallpaper_pixels,
@@ -188,7 +195,7 @@ pub fn run() {
             edge::set_ui_scale(cfg.ui_scale);
             capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
-            taskbar::apply(app.handle(), cfg.taskbar_autohide);
+            taskbar::apply(app.handle(), cfg.taskbar_autohide, cfg.taskbar_hidden);
             app.manage(config::ConfigState::new(cfg.clone()));
 
             // --- All panels ---
@@ -215,9 +222,10 @@ pub fn run() {
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
             wallpaper::warm(app.handle().clone());
+            activities::init(app.handle())?;
+            // Install the swallowing Alt+Tab hook last so it is first in the low-level hook chain.
             altswitch::set_enabled(cfg.alt_tab);
             altswitch::start(app.handle().clone());
-            activities::init(app.handle())?;
 
             // --- Global hotkeys (from config) ---
             config::init_hotkeys(app.handle(), &cfg.hotkeys)?;
@@ -252,8 +260,9 @@ pub fn run() {
                     "toggle_notch" => app.state::<Panels>().toggle("notch"),
                     "toggle_launcher" => app.state::<Panels>().toggle("launcher"),
                     "settings" => {
-                        let _ = app.emit_to("notch", "notch-tab", "settings/app");
-                        app.state::<Panels>().set_transient("notch");
+                        // App settings now live in the launcher (the notch settings tab is quick settings).
+                        let _ = app.emit_to("launcher", "launcher-view", "settings");
+                        app.state::<Panels>().set_transient("launcher");
                     }
                     "toggle_alt_tab" => config::toggle_alt_tab(app),
                     "quit" => app.exit(0),

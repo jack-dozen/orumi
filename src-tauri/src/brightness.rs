@@ -111,11 +111,11 @@ pub fn start_watcher(app: AppHandle) {
             }
             last = b;
             CURRENT.store(b, Ordering::Relaxed);
+            let _ = app.emit("brightness-changed", b as u8);
             // Our own slider's echo does not need to show a popup.
             if now_ms().saturating_sub(LAST_OWN_CHANGE_MS.load(Ordering::Relaxed)) < 2000 {
                 return;
             }
-            let _ = app.emit("brightness-changed", b as u8);
             crate::overlay::show_popup(&app, "brightness");
         };
 

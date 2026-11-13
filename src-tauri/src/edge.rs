@@ -3,7 +3,7 @@ use std::{
     ffi::c_void,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
     thread,
     time::{Duration, Instant},
@@ -21,6 +21,18 @@ const PIN_GRACE: Duration = Duration::from_secs(6);
 /// Cursor monitor interval: fast near an edge or while a panel is visible, slow while idle.
 const POLL_FAST: Duration = Duration::from_millis(30);
 const POLL_IDLE: Duration = Duration::from_millis(150);
+/// true = print how long the switcher takes to show on the main thread (turn off when not needed).
+const DEBUG_SHOW: bool = true;
+
+/// The edge thread, so opening or closing a panel can wake it from its polling sleep instead of
+/// waiting for the interval to end (up to POLL_IDLE).
+static EDGE_THREAD: OnceLock<thread::Thread> = OnceLock::new();
+
+fn wake() {
+    if let Some(t) = EDGE_THREAD.get() {
+        t.unpark();
+    }
+}
 /// "Near the edge" = within this distance of the screen edge (design units).
 const NEAR_EDGE_DIP: f64 = 96.0;
 /// How often to reread monitor dimensions.
@@ -108,7 +120,7 @@ fn size_override(label: &str) -> Option<(f64, f64)> {
         .and_then(|l| l.iter().find(|(k, _)| *k == label).map(|(_, s)| *s))
 }
 
-fn set_size_override(label: &'static str, size: Option<(f64, f64)>) {
+pub fn set_size_override(label: &'static str, size: Option<(f64, f64)>) {
     if let Ok(mut l) = SIZE_OVERRIDE.lock() {
         l.retain(|(k, _)| *k != label);
         if let Some(s) = size {
@@ -164,6 +176,17 @@ pub fn launcher_view(view: String, app: AppHandle) {
     let _ = app.run_on_main_thread(move || crate::place_panel(&a, "launcher"));
 }
 
+/// Active notch content height in design units (used to shrink its hover hit area when short).
+static NOTCH_HEIGHT: Mutex<Option<f64>> = Mutex::new(None);
+
+#[tauri::command]
+pub fn notch_set_height(height: f64) {
+    if let Ok(mut h) = NOTCH_HEIGHT.lock() {
+        *h = (height > 0.0).then_some(height);
+    }
+    wake();
+}
+
 /// Per-panel "forced open" flag (hotkey, tray, or button click).
 pub struct Panels(pub HashMap<&'static str, Arc<AtomicBool>>);
 
@@ -174,6 +197,7 @@ impl Panels {
             flag_set(&TRANSIENT, key, false);
             flag_set(&HELD, key, false);
             flag.fetch_xor(true, Ordering::Relaxed);
+            wake();
         }
     }
 
@@ -184,6 +208,7 @@ impl Panels {
                 flag_set(&HELD, key, false);
             }
             flag.store(open, Ordering::Relaxed);
+            wake();
         }
     }
 
@@ -192,6 +217,7 @@ impl Panels {
         if let Some((key, flag)) = self.0.get_key_value(label) {
             flag_set(&TRANSIENT, key, true);
             flag.store(true, Ordering::Relaxed);
+            wake();
         }
     }
 
@@ -235,6 +261,9 @@ pub fn panel_activation(
     if label != "bar" && label != "notch" {
         return;
     }
+    if label == "notch" {
+        eprintln!("[edge] notch keyboard activation: {enable}");
+    }
     if let Some((key, _)) = panels.0.get_key_value(label.as_str()) {
         flag_set(&HELD, key, enable);
     }
@@ -244,6 +273,7 @@ pub fn panel_activation(
             let _ = window.set_focus();
         }
     }
+    crate::altswitch::ensure_hook("panel activation");
 }
 
 struct Rect {
@@ -278,7 +308,14 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
         }
         Edge::Top => {
             let w = size.0 * u;
-            let h = size.1 * u;
+            let mut h = size.1 * u;
+            if spec.label == "notch" {
+                if let Ok(nh) = NOTCH_HEIGHT.lock() {
+                    if let Some(ch) = *nh {
+                        h = (ch * u).min(h);
+                    }
+                }
+            }
             let win = Rect { x: mx + (mw - w) / 2.0, y: my, w, h };
             let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
             let trig = Rect {
@@ -332,14 +369,59 @@ fn monitor_metrics(window: &WebviewWindow) -> Option<Metrics> {
     ))
 }
 
-/// Place the window at the correct position and size.
+/// Place the window at the correct position and size in a single atomic Win32 call.
 pub fn place(window: &WebviewWindow, spec: &PanelSpec) -> tauri::Result<()> {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER},
+    };
+
     if let Some(m) = monitor_metrics(window) {
         let (win, _) = layout(spec, m);
-        window.set_size(PhysicalSize::new(win.w.round() as u32, win.h.round() as u32))?;
-        window.set_position(PhysicalPosition::new(win.x.round() as i32, win.y.round() as i32))?;
+        let w = win.w.round() as u32;
+        let h = win.h.round() as u32;
+        let x = win.x.round() as i32;
+        let y = win.y.round() as i32;
+        let size = PhysicalSize::new(w, h);
+        let pos = PhysicalPosition::new(x, y);
+        // Every SetWindowPos makes WebView2 resize its surface, so skip what is already right.
+        if window.outer_size().ok() != Some(size) || window.outer_position().ok() != Some(pos) {
+            if let Ok(raw) = window.hwnd() {
+                let hwnd = HWND(raw.0 as isize as *mut c_void);
+                unsafe {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        None,
+                        x,
+                        y,
+                        w as i32,
+                        h as i32,
+                        SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            } else {
+                window.set_size(size)?;
+                window.set_position(pos)?;
+            }
+        }
     }
     Ok(())
+}
+
+/// Whether the window already has the always-on-top style.
+fn is_topmost(window: &WebviewWindow) -> bool {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{GetWindowLongW, GWL_EXSTYLE, WS_EX_TOPMOST},
+    };
+
+    window
+        .hwnd()
+        .map(|h| unsafe {
+            let ex = GetWindowLongW(HWND(h.0 as isize as *mut c_void), GWL_EXSTYLE) as u32;
+            (ex & WS_EX_TOPMOST.0) != 0
+        })
+        .unwrap_or(false)
 }
 
 /// activatable = false: clicking the window does not give it focus (bar and notch),
@@ -368,10 +450,14 @@ pub fn set_activatable(window: &WebviewWindow, activatable: bool) {
 
 /// Update the window on the main thread: reset position, click-through and focus, then notify React.
 fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool, spec: &PanelSpec) {
+    let app_handle = app.clone();
     let window = window.clone();
     let event = event.to_string();
     let spec = *spec;
+    let queued = Instant::now();
     let _ = app.run_on_main_thread(move || {
+        let started = Instant::now();
+        let waited = queued.elapsed();
         if show {
             // Always open the launcher at its usual size (the wallpaper view expands it itself).
             if spec.label == "launcher" {
@@ -380,13 +466,41 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
 
             // The display can change (power, resolution, dock), so reset each time it appears.
             let _ = place(&window, &spec);
-            let _ = window.set_always_on_top(true);
+            if !is_topmost(&window) {
+                let _ = window.set_always_on_top(true);
+            }
         }
         let _ = window.set_ignore_cursor_events(!show);
         if show && spec.focus {
             let _ = window.set_focus();
         }
         let _ = window.emit(event.as_str(), show);
+        if spec.label != "switcher" {
+            if !show {
+                // If an ORUMI panel (launcher, notch, bar) still holds foreground focus when closing,
+                // restore focus to the last active external window so the hidden WebView2 window does
+                // not keep keyboard focus.
+                let panels = app_handle.state::<Panels>();
+                if !panels.is_open("launcher") && !crate::activities::is_open() {
+                    crate::winlist::restore_external_foreground_if_ours();
+                }
+            }
+            crate::altswitch::ensure_hook(if show { "panel opened" } else { "panel closed" });
+            if show && spec.label == "launcher" {
+                // Launcher.tsx focuses its <input> after 60 ms; refresh the hook once more afterward.
+                thread::spawn(|| {
+                    thread::sleep(Duration::from_millis(80));
+                    crate::altswitch::ensure_hook("launcher input focused");
+                });
+            }
+        }
+        if DEBUG_SHOW && show && spec.label == "switcher" {
+            eprintln!(
+                "[edge] switcher: waited {} ms for the main thread, show work took {} ms",
+                waited.as_millis(),
+                started.elapsed().as_millis()
+            );
+        }
     });
 }
 
@@ -406,6 +520,7 @@ struct Runtime {
 /// Emit an "edge-visible:<label>" event (bool payload) to React.
 pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<AtomicBool>)>) {
     thread::spawn(move || {
+        let _ = EDGE_THREAD.set(thread::current());
         let mut panels: Vec<Runtime> = items
             .into_iter()
             .map(|(window, spec, pinned)| Runtime {
@@ -430,7 +545,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
         let mut interval = POLL_FAST;
 
         loop {
-            thread::sleep(interval);
+            thread::park_timeout(interval);
 
             if last_refresh.elapsed() >= METRICS_REFRESH {
                 metrics = monitor_metrics(&probe).or(metrics);
