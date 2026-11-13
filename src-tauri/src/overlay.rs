@@ -2,11 +2,11 @@
 
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
@@ -28,6 +28,15 @@ static CURRENT_MODE: Mutex<String> = Mutex::new(String::new());
 static LAST_CLOSE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
 /// true = the overlay is shown as an automatic popup (not opened manually).
 static AUTO_POPUP: AtomicBool = AtomicBool::new(false);
+/// When we last changed volume/mute ourselves (used to skip the automatic OSD popup).
+static LAST_OWN_CHANGE_MS: AtomicU64 = AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 #[derive(Serialize, Clone)]
 pub struct VolumeState {
@@ -118,6 +127,7 @@ pub async fn get_volume() -> Result<Option<VolumeState>, String> {
 
 #[tauri::command]
 pub async fn set_volume(percent: f32) -> Result<(), String> {
+    LAST_OWN_CHANGE_MS.store(now_ms(), Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(move || unsafe {
         if let Some(ep) = endpoint() {
             let v = (percent / 100.0).clamp(0.0, 1.0);
@@ -158,7 +168,10 @@ pub fn start_volume_watcher(app: AppHandle) {
                 last = Some(cur);
                 if !first_read {
                     let _ = app.emit("volume-changed", state.clone());
-                    show_popup(&app, "volume");
+                    // Suppress the automatic OSD popup right after our own UI slider/mute change.
+                    if now_ms().saturating_sub(LAST_OWN_CHANGE_MS.load(Ordering::Relaxed)) >= 1500 {
+                        show_popup(&app, "volume");
+                    }
                 }
             }
         }
@@ -168,6 +181,7 @@ pub fn start_volume_watcher(app: AppHandle) {
 /// Called from the speaker icon in the overlay. The volume watcher also updates the popup/slider.
 #[tauri::command]
 pub async fn toggle_mute() -> Result<(), String> {
+    LAST_OWN_CHANGE_MS.store(now_ms(), Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(|| unsafe {
         if let Some(ep) = endpoint() {
             if let Some(cur) = read_volume(&ep) {

@@ -179,9 +179,16 @@ fn bar_anchor(app: &AppHandle) -> Option<(i32, i32)> {
 #[tauri::command]
 pub async fn tray_toggle(app: AppHandle) -> Result<(), String> {
     let anchor = bar_anchor(&app);
+    // A fully hidden taskbar has no UI Automation tree: reveal it invisibly for the click.
+    let revealed = tauri::async_runtime::spawn_blocking(crate::taskbar::reveal_for_tray)
+        .await
+        .map_err(|e| e.to_string())?;
     let result = tauri::async_runtime::spawn_blocking(move || toggle_overflow(anchor))
         .await
         .map_err(|e| e.to_string())?;
+    if revealed {
+        crate::taskbar::conceal_after_close(|| overflow_visible().is_some(), result.is_ok());
+    }
     if let Err(e) = &result {
         eprintln!("[tray] {e}");
     }

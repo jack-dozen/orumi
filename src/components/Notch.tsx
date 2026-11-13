@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
@@ -14,7 +14,8 @@ import Icon from "./Icon";
 import { MediaTab, MiniPlayer } from "./Media";
 import WeatherCard from "./Weather";
 import { useConfig } from "../useConfig";
-import AppSettings, { ColorSettings } from "./Settings";
+import { useQuick, type QuickKey } from "../useQuick";
+import VolumeBrightness from "./VolumeBrightness";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -50,11 +51,13 @@ function Dashboard({
   media,
   gpu,
   weather,
+  visible,
 }: {
   stats: Stats | null;
   media: MediaState;
   gpu: number | null;
   weather: Weather | null;
+  visible: boolean;
 }) {
   const now = useNow();
   const today = now.getDate();
@@ -93,7 +96,7 @@ function Dashboard({
       </div>
 
       <MiniPlayer media={media} />
-      <div className="card card--placeholder">volume · brightness</div>
+      <VolumeBrightness active={visible} vertical />
     </div>
   );
 }
@@ -177,72 +180,85 @@ function SystemTab({
   );
 }
 
-function QuickSettings({ wifi }: { wifi: WifiStatus | null }) {
+type QuickTile = {
+  key: QuickKey;
+  title: string;
+  icon: string;
+  iconOff: string;
+  sub: (on: boolean, wifi: WifiStatus | null) => string;
+};
+
+const QUICK_TILES: QuickTile[] = [
+  {
+    key: "wifi",
+    title: "Wi-Fi",
+    icon: "wifi",
+    iconOff: "wifi_off",
+    sub: (on, wifi) => (on ? wifiLabel(wifi) : "Mati"),
+  },
+  {
+    key: "bluetooth",
+    title: "Bluetooth",
+    icon: "bluetooth",
+    iconOff: "bluetooth_disabled",
+    sub: (on) => (on ? "Nyala" : "Mati"),
+  },
+  {
+    key: "airplane",
+    title: "Mode pesawat",
+    icon: "airplanemode_active",
+    iconOff: "airplanemode_active",
+    sub: (on) => (on ? "Nyala" : "Mati"),
+  },
+  {
+    key: "dnd",
+    title: "Jangan ganggu",
+    icon: "do_not_disturb_on",
+    iconOff: "do_not_disturb_on",
+    sub: (on) => (on ? "Notifikasi dibisukan" : "Mati"),
+  },
+];
+
+/** Notch "settings" tab = Windows quick settings. ORUMI's own settings live in the launcher (>settings). */
+function QuickSettings({ wifi, visible }: { wifi: WifiStatus | null; visible: boolean }) {
+  const { state, busy, toggle } = useQuick(visible);
   const openPage = (page: string) => invoke("open_settings_page", { page });
-  const wifiOn = !!wifi?.adapter && wifi.connected;
 
   return (
-    <div className="card settings">
-      <div className="settings__tile">
-        <Icon name={wifiOn ? "wifi" : "wifi_off"} size={28} className="settings__icon" />
-        <div className="settings__text">
-          <div className="settings__title">WiFi</div>
-          <div className="settings__sub">{wifiLabel(wifi)}</div>
-        </div>
-        <button className="settings__btn" onClick={() => openPage("wifi")}>
-          Pengaturan
-        </button>
+    <div className="quick">
+      <div className="quick__tiles">
+        {QUICK_TILES.map((t) => {
+          const value = state ? state[t.key] : null;
+          const missing = state !== null && value === null; // no such radio on this PC
+          const on = value === true;
+          return (
+            <button
+              key={t.key}
+              className={`qtile ${on ? "qtile--on" : ""} ${missing ? "qtile--missing" : ""}`}
+              disabled={!state || missing || busy !== null}
+              onClick={() => toggle(t.key, !on)}
+            >
+              <Icon name={on ? t.icon : t.iconOff} size={26} fill={on} />
+              <span className="qtile__title">{t.title}</span>
+              <span className="qtile__sub">
+                {!state ? "memuat…" : missing ? "tidak ada" : busy === t.key ? "…" : t.sub(on, wifi)}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {wifi?.location_denied && (
         <div className="settings__warn">
-          Windows memblokir akses WiFi untuk app ini. Aktifkan "Let desktop apps access
-          your location" di pengaturan lokasi.{" "}
+          Windows memblokir akses WiFi untuk app ini. Aktifkan "Let desktop apps access your
+          location" di pengaturan lokasi.{" "}
           <button className="settings__link" onClick={() => openPage("location")}>
             Buka pengaturan lokasi
           </button>
         </div>
       )}
 
-      <div className="settings__todo">
-        Kontrol lain (bluetooth, mode pesawat, dll.) belum dibuat
-      </div>
-    </div>
-  );
-}
-
-type SettingsSection = "quick" | "app" | "color";
-
-function SettingsTab({
-  wifi,
-  section,
-  onSection,
-}: {
-  wifi: WifiStatus | null;
-  section: SettingsSection;
-  onSection: (s: SettingsSection) => void;
-}) {
-  const sections: [SettingsSection, string][] = [
-    ["quick", "Cepat"],
-    ["app", "Aplikasi"],
-    ["color", "Warna"],
-  ];
-  return (
-    <div className="settingsroot">
-      <div className="segmented">
-        {sections.map(([id, label]) => (
-          <button
-            key={id}
-            className={section === id ? "segmented__on" : ""}
-            onClick={() => onSection(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {section === "quick" && <QuickSettings wifi={wifi} />}
-      {section === "app" && <AppSettings />}
-      {section === "color" && <ColorSettings />}
+      <VolumeBrightness active={visible} />
     </div>
   );
 }
@@ -259,7 +275,23 @@ export default function Notch() {
   const wifi = useWifi(visible && (tab === "system" || tab === "settings"));
   const cfg = useConfig();
   const weather = useWeather(cfg?.weather_city ?? "Bandung");
-  const [section, setSection] = useState<SettingsSection>("quick");
+
+  // Follow content height dynamically (keeps short tabs like quick settings compact).
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const h = el.offsetHeight;
+      setHeight(h);
+      invoke("notch_set_height", { height: h }).catch(() => {});
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Notch closed: return to "does not take focus" mode (if it was used for typing).
   useEffect(() => {
@@ -281,11 +313,8 @@ export default function Notch() {
   // The bar can ask the notch to switch to a specific tab (clock or WiFi icon click).
   useEffect(() => {
     const unlisten = listen<string>("notch-tab", (e) => {
-      const [t, sub] = e.payload.split("/");
+      const [t] = e.payload.split("/");
       if (TABS.some((x) => x.id === t)) setTab(t as TabId);
-      if (t === "settings" && (sub === "quick" || sub === "app" || sub === "color")) {
-        setSection(sub);
-      }
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -293,29 +322,32 @@ export default function Notch() {
   }, []);
 
   return (
-    <div className={`notch ${visible ? "notch--visible" : ""}`}>
-      <div className="tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={`tabs__item ${tab === t.id ? "tabs__item--active" : ""}`}
-            onClick={() => setTab(t.id)}
-          >
-            <Icon name={t.icon} size={22} fill={tab === t.id} />
-            {t.label}
-          </button>
-        ))}
-      </div>
+    <div
+      className={`notch ${visible ? "notch--visible" : ""}`}
+      style={{ height: height ?? undefined }}
+    >
+      <div className="notch__inner" ref={innerRef}>
+        <div className="tabs">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`tabs__item ${tab === t.id ? "tabs__item--active" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              <Icon name={t.icon} size={22} fill={tab === t.id} />
+              {t.label}
+            </button>
+          ))}
+        </div>
 
-      <div className="notch__body">
-        {tab === "dashboard" && (
-          <Dashboard stats={stats} media={media} gpu={gpu} weather={weather} />
-        )}
-        {tab === "media" && <MediaTab media={media} />}
-        {tab === "system" && <SystemTab stats={stats} procs={procs} gpu={gpu} wifi={wifi} />}
-        {tab === "settings" && (
-          <SettingsTab wifi={wifi} section={section} onSection={setSection} />
-        )}
+        <div className="notch__body">
+          {tab === "dashboard" && (
+            <Dashboard stats={stats} media={media} gpu={gpu} weather={weather} visible={visible} />
+          )}
+          {tab === "media" && <MediaTab media={media} />}
+          {tab === "system" && <SystemTab stats={stats} procs={procs} gpu={gpu} wifi={wifi} />}
+          {tab === "settings" && <QuickSettings wifi={wifi} visible={visible} />}
+        </div>
       </div>
     </div>
   );

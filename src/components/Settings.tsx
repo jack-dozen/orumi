@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { saveConfig, useConfig, type ColorSlot, type Config } from "../useConfig";
 import Icon from "./Icon";
 import WallpaperSettings from "./WallpaperSettings";
 
-/** The notch normally does not take focus; temporarily allow it to receive focus for typing. */
+/**
+ * Temporarily allow the current panel to receive keyboard focus for typing. Only the bar and notch
+ * need this (the backend ignores other labels); the launcher already takes focus.
+ */
 const activate = (enable: boolean) =>
-  invoke("panel_activation", { label: "notch", enable }).catch(() => {});
+  invoke("panel_activation", { label: getCurrentWindow().label, enable }).catch(() => {});
 
 /** Timeout for waiting on a key combination before capture is canceled. */
 const CAPTURE_TIMEOUT_MS = 6000;
@@ -253,14 +257,20 @@ export default function AppSettings() {
         <Row label="Taskbar Windows">
           <div className="segmented segmented--small">
             <button
-              className={cfg.taskbar_autohide ? "segmented__on" : ""}
-              onClick={() => save({ taskbar_autohide: true })}
+              className={cfg.taskbar_autohide && !cfg.taskbar_hidden ? "segmented__on" : ""}
+              onClick={() => save({ taskbar_autohide: true, taskbar_hidden: false })}
             >
               Auto-hide
             </button>
             <button
-              className={!cfg.taskbar_autohide ? "segmented__on" : ""}
-              onClick={() => save({ taskbar_autohide: false })}
+              className={cfg.taskbar_hidden ? "segmented__on" : ""}
+              onClick={() => save({ taskbar_autohide: true, taskbar_hidden: true })}
+            >
+              Sembunyi
+            </button>
+            <button
+              className={!cfg.taskbar_autohide && !cfg.taskbar_hidden ? "segmented__on" : ""}
+              onClick={() => save({ taskbar_autohide: false, taskbar_hidden: false })}
             >
               Biarkan
             </button>

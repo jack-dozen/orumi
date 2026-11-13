@@ -4,7 +4,7 @@ This file is the single source of context for ORUMI. It replaces the older `edge
 `HANDOFF-activities.md`. It is written mainly for Claude in a fresh chat, but it doubles as the project blueprint
 and roadmap for the owner.
 
-- Last updated: 2026-11-11
+- Last updated: 2026-11-13
 - Code snapshot this file was checked against: `orumi-v0_1_3` archive (the code is the source of truth; if this file and the code disagree, trust the code and fix this file)
 - Chat language with the owner: **Indonesian**. This file, code comments, and commit messages: **English** (see section 2).
 
@@ -51,8 +51,8 @@ Hidden means click-through plus content slid out via CSS. All windows load the s
 | Label | Edge | Size (design units) | Notes |
 |---|---|---|---|
 | bar | left | width 64, full height minus 12 inset | hover (200 ms dwell), click, or hotkey; does not take focus |
-| notch | top center | 820 × 380 (trigger zone 240) | tabs: dashboard / media / system / settings; no focus except while typing |
-| launcher | bottom center | 1040 × 540 | needs focus; `>` actions, `@` windows, wallpaper carousel |
+| notch | top center | 820 × 380 (trigger zone 240) | tabs: dashboard / media / system / settings (Windows quick settings); no focus except while typing |
+| launcher | bottom center | 1040 × 540 | needs focus; `>` actions, `>settings` (ORUMI app/color settings), `@` windows, wallpaper carousel |
 | overlay | right center | 150 × 440 | power pill, volume/brightness mixer, automatic popups |
 | switcher | bottom center | 1200 × 260 | custom Alt+Tab; no focus |
 | preview | free (`Edge::Free`) | computed per hover | window thumbnail preview attached to the right of the bar; no focus |
@@ -82,7 +82,7 @@ high-frequency threads once caused heap corruption (0xc0000374).
 | File | Purpose |
 |---|---|
 | `lib.rs` | `PANELS`, `apply_layout`, `place_panel`, setup, tray menu, `generate_handler!`, `--guard` mode at start of `run()`, plugin `orumi-state` that registers all managed state |
-| `edge.rs` | edge engine (1.4), `launcher_view`, `panel_activation`, `set_activatable` (WS_EX_NOACTIVATE), `Edge::Free` |
+| `edge.rs` | edge engine (1.4), `launcher_view`, `notch_set_height`, `panel_activation`, `set_activatable` (WS_EX_NOACTIVATE), `Edge::Free` |
 | `config.rs` | `Config` + `config.json`, hotkeys (parse + re-register), `set_config`, `remember_wallpaper`, `toggle_alt_tab`, calls `taskbar::apply` on change |
 | `stats.rs`, `gpu.rs` | CPU/RAM/disk (sysinfo) with top processes; GPU usage via PDH "GPU Engine" |
 | `wifi.rs`, `battery.rs`, `media.rs` | WLAN API + notifications; `GetSystemPowerStatus`; SMTC (title, cover, controls, seek) |
@@ -94,7 +94,8 @@ high-frequency threads once caused heap corruption (0xc0000374).
 | `altswitch.rs` | custom Alt+Tab: `WH_KEYBOARD_LL` hook + worker + watchdog; installs after the Activities hook so it runs first in the hook chain; re-installs after launcher close and rescues a missed Alt+Tab by dismissing the native switcher and starting the custom one |
 | `wallpaper.rs`, `theme.rs` | wallpaper list, thumbnail cache (rayon, background `warm`), `set_wallpaper`; theme from wallpaper (`wallpaper_pixels` downsized to 128 px in Rust), persist/broadcast theme |
 | `tray_flyout.rs` | `>` button in the bar opens the Windows hidden-icons flyout via UI Automation (moved next to the bar, best effort) |
-| `taskbar.rs` | taskbar auto-hide + `--guard` process (see 2.3) |
+| `quick.rs` | notch quick settings: Wi-Fi / Bluetooth / airplane mode via `Windows.Devices.Radios` (Bloom pattern), Do Not Disturb via `HKCU\...\PushNotifications\ToastEnabled` (Astraeus pattern); commands `quick_get`, `quick_set` |
+| `taskbar.rs` | taskbar auto-hide, full hide (stage 2), tray reveal helpers, `--guard` process (see 2.3) |
 | `activities/mod.rs` | panel window: `show/hide/dismiss/toggle`, placement via `edge::place`, events `activities-open` / `activities-close`, commands `activities_toggle`, `activities_close`, `ws_list`, `ws_switch`, `ws_move_window` |
 | `activities/winkey.rs` | Win key trigger (poller + hook), Start menu suppression |
 | `activities/thumbs.rs` | window snapshots + thumbnails (`PrintWindow`, rayon, per-hwnd cache) |
@@ -105,16 +106,17 @@ high-frequency threads once caused heap corruption (0xc0000374).
 `App.tsx` (routing by label + `useTheme`), `App.css` (color tokens, icon `@font-face`, all styles), `theme.ts`
 (four base colors → CSS tokens), `config.ts`.
 Hooks: `useEdgeVisible`, `useNow`, `useStats`, `useMedia`, `useProcesses`, `useGpu`, `useWifi`, `useBattery`,
-`useWindows`, `useWeather`, `useConfig`.
+`useWindows`, `useWeather`, `useConfig`, `useQuick`.
 Components: `Bar`, `Notch`, `Launcher`, `Overlay`, `Switcher`, `Preview`, `Media`, `Weather`, `Gauge`, `Icon`,
-`AppIcon` (real app icon with letter fallback), `Settings` (+ `ColorSettings`), `WallpaperSettings`, `WallpaperPicker`.
+`AppIcon` (real app icon with letter fallback), `Settings` (+ `ColorSettings`), `LauncherSettings`, `VolumeBrightness`,
+`WallpaperSettings`, `WallpaperPicker`.
 Activities lives in `src/activities/` (`Activities.tsx`, `useActivities.ts`, `activities.css`, all classes prefixed `.act`).
 
 Theme: four colors **bg0** (panel), **bg1** (card), **fg** (text), **accent**, each either "wallpaper" (auto) or
 "custom", plus a wallpaper color intensity slider; everything else derives from these tokens.
 
 Rust → UI events: `edge-visible:<label>` (bool), `overlay-mode`, `volume-changed`, `brightness-changed`, `notch-tab`,
-`windows-changed`, `wifi-changed`, `theme-changed`, `theme-refresh`, `config-changed`, `switcher-items`,
+`launcher-view`, `windows-changed`, `wifi-changed`, `theme-changed`, `theme-refresh`, `config-changed`, `switcher-items`,
 `switcher-select`, `preview-data`, `activities-open`, `activities-close`.
 `useEdgeVisible` waits two real frames (plus a 500 ms safety) before starting the animation so panels do not "jump".
 
@@ -122,7 +124,7 @@ Rust → UI events: `edge-visible:<label>` (bool), `overlay-mode`, `volume-chang
 
 `ui_scale`, `weather_city`, `bg_tint`, `colors{bg0,bg1,fg,accent:{mode:"auto"|"custom",value}}`, `wallpaper_dir`,
 `wallpaper_switcher` ("builtin"|"external"), `wallpaper_command`, `last_wallpaper` (**written by backend only**),
-`alt_tab` (bool), `taskbar_autohide` (bool, default true), `bar_app_style` ("icons"|"dots"), `hotkeys{bar,notch,launcher}`.
+`alt_tab` (bool), `taskbar_autohide` (bool, default true), `taskbar_hidden` (bool, default false; full hide, takes precedence over autohide), `bar_app_style` ("icons"|"dots"), `hotkeys{bar,notch,launcher}`.
 Default hotkeys: Ctrl+Alt+B (bar), Ctrl+Alt+N (notch), Ctrl+Alt+J (launcher). Combinations used by hook-based apps
 (e.g. Google Drive) are not detected as conflicts; Windows combinations (Win+…, Ctrl+Alt+Del) cannot be used.
 Tray menu: bar, notch, launcher, Settings, custom Alt+Tab on/off, Quit.
@@ -139,8 +141,10 @@ A pure-Rust UI port (Slint) was explored in a separate chat (brief in `edgeshell
 ### 1.9 Credits and licensing
 
 Code adapted from **Bloom** (GPL-3.0): `osd.rs`, `brightness.rs`, `winlist.rs` filter, `wifi.rs`, battery flag, tray
-chevron pattern, icon pattern (`IShellItemImageFactory`), `PrintWindow`, taskbar guard pattern. Bloom pins `windows`
-0.61 while ORUMI uses 0.62, so adapted snippets may need API fixes. **Astraeus** (GPL-3.0): feature inspiration.
+chevron pattern, icon pattern (`IShellItemImageFactory`), `PrintWindow`, taskbar guard pattern, `Windows.Devices.Radios`
+pattern (`commands.rs`, adapted in `quick.rs`). Bloom pins `windows` 0.61 while ORUMI uses 0.62, so adapted snippets may
+need API fixes. **Astraeus** (GPL-3.0): feature inspiration and `ToastEnabled` Do Not Disturb switch (`sys_notifs.cpp`,
+adapted in `quick.rs`).
 **Caelestia**: design only. The **carousel** project has no LICENSE file, so its code must not be copied (only techniques
 rewritten). Bloom's source is uploaded as a zip because GitHub blocks automated folder fetching.
 
@@ -196,12 +200,16 @@ rewritten). Bloom's source is uploaded as a zip because GitHub blocks automated 
 ### 2.3 Taskbar rules
 
 - Hiding the taskbar must always come with a restore path that does not depend on a clean exit.
-- Current mechanism: `SHAppBarMessage(ABM_SETSTATE, ABS_AUTOHIDE)` on `Shell_TrayWnd`. Original state is saved to
-  `taskbar-restore.json` in the config dir before changing. Three restore layers: normal exit (`RunEvent::Exit`), a
+- Mechanism (modes: Auto-hide / Sembunyi (hidden) / Biarkan): `SHAppBarMessage(ABM_SETSTATE, ABS_AUTOHIDE)` on `Shell_TrayWnd`.
+  Hidden mode (stage 2, following Bloom's `set_taskbar_visibility`) additionally does `SW_HIDE` + `SetWindowPos(-10000,-10000)` on
+  `Shell_TrayWnd` and every `Shell_SecondaryTrayWnd`, and a 500 ms poller re-hides it if Explorer shows it again. Original state
+  **and original window positions** are saved to `taskbar-restore.json` (`original_state` + `rects`) in the config dir before changing. Three restore layers: normal exit (`RunEvent::Exit`), a
   detached guard process (`<exe> --guard <pid> <marker>`, no Tauri/WebView, ~1–2 MB) that waits for the parent to die
   and then restores taskbar **and** flyout, and the marker re-read at next launch.
-- Do **not** `SW_HIDE` the taskbar or make its window fully transparent: the UI Automation tree disappears and the
-  tray button stops working (Bloom uses alpha 1).
+- A hidden (`SW_HIDE`/parked) taskbar has no UI Automation tree, so the tray `>` button cannot find the chevron. Solution
+  (Bloom's `open_system_tray` pattern): `tray_toggle` calls `taskbar::reveal_for_tray` (window made alpha 0 + `WS_EX_TRANSPARENT`,
+  moved back to its saved position, `SW_SHOW`), invokes the chevron, and `taskbar::conceal_after_close` hides it again once the
+  flyout is closed. Restore order: show windows at saved positions first, then `ABM_SETSTATE`; if still parked, toggle the state to force a relayout.
 - The Windows volume/brightness flyout is hidden by making Explorer's `XamlExplorerHostIslandWindow` fully transparent
   and click-through (`osd.rs`); restored on normal exit and by the guard. `scripts\check-flyout.ps1` lists changed
   windows (`-Pulihkan` restores) if symptoms return.
@@ -259,6 +267,23 @@ or the guard mode without a migration plan.
 
 - Activities: window thumbnails, dragging a window card onto a workspace box, touchpad scroll gesture between views.
 - Impact of the preview and activities windows on memory.
+
+- Taskbar full hide (`taskbar_hidden`, Settings -> Taskbar Windows -> "Sembunyi"), written 2026-11-13, not compiled by Claude
+  (`cargo check` in the agent sandbox only fails on the unrelated `OUT_DIR` / build-script error). Test checklist:
+  hide appears instantly with no work-area gap; switching Sembunyi / Auto-hide / Biarkan restores the taskbar at the right place;
+  force-kill (guard restores it); restart with a leftover marker; tray `>` button still opens the flyout and the taskbar hides again
+  after closing it; Win key / Explorer restart does not leave the taskbar visible; multi-monitor (secondary taskbars, untested).
+  Risks: the 500 ms poller can flicker the taskbar if Explorer re-shows it; the HWND of a restarted Explorer is new, so saved
+  positions fall back to `ABM_GETTASKBARPOS`; bottom-edge panels no longer conflict with the taskbar when hidden.
+- Alt+Tab pure slide animation (`.swpanel` in `App.css`, fade removed; `translateY(100%)` → `0`, 200 ms).
+- Notch quick settings (`quick.rs`, `useQuick.ts`, `VolumeBrightness.tsx`, `Notch.tsx` `settings` tab: Wi-Fi, Bluetooth,
+  Airplane mode, Do Not Disturb tiles + horizontal volume/brightness sliders; dashboard `volume · brightness` placeholder
+  replaced with vertical sliders) and ORUMI app/color settings moved into the launcher (`LauncherSettings.tsx`, opened via
+  `>settings` or tray menu "Pengaturan") with dynamic panel width/height (`Aplikasi` 780 / `Warna` 720) and tightened card spacing.
+  Notch height dynamically follows content (`ResizeObserver` + `notch_set_height` hit-area clamp in `edge.rs`), and changing
+  volume/mute/brightness from UI sliders suppresses the automatic right-edge OSD popup (`LAST_OWN_CHANGE_MS` in `overlay.rs`
+  and `brightness.rs`). Note: `scripts\make-icon-font.ps1` has 4 new icons (`bluetooth`,
+  `bluetooth_disabled`, `airplanemode_active`, `do_not_disturb_on`) and must be re-run so those glyphs render properly.
 
 ### 3.3 Verified in the v0.1.3 code snapshot
 
@@ -335,9 +360,7 @@ Priority is rough; "check" means suspected from reading code, not confirmed.
    separate step from step 2 to keep compile errors easy to trace.
 4. Other optimization: turn off `DEBUG`, review the 8 ms poller, measure memory with Activities open and closed (7 windows)
    before deciding anything about a Slint port.
-5. Continue taskbar hiding. Auto-hide works; the open item is "stage 2" (hide the taskbar completely, following Bloom's
-   pattern: original position, marker, watchdog). Risky; do it only if auto-hide is not enough. Needs a test of the
-   bottom-edge conflict between taskbar reveal and the bottom-edge panels.
+5. Taskbar hiding stage 2 is **implemented but untested** (see 3.2). Next: owner tests it (checklist in 3.2), then fix issues.
 6. Finish merging Activities into the main code (checklist below), then new features if context remains.
 
 Activities merge checklist (build the combined version and test):
@@ -352,8 +375,8 @@ Activities merge checklist (build the combined version and test):
 
 ### 5.2 Later (not this chat unless stated)
 
-- Quick settings in the notch (bluetooth, airplane mode, …) and the "volume · brightness" dashboard card (placeholder now).
-- Windows notifications restyled to match the shell (owner asked whether this is possible; needs research).
+- Remaining quick-settings / notification items: Night Light (skipped for now due to no safe public API in Bloom/Astraeus);
+  Windows notifications restyled to match the shell (owner asked whether this is possible; needs research).
 - Wire `set_win_key_enabled` to config; optional extra Activities triggers (bar button, hot corner); arrow-key
   navigation in the normal app list.
 - Tray stage 2 (own tray icon panel via `NotifyIconSettings` registry + `Shell_NotifyIconGetRect` + UIA): fragile,
@@ -384,7 +407,10 @@ Activities merge checklist (build the combined version and test):
 | All `manage()` calls in the `orumi-state` plugin | removes the startup race |
 | Preview/thumbnails as files + asset protocol | avoids base64 over IPC and large images in the WebView |
 | `--process-per-site` + font subset + adaptive polling | memory from ~500 MB peak to ~200–250 MB |
-| Taskbar: auto-hide with three restore layers | full hiding breaks UI Automation (tray button) and is risky |
+| Taskbar: auto-hide with three restore layers | safe baseline |
+| Taskbar full hide = auto-hide + SW_HIDE + park off-screen; tray reveals it invisibly | Bloom's proven approach; replaces the earlier "never SW_HIDE" rule, tray button kept working via `reveal_for_tray` |
+| Notch `settings` tab = Windows quick settings; ORUMI settings moved to launcher (`>settings`) | separates OS quick controls from shell configuration without adding another tab or window |
+| Do Not Disturb via `HKCU\...\PushNotifications\ToastEnabled` | Astraeus pattern; avoids undocumented `WNF_SHEL_QUIETHOURS_*` binary blobs that can wedge Windows quick settings; Night Light skipped for the same reason |
 | No Windows virtual desktops | API is undocumented and changes between builds; WM will own workspaces |
 
 ---
@@ -393,6 +419,12 @@ Activities merge checklist (build the combined version and test):
 
 - 2026-11-11 (chat 3): read both handoffs and the v0.1.3 code; verified Activities touch points (3.3); created this
   `context.md`; agreed the plan in 5.1; agreed the English comments rule (2.1).
+- 2026-11-13 (chat 4): read Bloom's `utils.rs` / `commands.rs` taskbar code; implemented taskbar full hide (`taskbar.rs` rewrite,
+  `taskbar_hidden` config + Settings button, tray reveal in `tray_flyout.rs`); removed Alt+Tab fade (slide-only `.swpanel` in
+  `App.css`); implemented notch quick settings (`quick.rs`, `useQuick.ts`, `VolumeBrightness.tsx`) + dashboard
+  volume/brightness sliders, moved ORUMI app/color settings into launcher (`LauncherSettings.tsx`, tray menu), suppressed
+  automatic OSD popups for own UI slider/mute changes, and added dynamic height/width & tighter card spacing for notch and
+  launcher settings; updated 1.3, 1.5, 1.6, 1.7, 1.9, 2.3, 3.2, 5.1, 5.2, 6.
 - Earlier: edgeshell built from bar/notch/launcher up to custom Alt+Tab, taskbar auto-hide, tray flyout, previews;
   Activities developed in a separate chat and merged into the main repo; code renamed to ORUMI v0.1.x (rename incomplete).
 

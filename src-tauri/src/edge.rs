@@ -176,6 +176,17 @@ pub fn launcher_view(view: String, app: AppHandle) {
     let _ = app.run_on_main_thread(move || crate::place_panel(&a, "launcher"));
 }
 
+/// Active notch content height in design units (used to shrink its hover hit area when short).
+static NOTCH_HEIGHT: Mutex<Option<f64>> = Mutex::new(None);
+
+#[tauri::command]
+pub fn notch_set_height(height: f64) {
+    if let Ok(mut h) = NOTCH_HEIGHT.lock() {
+        *h = (height > 0.0).then_some(height);
+    }
+    wake();
+}
+
 /// Per-panel "forced open" flag (hotkey, tray, or button click).
 pub struct Panels(pub HashMap<&'static str, Arc<AtomicBool>>);
 
@@ -297,7 +308,14 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
         }
         Edge::Top => {
             let w = size.0 * u;
-            let h = size.1 * u;
+            let mut h = size.1 * u;
+            if spec.label == "notch" {
+                if let Ok(nh) = NOTCH_HEIGHT.lock() {
+                    if let Some(ch) = *nh {
+                        h = (ch * u).min(h);
+                    }
+                }
+            }
             let win = Rect { x: mx + (mw - w) / 2.0, y: my, w, h };
             let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
             let trig = Rect {

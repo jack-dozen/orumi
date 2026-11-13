@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emitTo } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
 import Icon from "./Icon";
 import WallpaperPicker from "./WallpaperPicker";
+import LauncherSettings from "./LauncherSettings";
 import AppIcon from "./AppIcon";
 import { windowIconTarget } from "../useWindows";
 
@@ -49,7 +50,7 @@ const ACTIONS: ActionDef[] = [
   { id: "restart", name: "Restart", hint: "Mulai ulang PC", glyph: "restart_alt", dangerous: true },
   { id: "shutdown", name: "Shutdown", hint: "Matikan PC", glyph: "power_settings_new", dangerous: true },
   { id: "reload_apps", name: "Reload apps", hint: "Muat ulang daftar aplikasi", glyph: "refresh" },
-  { id: "settings", name: "Settings", hint: "Pengaturan edgeshell", glyph: "tune" },
+  { id: "settings", name: "Settings", hint: "Pengaturan ORUMI", glyph: "tune" },
   { id: "wallpaper", name: "Wallpaper", hint: "Ganti wallpaper desktop", glyph: "wallpaper" },
 ];
 
@@ -82,8 +83,13 @@ export default function Launcher() {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
-  const [view, setView] = useState<"list" | "wallpaper">("list");
+  const [view, setView] = useState<"list" | "wallpaper" | "settings">("list");
+  /** A view requested from outside (tray menu) before the launcher finished opening. */
+  const pendingView = useRef<"settings" | null>(null);
+  const visibleRef = useRef(false);
+  visibleRef.current = visible;
   const [pickerWidth, setPickerWidth] = useState<number | null>(null);
+  const [settingsWidth, setSettingsWidth] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const openedAt = useRef(0);
 
@@ -113,10 +119,23 @@ export default function Launcher() {
     openedAt.current = Date.now();
     setQuery("");
     setIndex(0);
-    setView("list");
+    setView(pendingView.current ?? "list");
+    pendingView.current = null;
     const id = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(id);
   }, [visible]);
+
+  // The tray menu asks for the settings view; it may arrive before or after the panel is shown.
+  useEffect(() => {
+    const unlisten = listen<string>("launcher-view", (e) => {
+      if (e.payload !== "settings") return;
+      if (!visibleRef.current) pendingView.current = "settings"; // applied when it opens
+      setView("settings");
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   // Returning from the wallpaper carousel remounts the search box, so focus it again.
   useEffect(() => {
@@ -128,6 +147,9 @@ export default function Launcher() {
   // Outside click on the launcher (window loses focus) = close.
   useEffect(() => {
     const onBlur = () => {
+      // The native color dialog makes the window lose focus; keep the launcher open during it.
+      const el = document.activeElement as HTMLInputElement | null;
+      if (el?.tagName === "INPUT" && el.type === "color") return;
       if (Date.now() - openedAt.current > 400) close();
     };
     window.addEventListener("blur", onBlur);
@@ -192,9 +214,7 @@ export default function Launcher() {
               .then(setApps)
               .catch(() => {});
           } else if (a.id === "settings") {
-            emitTo("notch", "notch-tab", "settings/app").then(() =>
-              invoke("set_panel", { label: "notch", open: true }),
-            );
+            setView("settings");
           } else {
             invoke("run_action", { id: a.id }).catch(() => {});
           }
@@ -239,6 +259,11 @@ export default function Launcher() {
       }
       return;
     }
+    // Settings: ORUMI's own settings open inside the launcher.
+    if (mode === "actions" && item.key === "settings") {
+      setView("settings");
+      return;
+    }
     close();
     item.run();
   };
@@ -269,7 +294,12 @@ export default function Launcher() {
           ? "Memuat daftar aplikasi…"
           : "Tidak ada hasil";
 
-  const width = view === "wallpaper" && pickerWidth ? pickerWidth : LIST_WIDTH;
+  const width =
+    view === "wallpaper" && pickerWidth
+      ? pickerWidth
+      : view === "settings"
+        ? (settingsWidth ?? 780)
+        : LIST_WIDTH;
 
   return (
     <div
@@ -284,7 +314,9 @@ export default function Launcher() {
         style={{ width, height: height ?? undefined }}
       >
         <div className="lpanel__inner" ref={innerRef}>
-          {view === "wallpaper" ? (
+          {view === "settings" ? (
+            <LauncherSettings onBack={() => setView("list")} onWidth={setSettingsWidth} />
+          ) : view === "wallpaper" ? (
             <WallpaperPicker
               onBack={() => setView("list")}
               onDone={close}

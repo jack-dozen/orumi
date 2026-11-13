@@ -87,6 +87,8 @@ pub struct Config {
     pub alt_tab: bool,
     /// true = auto-hide the Windows taskbar while edgeshell runs (restored on exit).
     pub taskbar_autohide: bool,
+    /// true = hide the Windows taskbar completely (takes precedence over `taskbar_autohide`).
+    pub taskbar_hidden: bool,
     /// "icons" or "dots": how the open-app list appears in the bar.
     pub bar_app_style: String,
     pub hotkeys: Hotkeys,
@@ -105,6 +107,7 @@ impl Default for Config {
             last_wallpaper: String::new(),
             alt_tab: true,
             taskbar_autohide: true,
+            taskbar_hidden: false,
             bar_app_style: "icons".into(),
             hotkeys: Hotkeys::default(),
         }
@@ -378,8 +381,8 @@ pub fn set_config(
     *state.0.lock().map_err(|e| e.to_string())? = new.clone();
 
     crate::altswitch::set_enabled(new.alt_tab);
-    if new.taskbar_autohide != old.taskbar_autohide {
-        crate::taskbar::apply(&app, new.taskbar_autohide);
+    if new.taskbar_autohide != old.taskbar_autohide || new.taskbar_hidden != old.taskbar_hidden {
+        crate::taskbar::apply(&app, new.taskbar_autohide, new.taskbar_hidden);
     }
 
     if new.wallpaper_dir != old.wallpaper_dir {

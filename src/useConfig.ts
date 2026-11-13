@@ -24,6 +24,7 @@ export type Config = {
   wallpaper_command: string;
   alt_tab: boolean;
   taskbar_autohide: boolean;
+  taskbar_hidden: boolean;
   bar_app_style: "icons" | "dots";
   hotkeys: Hotkeys;
 };
