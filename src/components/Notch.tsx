@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useGpu } from "../useGpu";
 import { useMedia, type MediaState } from "../useMedia";
@@ -320,6 +320,11 @@ export default function Notch() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  // Broadcast active tab so the bar knows whether clicking clock/WiFi should switch or close.
+  useEffect(() => {
+    emit("notch-tab-active", tab).catch(() => {});
+  }, [tab]);
 
   return (
     <div

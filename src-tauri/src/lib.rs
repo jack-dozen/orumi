@@ -147,6 +147,7 @@ pub fn run() {
             activities::ws_switch,
             activities::ws_move_window,
             altswitch::switcher_pick,
+            altswitch::switcher_open,
             altswitch::switcher_set_previews,
             altswitch::switcher_get_previews,
             altswitch::dev_log,

@@ -1,6 +1,6 @@
 import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emitTo } from "@tauri-apps/api/event";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import { useBattery, type BatteryStatus } from "../useBattery";
 import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
@@ -11,13 +11,6 @@ import AppIcon from "./AppIcon";
 import Icon from "./Icon";
 
 const pad = (n: number) => String(n).padStart(2, "0");
-
-/** Select a notch tab, then open (or close) the notch. */
-async function notchTab(tab: string, toggle: boolean) {
-  await emitTo("notch", "notch-tab", tab);
-  if (toggle) invoke("toggle_panel", { label: "notch" });
-  else invoke("set_panel", { label: "notch", open: true });
-}
 
 /** Click an app to switch to it; if already focused, minimize it or switch windows. */
 function onAppClick(g: AppGroup) {
@@ -56,7 +49,33 @@ export default function Bar() {
   const groups = useWindows(visible);
   const asIcons = (cfg?.bar_app_style ?? "icons") === "icons";
   const previewOpen = useEdgeVisible("preview");
+  const notchOpen = useEdgeVisible("notch");
+  const activeNotchTab = useRef<string>("dashboard");
   const hoverTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    const unlisten = listen<string>("notch-tab-active", (e) => {
+      activeNotchTab.current = e.payload;
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  /** Close notch if already open on `tab`; otherwise switch to `tab` and keep/open it. */
+  async function handleNotchTab(tab: string) {
+    if (notchOpen && activeNotchTab.current === tab) {
+      invoke("set_panel", { label: "notch", open: false }).catch(() => {});
+      return;
+    }
+    activeNotchTab.current = tab;
+    await emitTo("notch", "notch-tab", tab);
+    if (!notchOpen) {
+      invoke("toggle_panel", { label: "notch" }).catch(() => {});
+    } else {
+      invoke("set_panel", { label: "notch", open: true }).catch(() => {});
+    }
+  }
 
   // Bar hidden: close the thumbnail preview.
   useEffect(() => {
@@ -155,7 +174,7 @@ export default function Bar() {
         >
           <Icon name="chevron_right" size={22} />
         </div>
-        <div className="bar__item bar__clock" onClick={() => notchTab("dashboard", true)}>
+        <div className="bar__item bar__clock" onClick={() => handleNotchTab("dashboard")}>
           {pad(now.getHours())}
           <br />
           {pad(now.getMinutes())}
@@ -164,7 +183,7 @@ export default function Bar() {
           <div
             className={`bar__item ${wifiOn ? "" : "bar__off"}`}
             title={wifiTitle}
-            onClick={() => notchTab("settings", false)}
+            onClick={() => handleNotchTab("settings")}
           >
             <Icon name={wifiOn ? "wifi" : "wifi_off"} size={20} />
           </div>

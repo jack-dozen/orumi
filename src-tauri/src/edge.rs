@@ -187,6 +187,10 @@ pub fn notch_set_height(height: f64) {
     wake();
 }
 
+/// Timestamp of the last close per panel, so a bar button click that causes focus loss (closing
+/// the panel on mouse-down) does not immediately re-open it on mouse-up.
+static LAST_CLOSE: Mutex<Vec<(&'static str, Instant)>> = Mutex::new(Vec::new());
+
 /// Per-panel "forced open" flag (hotkey, tray, or button click).
 pub struct Panels(pub HashMap<&'static str, Arc<AtomicBool>>);
 
@@ -207,9 +211,27 @@ impl Panels {
                 flag_set(&TRANSIENT, key, false);
                 flag_set(&HELD, key, false);
             }
-            flag.store(open, Ordering::Relaxed);
+            let was_open = flag.swap(open, Ordering::Relaxed);
+            if !open && was_open {
+                if let Ok(mut lc) = LAST_CLOSE.lock() {
+                    if let Some(entry) = lc.iter_mut().find(|(k, _)| *k == *key) {
+                        entry.1 = Instant::now();
+                    } else {
+                        lc.push((*key, Instant::now()));
+                    }
+                }
+            }
             wake();
         }
+    }
+
+    /// True if `label` closed within `within` (used to ignore mouse-up re-open after blur close).
+    pub fn recently_closed(&self, label: &str, within: Duration) -> bool {
+        LAST_CLOSE
+            .lock()
+            .ok()
+            .and_then(|lc| lc.iter().find(|(k, _)| *k == label).map(|(_, at)| at.elapsed() < within))
+            .unwrap_or(false)
     }
 
     /// UI click: opens, then hides when the cursor moves away.
@@ -234,7 +256,7 @@ impl Panels {
 pub fn toggle_panel(label: String, panels: State<'_, Panels>) {
     if panels.is_open(&label) {
         panels.set(&label, false);
-    } else {
+    } else if !panels.recently_closed(&label, Duration::from_millis(350)) {
         panels.set_transient(&label);
     }
 }

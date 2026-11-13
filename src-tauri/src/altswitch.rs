@@ -56,7 +56,9 @@ const LLKHF_INJECTED: u32 = 0x10;
 const LLKHF_ALTDOWN: u32 = 0x20;
 
 const VK_TAB: u32 = 0x09;
+const VK_RETURN: u32 = 0x0D;
 const VK_ESCAPE: u32 = 0x1B;
+const VK_SPACE: u32 = 0x20;
 const VK_LEFT: u32 = 0x25;
 const VK_UP: u32 = 0x26;
 const VK_RIGHT: u32 = 0x27;
@@ -107,6 +109,10 @@ static ENABLED: AtomicBool = AtomicBool::new(true);
 static PREVIEWS_ENABLED: AtomicBool = AtomicBool::new(true);
 /// Whether an Alt+Tab session is in progress.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Sticky session (triggered from launcher `>switch`): stays open without Alt held until Enter/Space/click/Esc.
+static STICKY: AtomicBool = AtomicBool::new(false);
+/// Ignore the key-up of the Enter/Space that invoked `switcher_open` before accepting a commit key.
+static STICKY_ARMED: AtomicBool = AtomicBool::new(false);
 /// Keys whose keydown we swallowed; their keyup must also be swallowed.
 static SWALLOWED: AtomicU8 = AtomicU8::new(0);
 /// When the hook last saw a physical Tab keydown (ms since START). Used by the watchdog.
@@ -149,7 +155,7 @@ fn async_down(vk: u32) -> bool {
 }
 
 enum Msg {
-    Start { reverse: bool },
+    Start { reverse: bool, sticky: bool },
     Next { reverse: bool },
     SetPreviews(bool),
     Step(i32),
@@ -184,7 +190,7 @@ fn reinstall() {
 /// Proactively refresh the low-level keyboard hook after focus/panel/setting transitions so
 /// Alt+Tab never misses the first Tab keystroke or flashes the native Windows switcher.
 pub fn ensure_hook(reason: &'static str) {
-    if !ENABLED.load(Ordering::Relaxed) {
+    if !ENABLED.load(Ordering::Relaxed) && !STICKY.load(Ordering::Relaxed) {
         return;
     }
     let now = now_ms().max(1);
@@ -210,6 +216,7 @@ pub fn set_enabled(on: bool) {
     let _was = ENABLED.swap(on, Ordering::Relaxed);
     if !on {
         ACTIVE.store(false, Ordering::Relaxed);
+        STICKY.store(false, Ordering::Relaxed);
         send(Msg::Cancel);
     } else {
         reinstall();
@@ -226,6 +233,8 @@ fn swallow_bit(vk: u32) -> u8 {
         VK_RIGHT => 8,
         VK_UP => 16,
         VK_DOWN => 32,
+        VK_RETURN => 64,
+        VK_SPACE => 128,
         _ => 0,
     }
 }
@@ -326,13 +335,14 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
         set(ACTIVE.load(Ordering::Relaxed), TRACE_ACTIVE);
         TAB_TRACE.store(t, Ordering::Relaxed);
     }
-    if !ENABLED.load(Ordering::Relaxed) {
+    let sticky = STICKY.load(Ordering::Relaxed);
+    if !ENABLED.load(Ordering::Relaxed) && !sticky {
         return false;
     }
 
-    // Alt released: session ends. Always pass the Alt-up event through.
+    // Alt released: session ends (unless sticky). Always pass the Alt-up event through.
     if is_alt_key && up {
-        if ACTIVE.swap(false, Ordering::Relaxed) {
+        if !sticky && ACTIVE.swap(false, Ordering::Relaxed) {
             send(Msg::Commit);
         }
         return false;
@@ -343,14 +353,17 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
 
     // Release keys whose keydown we already swallowed.
     if up {
+        if sticky && matches!(vk, VK_RETURN | VK_SPACE) {
+            STICKY_ARMED.store(true, Ordering::Relaxed);
+        }
         return take_swallowed(vk);
     }
 
     let active = ACTIVE.load(Ordering::Relaxed);
 
-    // Any key without Alt during an active session means Alt-up was missed: end the session,
+    // Any key without Alt during a normal Alt+Tab session means Alt-up was missed: end the session,
     // then pass the key through unchanged.
-    if active && !alt_down && !is_alt_key {
+    if active && !sticky && !alt_down && !is_alt_key {
         ACTIVE.store(false, Ordering::Relaxed);
         send(Msg::Commit);
         return false;
@@ -366,10 +379,10 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
     }
 
     let swallow = match vk {
-        // Require Alt, with async key state as a fallback for a missing low-level flag.
+        // Require Alt (or sticky mode), with async key state as a fallback for a missing low-level flag.
         // Read Ctrl/Win/Shift state directly from Windows.
         VK_TAB
-            if alt_down
+            if (alt_down || sticky)
                 && (HANDLE_CTRL_ALT_TAB || !async_down(VK_CONTROL))
                 && !async_down(VK_LWIN)
                 && !async_down(VK_RWIN) =>
@@ -379,12 +392,21 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
                 send(Msg::Next { reverse });
             } else {
                 ACTIVE.store(true, Ordering::Relaxed);
-                send(Msg::Start { reverse });
+                send(Msg::Start { reverse, sticky: false });
+            }
+            true
+        }
+        VK_RETURN | VK_SPACE if active && sticky => {
+            if STICKY_ARMED.load(Ordering::Relaxed) {
+                ACTIVE.store(false, Ordering::Relaxed);
+                STICKY.store(false, Ordering::Relaxed);
+                send(Msg::Commit);
             }
             true
         }
         VK_ESCAPE if active => {
             ACTIVE.store(false, Ordering::Relaxed);
+            STICKY.store(false, Ordering::Relaxed);
             send(Msg::Cancel);
             true
         }
@@ -435,6 +457,7 @@ struct Session {
     items: Vec<WindowEntry>,
     index: usize,
     shown: bool,
+    sticky: bool,
     started: Instant,
     layout: GridLayout,
     /// Window size (design units) that fits the grid.
@@ -674,6 +697,8 @@ fn step_row(app: &AppHandle, session: &mut Option<Session>, delta: i32) {
 
 /// End the session: hide the panel and switch to the selected window.
 fn finish(app: &AppHandle, session: &mut Option<Session>) {
+    ACTIVE.store(false, Ordering::Relaxed);
+    STICKY.store(false, Ordering::Relaxed);
     let Some(s) = session.take() else { return };
     if s.shown {
         hide_panel(app);
@@ -684,6 +709,8 @@ fn finish(app: &AppHandle, session: &mut Option<Session>) {
 }
 
 fn cancel(app: &AppHandle, session: &mut Option<Session>) {
+    ACTIVE.store(false, Ordering::Relaxed);
+    STICKY.store(false, Ordering::Relaxed);
     if let Some(s) = session.take() {
         if s.shown {
             hide_panel(app);
@@ -693,10 +720,12 @@ fn cancel(app: &AppHandle, session: &mut Option<Session>) {
 
 fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
     match msg {
-        Msg::Start { reverse } => {
+        Msg::Start { reverse, sticky } => {
             let started = Instant::now();
             // First, suppress the active app's menu bar while Alt is still held.
-            unsafe { mask_alt_menu() };
+            if !sticky {
+                unsafe { mask_alt_menu() };
+            }
 
             // Close any open ORUMI interactive overlays (launcher, notch, overlay, activities)
             // so pressing Alt+Tab while launcher/notch is open cleanly transitions to switching windows.
@@ -718,6 +747,7 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
             }
             if items.is_empty() {
                 ACTIVE.store(false, Ordering::Relaxed);
+                STICKY.store(false, Ordering::Relaxed);
                 *session = None;
                 return;
             }
@@ -737,6 +767,7 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
                 items,
                 index,
                 shown: false,
+                sticky,
                 started,
                 layout,
                 window,
@@ -745,6 +776,9 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
             };
             // Expensive work happens now, before the panel is revealed (see prepare).
             prepare(app, &mut s);
+            if sticky {
+                show(app, &mut s);
+            }
             *session = Some(s);
         }
         Msg::Next { reverse } => step(app, session, if reverse { -1 } else { 1 }),
@@ -801,9 +835,8 @@ fn worker(app: AppHandle, rx: Receiver<Msg>) {
 
         let Some(s) = session.as_mut() else { continue };
         let age = s.started.elapsed();
-        if age >= ALT_POLL_GRACE && !async_down(VK_MENU) {
+        if !s.sticky && age >= ALT_POLL_GRACE && !async_down(VK_MENU) {
             // Alt-up was missed (hook removed, desktop is safe, etc.): consider the session finished.
-            ACTIVE.store(false, Ordering::Relaxed);
             finish(&app, &mut session);
         } else if !s.shown && age >= SHOW_DELAY {
             show(&app, s);
@@ -902,7 +935,7 @@ fn watchdog() {
                 if ACTIVE.swap(true, Ordering::Relaxed) {
                     send(Msg::Next { reverse });
                 } else {
-                    send(Msg::Start { reverse });
+                    send(Msg::Start { reverse, sticky: false });
                 }
             }
         }
@@ -919,6 +952,16 @@ pub fn dev_log(line: String) {
 #[tauri::command]
 pub fn switcher_pick(index: usize) {
     send(Msg::Pick(index));
+}
+
+/// Open the switcher in sticky mode (e.g. from the launcher `>switch` action).
+#[tauri::command]
+pub fn switcher_open() {
+    STICKY_ARMED.store(!async_down(VK_RETURN) && !async_down(VK_SPACE), Ordering::Relaxed);
+    STICKY.store(true, Ordering::Relaxed);
+    ACTIVE.store(true, Ordering::Relaxed);
+    ensure_hook("switcher_open");
+    send(Msg::Start { reverse: false, sticky: true });
 }
 
 /// Enable or disable thumbnail previews for the current process.

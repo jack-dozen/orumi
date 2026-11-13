@@ -52,7 +52,7 @@ Hidden means click-through plus content slid out via CSS. All windows load the s
 |---|---|---|---|
 | bar | left | width 64, full height minus 12 inset | hover (200 ms dwell), click, or hotkey; does not take focus |
 | notch | top center | 820 × 380 (trigger zone 240) | tabs: dashboard / media / system / settings (Windows quick settings); no focus except while typing |
-| launcher | bottom center | 1040 × 540 | needs focus; `>` actions, `>settings` (ORUMI app/color settings), `@` windows, wallpaper carousel |
+| launcher | bottom center | 1040 × 540 | needs focus; `>` actions (`>settings` ORUMI settings, `>switch` sticky switcher), wallpaper carousel |
 | overlay | right center | 150 × 440 | power pill, volume/brightness mixer, automatic popups |
 | switcher | bottom center | 1200 × 260 | custom Alt+Tab; no focus |
 | preview | free (`Edge::Free`) | computed per hover | window thumbnail preview attached to the right of the bar; no focus |
@@ -91,7 +91,7 @@ high-frequency threads once caused heap corruption (0xc0000374).
 | `icons.rs` | app icons via `IShellItemImageFactory` → PNG cache, dedicated COM STA thread; `app_icon(target)` with `aumid:<AppID>` or `path:<exe>`; `ICON_SIZE = 128`, `ICON_VERSION = 2` |
 | `previews.rs` | bar hover thumbnails: `PrintWindow` → JPEG in `app_cache_dir/previews/<hwnd>_<seq>.jpg`; `preview_open/keep/close_soon/close` with generation counter `GEN` |
 | `overlay.rs`, `brightness.rs`, `osd.rs` | volume (Core Audio) and popups; brightness (WMI events to read, COM worker to write, laptop panel only); hides the Windows 11 volume/brightness flyout |
-| `altswitch.rs` | custom Alt+Tab: `WH_KEYBOARD_LL` hook + worker + watchdog; installs after the Activities hook so it runs first in the hook chain; re-installs after launcher close and rescues a missed Alt+Tab by dismissing the native switcher and starting the custom one |
+| `altswitch.rs` | custom Alt+Tab: `WH_KEYBOARD_LL` hook + worker + watchdog; installs after the Activities hook so it runs first in the hook chain; re-installs after launcher close, rescues a missed Alt+Tab by dismissing the native switcher, and supports sticky launch via `switcher_open` (`>switch`) |
 | `wallpaper.rs`, `theme.rs` | wallpaper list, thumbnail cache (rayon, background `warm`), `set_wallpaper`; theme from wallpaper (`wallpaper_pixels` downsized to 128 px in Rust), persist/broadcast theme |
 | `tray_flyout.rs` | `>` button in the bar opens the Windows hidden-icons flyout via UI Automation (moved next to the bar, best effort) |
 | `quick.rs` | notch quick settings: Wi-Fi / Bluetooth / airplane mode via `Windows.Devices.Radios` (Bloom pattern), Do Not Disturb via `HKCU\...\PushNotifications\ToastEnabled` (Astraeus pattern); commands `quick_get`, `quick_set` |
@@ -253,7 +253,7 @@ or the guard mode without a migration plan.
   clock → dashboard, tray `>` button, WiFi, volume, battery, power.
 - Notch: dashboard (clock, weather, calendar, gauges, mini media), media, system (CPU/RAM/disk/GPU/WiFi/top processes), settings.
 - Launcher: app search with icons (most relevant result at the bottom, near the search box), `>` actions + settings +
-  wallpaper, `@` window switch, height follows content.
+  wallpaper, height follows content. (`@` window switch replaced by `>switch` / `>switch window`, untested.)
 - Wallpaper carousel (endless, starts at the current wallpaper, asset-protocol thumbnails, width follows image count).
 - Overlay: power, mixer, automatic volume/brightness popups. Custom Alt+Tab with app icons. Theme from wallpaper/custom
   (four colors). Settings. Tray flyout (native Windows). Taskbar auto-hide (normal exit, force kill, and settings toggle all tested).
@@ -276,6 +276,8 @@ or the guard mode without a migration plan.
   Risks: the 500 ms poller can flicker the taskbar if Explorer re-shows it; the HWND of a restarted Explorer is new, so saved
   positions fall back to `ABM_GETTASKBARPOS`; bottom-edge panels no longer conflict with the taskbar when hidden.
 - Alt+Tab pure slide animation (`.swpanel` in `App.css`, fade removed; `translateY(100%)` → `0`, 200 ms).
+- Launcher `>switch` / `>switch window` (`switcher_open` sticky mode in `altswitch.rs`, replacing `@` window mode in `Launcher.tsx`):
+  opens the custom Alt+Tab switcher without Alt held; navigate with arrows/Tab, commit with Enter/Space/click, cancel with Esc.
 - Notch quick settings (`quick.rs`, `useQuick.ts`, `VolumeBrightness.tsx`, `Notch.tsx` `settings` tab: Wi-Fi, Bluetooth,
   Airplane mode, Do Not Disturb tiles + horizontal volume/brightness sliders; dashboard `volume · brightness` placeholder
   replaced with vertical sliders) and ORUMI app/color settings moved into the launcher (`LauncherSettings.tsx`, opened via
@@ -423,8 +425,10 @@ Activities merge checklist (build the combined version and test):
   `taskbar_hidden` config + Settings button, tray reveal in `tray_flyout.rs`); removed Alt+Tab fade (slide-only `.swpanel` in
   `App.css`); implemented notch quick settings (`quick.rs`, `useQuick.ts`, `VolumeBrightness.tsx`) + dashboard
   volume/brightness sliders, moved ORUMI app/color settings into launcher (`LauncherSettings.tsx`, tray menu), suppressed
-  automatic OSD popups for own UI slider/mute changes, and added dynamic height/width & tighter card spacing for notch and
-  launcher settings; updated 1.3, 1.5, 1.6, 1.7, 1.9, 2.3, 3.2, 5.1, 5.2, 6.
+  automatic OSD popups for own UI slider/mute changes, added dynamic height/width & tighter card spacing for notch and
+  launcher settings, and replaced launcher `@` window mode with `>switch` / `>switch window` sticky switcher (`switcher_open` in
+  `altswitch.rs`); updated 1.3, 1.5, 1.6, 1.7, 1.9, 2.3, 3.1, 3.2, 5.1, 5.2, 6.
+- 2026-11-13 (chat 5): fixed Bar launcher and WiFi/Clock toggle behavior — added `LAST_CLOSE` 350 ms guard in `edge.rs` (`Panels::set` + `toggle_panel`) so launcher focus-loss on mouse-down does not re-open on mouse-up, and updated `Bar.tsx` + `Notch.tsx` (`notch-tab-active` event + `handleNotchTab`) so clicking WiFi or Clock switches tabs if the notch is on another tab and closes it when already open on that same tab.
 - Earlier: edgeshell built from bar/notch/launcher up to custom Alt+Tab, taskbar auto-hide, tray flyout, previews;
   Activities developed in a separate chat and merged into the main repo; code renamed to ORUMI v0.1.x (rename incomplete).
 

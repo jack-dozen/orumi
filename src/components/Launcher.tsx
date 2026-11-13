@@ -7,19 +7,10 @@ import Icon from "./Icon";
 import WallpaperPicker from "./WallpaperPicker";
 import LauncherSettings from "./LauncherSettings";
 import AppIcon from "./AppIcon";
-import { windowIconTarget } from "../useWindows";
 
 type AppEntry = { name: string; id: string };
-type WinEntry = {
-  hwnd: number;
-  title: string;
-  exe: string;
-  minimized: boolean;
-  path: string;
-  aumid: string;
-};
 
-/** One result row, whether an app, action, or window. */
+/** One result row, whether an app or an action. */
 type Item = {
   key: string;
   name: string;
@@ -50,6 +41,7 @@ const ACTIONS: ActionDef[] = [
   { id: "restart", name: "Restart", hint: "Mulai ulang PC", glyph: "restart_alt", dangerous: true },
   { id: "shutdown", name: "Shutdown", hint: "Matikan PC", glyph: "power_settings_new", dangerous: true },
   { id: "reload_apps", name: "Reload apps", hint: "Muat ulang daftar aplikasi", glyph: "refresh" },
+  { id: "switch_window", name: "Switch window", hint: "Pindah window terbuka (Alt+Tab)", glyph: "apps" },
   { id: "settings", name: "Settings", hint: "Pengaturan ORUMI", glyph: "tune" },
   { id: "wallpaper", name: "Wallpaper", hint: "Ganti wallpaper desktop", glyph: "wallpaper" },
 ];
@@ -79,7 +71,6 @@ export default function Launcher() {
   const visible = useEdgeVisible("launcher");
   const cfg = useConfig();
   const [apps, setApps] = useState<AppEntry[]>([]);
-  const [wins, setWins] = useState<WinEntry[]>([]);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
@@ -161,38 +152,9 @@ export default function Launcher() {
     setArmed(null);
   }, [query, index, visible]);
 
-  const mode = query.startsWith(">") ? "actions" : query.startsWith("@") ? "windows" : "apps";
-
-  // Load the window list each time "@" mode is entered.
-  useEffect(() => {
-    if (!visible || mode !== "windows") return;
-    invoke<WinEntry[]>("list_windows")
-      .then(setWins)
-      .catch(() => setWins([]));
-  }, [visible, mode]);
+  const mode = query.startsWith(">") ? "actions" : "apps";
 
   const results: Item[] = useMemo(() => {
-    if (mode === "windows") {
-      const q = query.slice(1).trim().toLowerCase();
-      const list = q
-        ? wins
-            .map((w) => ({ w, s: Math.max(score(w.title, q), score(w.exe, q)) }))
-            .filter((x) => x.s > 0)
-            .sort((x, y) => y.s - x.s)
-            .map((x) => x.w)
-        : wins;
-      return list.slice(0, MAX_SHOWN).map((w) => ({
-        key: String(w.hwnd),
-        name: w.title,
-        hint: [w.exe, w.minimized ? "diperkecil" : ""].filter(Boolean).join(" · "),
-        glyph: (w.exe || w.title).charAt(0).toUpperCase(),
-        icon: windowIconTarget(w) ?? undefined,
-        run: () => {
-          invoke("focus_window", { hwnd: w.hwnd }).catch(() => {});
-        },
-      }));
-    }
-
     if (mode === "actions") {
       const q = query.slice(1).trim().toLowerCase();
       const list = q
@@ -213,6 +175,8 @@ export default function Launcher() {
             invoke<AppEntry[]>("list_apps", { refresh: true })
               .then(setApps)
               .catch(() => {});
+          } else if (a.id === "switch_window") {
+            invoke("switcher_open").catch(() => {});
           } else if (a.id === "settings") {
             setView("settings");
           } else {
@@ -239,7 +203,7 @@ export default function Launcher() {
         invoke("launch_app", { id: a.id }).catch(() => {});
       },
     }));
-  }, [apps, wins, query, mode]);
+  }, [apps, query, mode]);
 
   /** Run an item; dangerous actions require two confirmations. */
   const activate = (item?: Item) => {
@@ -284,15 +248,11 @@ export default function Launcher() {
   };
 
   const emptyText =
-    mode === "windows"
-      ? wins.length === 0
-        ? "Tidak ada window terbuka"
-        : "Tidak ada hasil"
-      : mode === "actions"
-        ? "Tidak ada aksi yang cocok"
-        : apps.length === 0
-          ? "Memuat daftar aplikasi…"
-          : "Tidak ada hasil";
+    mode === "actions"
+      ? "Tidak ada aksi yang cocok"
+      : apps.length === 0
+        ? "Memuat daftar aplikasi…"
+        : "Tidak ada hasil";
 
   const width =
     view === "wallpaper" && pickerWidth
@@ -359,7 +319,7 @@ export default function Launcher() {
               <input
                 ref={inputRef}
                 className="lsearch"
-                placeholder="Cari aplikasi…  (> aksi sistem,  @ pindah window)"
+                placeholder="Cari aplikasi…  (> aksi sistem)"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
