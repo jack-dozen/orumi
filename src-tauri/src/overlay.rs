@@ -68,6 +68,16 @@ pub fn show_popup(app: &AppHandle, mode: &str) {
     }
 }
 
+/// Cursor dwelled at the right screen edge: show volume + brightness; hides when the cursor leaves.
+pub fn hover_open(app: &AppHandle) {
+    if let Ok(mut m) = CURRENT_MODE.lock() {
+        *m = "mixer".to_string();
+    }
+    AUTO_POPUP.store(false, Ordering::Relaxed);
+    let _ = app.emit_to("overlay", "overlay-mode", json!({ "mode": "mixer", "manual": true }));
+    app.state::<Panels>().set_transient("overlay");
+}
+
 /// Called from the bar: open an overlay with `mode` content, or close it if the same content is already open.
 #[tauri::command]
 pub fn overlay_toggle(mode: String, app: AppHandle, panels: State<'_, Panels>) {

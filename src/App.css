@@ -811,9 +811,9 @@ button {
   top: 50%;
   right: 0;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
 
   transform: translate(100%, -50%);
   transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -839,11 +839,55 @@ button {
 }
 
 .opill--mixer {
-  width: 140px;
-  padding: 18px 10px;
+  width: 68px;
+  padding: 16px 0;
   display: flex;
-  justify-content: space-around;
-  gap: 8px;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  cursor: default;
+}
+
+/* Power pill joined to the mixer pill: one continuous shape. */
+.opill--mixer + .opower .opill--power {
+  border-radius: 0;
+}
+
+.opower {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-width 380ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 260ms ease;
+}
+
+.opower--shown {
+  max-width: 84px;
+  opacity: 1;
+}
+
+.opower .opill--power {
+  flex-shrink: 0;
+}
+
+.opill--tall .hslider {
+  height: 280px;
+}
+
+.opower .opill--power {
+  flex: 1;
+  justify-content: center;
+}
+
+.overlay > .ocaption {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  white-space: nowrap;
 }
 
 .opill--single {
@@ -880,45 +924,47 @@ button {
   color: var(--error);
 }
 
-.mixer__col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.mixer__icon {
-  display: flex;
-  line-height: 1;
-  color: var(--on-surface);
-}
-
-.mixer__num {
-  font-size: 11px;
-  color: var(--on-surface-variant);
-}
-
-.vslider {
-  width: 44px;
-  height: 280px;
+.hslider {
+  position: relative;
+  width: 36px;
+  height: 150px;
   box-sizing: border-box;
   display: flex;
   align-items: flex-end;
-  border-radius: 22px;
+  border-radius: 18px;
   background: var(--surface-container-high);
   overflow: hidden;
   cursor: pointer;
   touch-action: none;
 }
 
-.vslider__fill {
+.hslider__fill {
   width: 100%;
   background: var(--primary);
-  border-radius: 22px;
+  border-radius: 18px;
   min-height: 0;
+  position: relative;
+  overflow: hidden;
 }
 
-.vslider--disabled {
+.hslider__icon {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-surface);
+  pointer-events: none;
+}
+
+.hslider__icon--on {
+  color: var(--on-primary);
+}
+
+.hslider--disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

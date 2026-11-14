@@ -503,7 +503,10 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
                 // restore focus to the last active external window so the hidden WebView2 window does
                 // not keep keyboard focus.
                 let panels = app_handle.state::<Panels>();
-                if !panels.is_open("launcher") && !crate::activities::is_open() {
+                if !panels.is_open("launcher")
+                    && !panels.is_open("overlay")
+                    && !crate::activities::is_open()
+                {
                     crate::winlist::restore_external_foreground_if_ours();
                 }
             }
@@ -536,6 +539,9 @@ struct Runtime {
     inside_since: Option<Instant>,
     /// Whether the cursor entered the window after the panel was opened by clicking.
     pin_entered: bool,
+    /// Hover-opened flag-only panels (launcher, overlay): the cursor must leave the trigger zone
+    /// after a close before the panel can open again.
+    armed: bool,
 }
 
 /// One thread for all panels.
@@ -554,6 +560,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 outside_since: None,
                 inside_since: None,
                 pin_entered: false,
+                armed: true,
             })
             .collect();
         if panels.is_empty() {
@@ -600,10 +607,56 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             for p in panels.iter_mut() {
                 let pinned = p.pinned.load(Ordering::Relaxed);
 
-                // Panel without hover: follow the flag only.
+                // Panel without hover: follow the flag only. The launcher and overlay may also be
+                // opened by dwelling at their screen edge.
                 if !p.spec.hover {
+                    if matches!(p.spec.label, "overlay" | "launcher") {
+                        let (win_rect, trigger_rect) = layout(&p.spec, m);
+                        if !pinned && !p.visible {
+                            if trigger_rect.contains(cursor.x, cursor.y) {
+                                if p.armed {
+                                    let since = *p.inside_since.get_or_insert_with(Instant::now);
+                                    if since.elapsed() >= EDGE_DWELL {
+                                        p.inside_since = None;
+                                        p.pin_entered = false;
+                                        p.outside_since = None;
+                                        if p.spec.label == "overlay" {
+                                            crate::overlay::hover_open(&app);
+                                        } else {
+                                            app.state::<Panels>().set("launcher", true);
+                                        }
+                                    }
+                                } else {
+                                    p.inside_since = None;
+                                }
+                            } else {
+                                p.armed = true;
+                                p.inside_since = None;
+                            }
+                        }
+                        // Hover-opened overlay hides again once the cursor leaves it.
+                        if pinned
+                            && p.spec.label == "overlay"
+                            && flag_has(&TRANSIENT, "overlay")
+                        {
+                            if win_rect.contains(cursor.x, cursor.y) {
+                                p.pin_entered = true;
+                                p.outside_since = None;
+                            } else {
+                                let since = *p.outside_since.get_or_insert_with(Instant::now);
+                                let limit = if p.pin_entered { HIDE_DELAY } else { PIN_GRACE };
+                                if since.elapsed() >= limit {
+                                    p.pinned.store(false, Ordering::Relaxed);
+                                    flag_set(&TRANSIENT, "overlay", false);
+                                }
+                            }
+                        }
+                    }
                     if pinned != p.visible {
                         p.visible = pinned;
+                        if !pinned {
+                            p.armed = false;
+                        }
                         set_visible(&app, &p.window, &p.event, pinned, &p.spec);
                     }
                     continue;

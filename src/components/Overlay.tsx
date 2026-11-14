@@ -18,11 +18,13 @@ const POWER_ITEMS = [
 ];
 
 /** Vertical slider: drag or click to set a value from 0 to 100. */
-function VSlider(props: {
+function HSlider(props: {
   value: number;
   disabled?: boolean;
   onChange: (v: number) => void;
   onDragging?: (d: boolean) => void;
+  icon?: string;
+  onIconClick?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -41,9 +43,16 @@ function VSlider(props: {
   return (
     <div
       ref={ref}
-      className={`vslider ${props.disabled ? "vslider--disabled" : ""}`}
+      className={`hslider ${props.disabled ? "hslider--disabled" : ""}`}
       onPointerDown={(e) => {
         if (props.disabled) return;
+        if (props.onIconClick) {
+          const r = ref.current!.getBoundingClientRect();
+          if (e.clientY > r.bottom - r.width) {
+            props.onIconClick();
+            return;
+          }
+        }
         e.currentTarget.setPointerCapture(e.pointerId);
         dragging.current = true;
         props.onDragging?.(true);
@@ -60,7 +69,18 @@ function VSlider(props: {
       onPointerCancel={endDrag}
       onLostPointerCapture={endDrag}
     >
-      <div className="vslider__fill" style={{ height: `${props.value}%` }} />
+      {props.icon && (
+        <span className="hslider__icon">
+          <Icon name={props.icon} size={20} />
+        </span>
+      )}
+      <div className="hslider__fill" style={{ height: `${props.value}%` }}>
+        {props.icon && (
+          <span className="hslider__icon hslider__icon--on">
+            <Icon name={props.icon} size={20} />
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -71,6 +91,9 @@ export default function Overlay() {
   const [vol, setVol] = useState<Vol>({ volume: 0, muted: false });
   const [bright, setBright] = useState<number | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
+  const [showPower, setShowPower] = useState(false);
+  // Keyboard-triggered popups use long sliders; hot-edge/bar opens use the compact size.
+  const [tall, setTall] = useState(false);
 
   const manual = useRef(true);
   const openedAt = useRef(0);
@@ -93,6 +116,8 @@ export default function Overlay() {
       openedAt.current = Date.now();
       setMode(e.payload.mode);
       setArmed(null);
+      setShowPower(false);
+      setTall(!e.payload.manual);
       if (!e.payload.manual) armAutoClose();
     });
     return () => {
@@ -163,7 +188,10 @@ export default function Overlay() {
     return () => clearTimeout(id);
   }, [armed]);
   useEffect(() => {
-    if (!visible) setArmed(null);
+    if (!visible) {
+      setArmed(null);
+      setShowPower(false);
+    }
   }, [visible]);
 
   // If the overlay closes during a drag, clear the "being dragged" state.
@@ -206,59 +234,60 @@ export default function Overlay() {
   const volIcon =
     vol.muted || vol.volume < 1 ? "volume_off" : vol.volume < 50 ? "volume_down" : "volume_up";
 
+  const mixerMode = mode !== "power";
+  const power = (
+    <div className={`opower ${!mixerMode || showPower ? "opower--shown" : ""}`}>
+      <div className="opill opill--power">
+        {POWER_ITEMS.map((it) => (
+          <button
+            key={it.id}
+            title={it.label}
+            className={`obtn ${armed === it.id ? "obtn--armed" : ""}`}
+            onClick={() => onPower(it)}
+          >
+            <Icon name={it.icon} size={26} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className={`overlay ${visible ? "overlay--visible" : ""}`}>
-      {mode === "power" ? (
-        <>
-          <div className="opill opill--power">
-            {POWER_ITEMS.map((it) => (
-              <button
-                key={it.id}
-                title={it.label}
-                className={`obtn ${armed === it.id ? "obtn--armed" : ""}`}
-                onClick={() => onPower(it)}
-              >
-                <Icon name={it.icon} size={26} />
-              </button>
-            ))}
-          </div>
-          {armed && <div className="ocaption">klik lagi untuk konfirmasi</div>}
-        </>
-      ) : (
-        <div className={`opill ${mode === "mixer" ? "opill--mixer" : "opill--single"}`}>
+      {mixerMode && (
+        <div
+          className={`opill opill--mixer ${tall ? "opill--tall" : ""}`}
+          onClick={(e) => {
+            // Click on the pill background (outside the sliders): also show the power options.
+            if ((e.target as HTMLElement).closest(".hslider")) return;
+            window.clearTimeout(autoTimer.current);
+            manual.current = true;
+            openedAt.current = Date.now();
+            setShowPower(true);
+          }}
+        >
           {showVol && (
-            <div className="mixer__col">
-              <VSlider
-                value={vol.muted ? 0 : vol.volume}
-                onChange={onVolume}
-                onDragging={(d) => (draggingVol.current = d)}
-              />
-              <button
-                className="mixer__icon"
-                title="Mute / unmute"
-                onClick={() => invoke("toggle_mute").catch(() => {})}
-              >
-                <Icon name={volIcon} size={22} />
-              </button>
-              <span className="mixer__num">{vol.muted ? "mute" : Math.round(vol.volume)}</span>
-            </div>
+            <HSlider
+              value={vol.muted ? 0 : vol.volume}
+              onChange={onVolume}
+              onDragging={(d) => (draggingVol.current = d)}
+              icon={volIcon}
+              onIconClick={() => invoke("toggle_mute").catch(() => {})}
+            />
           )}
           {showBright && (
-            <div className="mixer__col">
-              <VSlider
-                value={bright ?? 0}
-                disabled={bright === null}
-                onChange={onBrightness}
-                onDragging={(d) => (draggingBright.current = d)}
-              />
-              <span className="mixer__icon">
-                <Icon name="brightness_medium" size={22} />
-              </span>
-              <span className="mixer__num">{bright === null ? "—" : Math.round(bright)}</span>
-            </div>
+            <HSlider
+              value={bright ?? 0}
+              disabled={bright === null}
+              onChange={onBrightness}
+              onDragging={(d) => (draggingBright.current = d)}
+              icon="brightness_medium"
+            />
           )}
         </div>
       )}
+      {power}
+      {armed && <div className="ocaption">klik lagi untuk konfirmasi</div>}
     </div>
   );
 }
