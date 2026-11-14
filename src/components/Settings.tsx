@@ -120,6 +120,7 @@ export default function AppSettings() {
   const cfg = useConfig();
   const [scale, setScale] = useState(80);
   const [city, setCity] = useState("");
+  const [searchPlaceholder, setSearchPlaceholder] = useState("");
   const [note, setNote] = useState("");
   const [ok, setOk] = useState("");
   const [resetKey, setResetKey] = useState(0); // force the hotkey field to reload the saved value
@@ -131,6 +132,7 @@ export default function AppSettings() {
     if (!cfg) return;
     setScale(Math.round(cfg.ui_scale * 100));
     setCity(cfg.weather_city);
+    setSearchPlaceholder(cfg.search_placeholder ?? "");
   }, [cfg]);
 
   useEffect(() => {
@@ -210,6 +212,26 @@ export default function AppSettings() {
               activate(false);
               const c = city.trim();
               if (c && c !== cfg.weather_city) save({ weather_city: c });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
+        </Row>
+        <Row label="Placeholder cari">
+          <input
+            className="sinput"
+            value={searchPlaceholder}
+            placeholder="Kosong = bawaan"
+            spellCheck={false}
+            onChange={(e) => setSearchPlaceholder(e.target.value)}
+            onFocus={() => activate(true)}
+            onBlur={() => {
+              activate(false);
+              const p = searchPlaceholder.trim();
+              if (p !== (cfg.search_placeholder ?? "")) {
+                save({ search_placeholder: p });
+              }
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") (e.target as HTMLInputElement).blur();

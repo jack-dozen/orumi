@@ -123,7 +123,12 @@ export default function Bar() {
           title="Launcher"
           onClick={() => invoke("toggle_panel", { label: "launcher" })}
         >
-          <Icon name="apps" size={26} />
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="var(--primary)" aria-hidden="true">
+            <rect x="2" y="2" width="9.5" height="9.5" rx="1" />
+            <rect x="12.5" y="2" width="9.5" height="9.5" rx="1" />
+            <rect x="2" y="12.5" width="9.5" height="9.5" rx="1" />
+            <rect x="12.5" y="12.5" width="9.5" height="9.5" rx="1" />
+          </svg>
         </div>
         <div className="bar__item" title="Workspace (belum dibuat)">
           <Icon name="more_vert" size={22} />

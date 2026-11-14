@@ -33,17 +33,17 @@ type ActionDef = {
 };
 
 const ACTIONS: ActionDef[] = [
+  { id: "wallpaper", name: "Wallpaper", hint: "Ganti wallpaper desktop", glyph: "wallpaper" },
+  { id: "switch_window", name: "Switch window", hint: "Pindah window terbuka (Alt+Tab)", glyph: "apps" },
+  { id: "settings", name: "Settings", hint: "Pengaturan ORUMI", glyph: "tune" },
   { id: "lock", name: "Lock", hint: "Kunci layar", glyph: "lock" },
   { id: "sleep", name: "Sleep", hint: "Tidurkan PC", glyph: "bedtime" },
   { id: "hibernate", name: "Hibernate", hint: "Simpan sesi ke disk lalu mati", glyph: "schedule" },
-  { id: "display_off", name: "Display off", hint: "Matikan layar saja", glyph: "desktop_access_disabled" },
-  { id: "logout", name: "Sign out", hint: "Keluar dari akun", glyph: "logout", dangerous: true },
   { id: "restart", name: "Restart", hint: "Mulai ulang PC", glyph: "restart_alt", dangerous: true },
   { id: "shutdown", name: "Shutdown", hint: "Matikan PC", glyph: "power_settings_new", dangerous: true },
+  { id: "display_off", name: "Display off", hint: "Matikan layar saja", glyph: "desktop_access_disabled" },
+  { id: "logout", name: "Sign out", hint: "Keluar dari akun", glyph: "logout", dangerous: true },
   { id: "reload_apps", name: "Reload apps", hint: "Muat ulang daftar aplikasi", glyph: "refresh" },
-  { id: "switch_window", name: "Switch window", hint: "Pindah window terbuka (Alt+Tab)", glyph: "apps" },
-  { id: "settings", name: "Settings", hint: "Pengaturan ORUMI", glyph: "tune" },
-  { id: "wallpaper", name: "Wallpaper", hint: "Ganti wallpaper desktop", glyph: "wallpaper" },
 ];
 
 const MAX_SHOWN = 8;
@@ -72,6 +72,8 @@ export default function Launcher() {
   const cfg = useConfig();
   const [apps, setApps] = useState<AppEntry[]>([]);
   const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<"apps" | "actions">("apps");
+  const [compact, setCompact] = useState(false);
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
   const [view, setView] = useState<"list" | "wallpaper" | "settings">("list");
@@ -109,6 +111,7 @@ export default function Launcher() {
     if (!visible) return;
     openedAt.current = Date.now();
     setQuery("");
+    setMode("apps");
     setIndex(0);
     setView(pendingView.current ?? "list");
     pendingView.current = null;
@@ -123,6 +126,14 @@ export default function Launcher() {
       if (!visibleRef.current) pendingView.current = "settings"; // applied when it opens
       setView("settings");
     });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Compact mode when the active window behind the launcher is maximized/fullscreen.
+  useEffect(() => {
+    const unlisten = listen<boolean>("launcher-compact", (e) => setCompact(e.payload));
     return () => {
       unlisten.then((fn) => fn());
     };
@@ -147,16 +158,14 @@ export default function Launcher() {
     return () => window.removeEventListener("blur", onBlur);
   }, []);
 
-  // Cancel confirmation if the selection or text changes.
+  // Cancel confirmation if the selection, mode, or text changes.
   useEffect(() => {
     setArmed(null);
-  }, [query, index, visible]);
-
-  const mode = query.startsWith(">") ? "actions" : "apps";
+  }, [query, index, visible, mode]);
 
   const results: Item[] = useMemo(() => {
     if (mode === "actions") {
-      const q = query.slice(1).trim().toLowerCase();
+      const q = query.trim().toLowerCase();
       const list = q
         ? ACTIONS.map((a) => ({ a, s: Math.max(score(a.name, q), score(a.id, q)) }))
             .filter((x) => x.s > 0)
@@ -232,16 +241,27 @@ export default function Launcher() {
     item.run();
   };
 
+  const showList = !compact || mode === "actions" || query.trim().length > 0;
+
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowUp") {
+    if (e.key === ">") {
+      // Consume '>' so it toggles between apps and system actions without entering the query.
+      e.preventDefault();
+      setMode((m) => (m === "apps" ? "actions" : "apps"));
+      setIndex(0);
+    } else if (e.key === "Backspace" && query === "" && mode === "actions") {
+      e.preventDefault();
+      setMode("apps");
+      setIndex(0);
+    } else if (e.key === "ArrowUp") {
       // The list is displayed in reverse: moving up selects less relevant results.
       e.preventDefault();
-      setIndex((i) => Math.min(i + 1, results.length - 1));
+      if (showList) setIndex((i) => Math.min(i + 1, results.length - 1));
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      setIndex((i) => Math.max(i - 1, 0));
+      if (showList) setIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter") {
-      activate(results[index]);
+      if (showList) activate(results[index]);
     } else if (e.key === "Escape") {
       close();
     }
@@ -284,50 +304,94 @@ export default function Launcher() {
             />
           ) : (
             <>
-              <div className="launcher__list">
-                {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
-                {results.map((item, i) => (
-                  <div
-                    key={item.key}
-                    className={`litem ${i === index ? "litem--active" : ""}`}
-                    onMouseMove={() => setIndex(i)}
-                    onClick={() => activate(item)}
-                  >
-                    {item.icon ? (
-                      <AppIcon target={item.icon} fallback={item.glyph} size={36} />
-                    ) : (
-                      <div
-                        className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}
-                      >
-                        {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
-                      </div>
-                    )}
-                    <div className="litem__text">
-                      <span className="litem__name">{item.name}</span>
-                      {(item.hint || armed === item.key) && (
-                        <span
-                          className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}
+              {showList && (
+                <div className="launcher__list">
+                  {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
+                  {results.map((item, i) => (
+                    <div
+                      key={item.key}
+                      className={`litem ${i === index ? "litem--active" : ""}`}
+                      onMouseMove={() => setIndex(i)}
+                      onClick={() => activate(item)}
+                    >
+                      {item.icon ? (
+                        <AppIcon target={item.icon} fallback={item.glyph} size={36} />
+                      ) : (
+                        <div
+                          className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}
                         >
-                          {armed === item.key ? "Tekan Enter lagi untuk konfirmasi" : item.hint}
-                        </span>
+                          {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
+                        </div>
                       )}
+                      <div className="litem__text">
+                        <span className="litem__name">{item.name}</span>
+                        {(item.hint || armed === item.key) && (
+                          <span
+                            className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}
+                          >
+                            {armed === item.key ? "Tekan Enter lagi untuk konfirmasi" : item.hint}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
 
-              <input
-                ref={inputRef}
-                className="lsearch"
-                placeholder="Cari aplikasi…  (> aksi sistem)"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setIndex(0);
-                }}
-                onKeyDown={onKeyDown}
-                spellCheck={false}
-              />
+              <div className="lsearchbar">
+                <button
+                  type="button"
+                  className={`lsearch__mode ${mode === "actions" ? "lsearch__mode--actions" : ""}`}
+                  title={mode === "actions" ? "Kembali ke daftar aplikasi" : "Aksi sistem (>)"}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setMode((m) => (m === "apps" ? "actions" : "apps"));
+                    setIndex(0);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  {mode === "actions" ? (
+                    <Icon name="chevron_right" size={22} />
+                  ) : (
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <circle cx="11" cy="11" r="7" />
+                      <line x1="20" y1="20" x2="16.2" y2="16.2" />
+                    </svg>
+                  )}
+                </button>
+                <input
+                  ref={inputRef}
+                  className="lsearch"
+                  placeholder={
+                    mode === "actions"
+                      ? "Cari aksi sistem…"
+                      : cfg?.search_placeholder || "Cari aplikasi…  (> aksi sistem)"
+                  }
+                  value={query}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v.startsWith(">")) {
+                      setMode((m) => (m === "apps" ? "actions" : "apps"));
+                      setQuery(v.slice(1));
+                    } else {
+                      setQuery(v);
+                    }
+                    setIndex(0);
+                  }}
+                  onKeyDown={onKeyDown}
+                  spellCheck={false}
+                />
+              </div>
             </>
           )}
         </div>

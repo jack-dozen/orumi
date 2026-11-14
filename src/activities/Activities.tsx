@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import Icon from "../components/Icon";
 import AppIcon from "../components/AppIcon";
+import { useConfig } from "../useConfig";
 import {
   closeActivities,
   iconTarget,
@@ -102,6 +103,7 @@ function LazyAppIcon({
 
 export default function Activities() {
   const { visible, openCount, wins, workspaces, apps, refreshWorkspaces } = useActivities();
+  const cfg = useConfig();
 
   const [view, setView] = useState<View>("ws");
   const [query, setQuery] = useState("");
@@ -453,7 +455,7 @@ export default function Activities() {
           <input
             ref={inputRef}
             className="act__search"
-            placeholder="Cari aplikasi"
+            placeholder={cfg?.search_placeholder || "Cari aplikasi"}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);

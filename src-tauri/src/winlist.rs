@@ -20,7 +20,7 @@ use tauri::{AppHandle, Emitter};
 use windows::{
     core::{BOOL, PWSTR},
     Win32::{
-        Foundation::{CloseHandle, HWND, LPARAM},
+        Foundation::{CloseHandle, HWND, LPARAM, RECT},
         Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
         System::Threading::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
@@ -30,10 +30,11 @@ use windows::{
             Accessibility::{SetWinEventHook, HWINEVENTHOOK},
             WindowsAndMessaging::{
                 DispatchMessageW, EnumWindows, GetClassNameW, GetForegroundWindow, GetMessageW,
-                GetWindow, GetWindowLongW, GetWindowTextLengthW, GetWindowTextW,
-                GetWindowThreadProcessId, IsHungAppWindow, IsIconic, IsWindowVisible,
-                SetForegroundWindow, ShowWindow, SwitchToThisWindow, TranslateMessage, GWL_EXSTYLE,
-                GW_OWNER, MSG, SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW,
+                GetSystemMetrics, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
+                GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow, IsIconic,
+                IsWindowVisible, IsZoomed, SetForegroundWindow, ShowWindow, SwitchToThisWindow,
+                TranslateMessage, GWL_EXSTYLE, GW_OWNER, MSG, SM_CXSCREEN, SM_CYSCREEN,
+                SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW,
                 WS_EX_TOOLWINDOW,
             },
         },
@@ -393,6 +394,53 @@ pub fn restore_external_foreground_if_ours() {
         if let Some(first) = collect_windows().into_iter().find(|w| !w.minimized) {
             SwitchToThisWindow(to_hwnd(first.hwnd), true);
         }
+    }
+}
+
+/// True if the active external foreground window is maximized or covers the full screen.
+pub fn is_foreground_maximized() -> bool {
+    unsafe {
+        let my_pid = std::process::id();
+        let mut hwnd = GetForegroundWindow();
+        let mut pid: u32 = 0;
+        if !hwnd.0.is_null() {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        }
+        if hwnd.0.is_null() || pid == 0 || pid == my_pid {
+            let last = LAST_EXTERNAL_FG.load(Ordering::Relaxed);
+            if last == 0 {
+                return false;
+            }
+            hwnd = HWND(last as *mut c_void);
+        }
+        if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            return false;
+        }
+        let class = class_name(hwnd);
+        if matches!(
+            class.as_str(),
+            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+        ) {
+            return false;
+        }
+        if IsZoomed(hwnd).as_bool() {
+            return true;
+        }
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_ok() {
+            let sw = GetSystemMetrics(SM_CXSCREEN);
+            let sh = GetSystemMetrics(SM_CYSCREEN);
+            if sw > 0
+                && sh > 0
+                && rect.left <= 0
+                && rect.top <= 0
+                && rect.right >= sw
+                && rect.bottom >= sh
+            {
+                return true;
+            }
+        }
+        false
     }
 }
 

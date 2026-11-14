@@ -484,6 +484,8 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
             // Always open the launcher at its usual size (the wallpaper view expands it itself).
             if spec.label == "launcher" {
                 set_size_override("launcher", None);
+                let compact = crate::winlist::is_foreground_maximized();
+                let _ = window.emit("launcher-compact", compact);
             }
 
             // The display can change (power, resolution, dock), so reset each time it appears.

@@ -26,6 +26,7 @@ export type Config = {
   taskbar_autohide: boolean;
   taskbar_hidden: boolean;
   bar_app_style: "icons" | "dots";
+  search_placeholder: string;
   hotkeys: Hotkeys;
 };
 

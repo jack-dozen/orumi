@@ -787,14 +787,47 @@ button {
   font-weight: 600;
 }
 
-.lsearch {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 13px 20px;
-  border: none;
-  outline: none;
+.lsearchbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 18px 6px 8px;
   border-radius: 26px;
   background: var(--surface-container-high);
+}
+
+.lsearch__mode {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-surface-variant);
+  transition: background 150ms, color 150ms;
+}
+
+.lsearch__mode:hover {
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+}
+
+.lsearch__mode--actions,
+.lsearch__mode--actions:hover {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.lsearch {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 7px 0;
+  border: none;
+  outline: none;
+  background: transparent;
   color: var(--on-surface);
   font: inherit;
   font-size: 16px;

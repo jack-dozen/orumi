@@ -91,6 +91,8 @@ pub struct Config {
     pub taskbar_hidden: bool,
     /// "icons" or "dots": how the open-app list appears in the bar.
     pub bar_app_style: String,
+    /// Custom search bar placeholder for Launcher & Activities. Empty = built-in default.
+    pub search_placeholder: String,
     pub hotkeys: Hotkeys,
 }
 
@@ -109,6 +111,7 @@ impl Default for Config {
             taskbar_autohide: true,
             taskbar_hidden: false,
             bar_app_style: "icons".into(),
+            search_placeholder: String::new(),
             hotkeys: Hotkeys::default(),
         }
     }
@@ -161,6 +164,7 @@ fn sanitize(mut c: Config) -> Config {
     if c.bar_app_style != "dots" {
         c.bar_app_style = "icons".into();
     }
+    c.search_placeholder = c.search_placeholder.trim().to_string();
     c.wallpaper_dir = c.wallpaper_dir.trim().trim_matches('"').to_string();
     c.wallpaper_command = c.wallpaper_command.trim().to_string();
     if c.wallpaper_switcher != "external" {
