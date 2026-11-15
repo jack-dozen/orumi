@@ -7,6 +7,8 @@ export type Stats = {
   mem_total: number;
   disk_used: number;
   disk_total: number;
+  net_down: number;
+  net_up: number;
 };
 
 /** Fetch statistics every second, only while `active` = true. */

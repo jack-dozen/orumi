@@ -178,13 +178,16 @@ pub fn launcher_view(view: String, app: AppHandle) {
     let _ = app.run_on_main_thread(move || crate::place_panel(&a, "launcher"));
 }
 
-/// Active notch content height in design units (used to shrink its hover hit area when short).
-static NOTCH_HEIGHT: Mutex<Option<f64>> = Mutex::new(None);
+/// Active notch content size (width, height) in design units (used to size its hover hit area).
+static NOTCH_SIZE: Mutex<Option<(Option<f64>, Option<f64>)>> = Mutex::new(None);
 
 #[tauri::command]
-pub fn notch_set_height(height: f64) {
-    if let Ok(mut h) = NOTCH_HEIGHT.lock() {
-        *h = (height > 0.0).then_some(height);
+pub fn notch_set_height(height: f64, width: Option<f64>) {
+    if let Ok(mut s) = NOTCH_SIZE.lock() {
+        *s = Some((
+            width.filter(|&w| w > 0.0),
+            (height > 0.0).then_some(height),
+        ));
     }
     wake();
 }
@@ -536,9 +539,17 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
         return Rect { x, y, w, h };
     }
     if label == "notch" {
-        if let Ok(nh) = NOTCH_HEIGHT.lock() {
-            if let Some(ch) = *nh {
-                win.h = (ch * scale * ui_scale()).min(win.h);
+        if let Ok(ns) = NOTCH_SIZE.lock() {
+            if let Some((cw, ch)) = *ns {
+                let u = scale * ui_scale();
+                if let Some(w) = cw {
+                    let actual_w = (w * u).min(win.w);
+                    win.x += (win.w - actual_w) / 2.0;
+                    win.w = actual_w;
+                }
+                if let Some(h) = ch {
+                    win.h = (h * u).min(win.h);
+                }
             }
         }
     }

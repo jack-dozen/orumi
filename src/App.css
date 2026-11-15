@@ -233,6 +233,8 @@ button {
   top: 0;
   left: 0;
   right: 0;
+  margin: 0 auto;
+  max-width: 100%;
   box-sizing: border-box;
   background: var(--surface);
   border-radius: 0 0 28px 28px;
@@ -241,6 +243,7 @@ button {
   transform: translateY(-100%);
   transition:
     transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
     height 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -278,7 +281,7 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 4px 18px 6px;
+  padding: 4px 12px 6px;
   font-size: 12px;
   color: var(--on-surface-variant);
   border-bottom: 2px solid transparent;
@@ -332,8 +335,12 @@ button {
 .dash {
   height: 286px;
   display: grid;
-  grid-template-columns: 170px 1fr 170px 80px;
+  grid-template-columns: 170px 1fr;
   gap: 10px;
+}
+
+.dash--media {
+  grid-template-columns: 170px 1fr 180px;
 }
 
 .dash__col {
@@ -343,12 +350,62 @@ button {
 }
 
 .calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calendar__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.calendar__title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--on-surface);
+  text-align: center;
+  padding: 2px 6px;
+  border-radius: 10px;
+  transition: background 150ms;
+}
+
+.calendar__title:hover {
+  background: var(--surface-container-highest);
+}
+
+.calendar__btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 50%;
+  color: var(--on-surface-variant);
+  transition: background 150ms, color 150ms;
+}
+
+.calendar__btn:hover {
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+}
+
+.calendar__prev {
+  transform: scaleX(-1);
+}
+
+.calendar__grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   grid-auto-rows: 1fr;
   text-align: center;
   align-items: center;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .calendar__head {
@@ -470,14 +527,55 @@ button {
   gap: 14px;
 }
 
+.mcontrols--mtab {
+  gap: 16px;
+}
+
 .mcontrols button {
   display: flex;
+  align-items: center;
   color: var(--on-surface);
   line-height: 1;
 }
 
 .mcontrols__play {
   color: var(--primary);
+}
+
+.mcontrols__opt {
+  padding: 5px;
+  border-radius: 999px;
+  color: var(--on-surface-variant) !important;
+  transition: color 140ms, background 140ms;
+}
+
+.mcontrols__opt:hover {
+  color: var(--on-surface) !important;
+  background: color-mix(in srgb, var(--surface-container-highest) 70%, transparent);
+}
+
+.mcontrols__opt--on {
+  color: var(--primary) !important;
+}
+
+.mcontrols__speaker {
+  gap: 2px;
+  margin-left: 4px;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--surface-container-highest) 65%, transparent);
+}
+
+.mcontrols__speaker.mcontrols__opt--on {
+  background: var(--primary-container);
+  color: var(--on-primary-container) !important;
+}
+
+.mcontrols__chev {
+  transition: transform 200ms;
+}
+
+.mcontrols__chev--open {
+  transform: rotate(180deg);
 }
 
 .mini {
@@ -489,25 +587,216 @@ button {
 
 .mini__cover {
   width: 100%;
-  aspect-ratio: 1;
-  max-height: 120px;
+  height: 112px;
+  flex-shrink: 0;
   object-fit: cover;
   border-radius: 12px;
 }
 
+.mini__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
 .mini__title {
+  width: 100%;
   font-size: 12px;
   font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  display: flex;
+  justify-content: center;
+}
+
+.mini__title--marquee {
+  justify-content: flex-start;
+}
+
+.marquee__track {
+  display: inline-flex;
+  align-items: center;
+  gap: 32px;
+  min-width: max-content;
+}
+
+.mini__title--marquee .marquee__track,
+.mtab__title--marquee .marquee__track {
+  animation: mini-marquee 9s linear infinite;
+}
+
+@keyframes mini-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-50% - 16px));
+  }
+}
+
+.mini__artist {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.mini__mid {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+}
+
+.mini__viz {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 4px;
+  background: transparent;
+}
+
+.mini__viz:hover .mini__bar {
+  opacity: 1;
+}
+
+.mini__bar {
+  width: 4px;
+  height: 100%;
+  max-height: 28px;
+  border-radius: 99px;
+  background: var(--primary);
+  transform: scaleY(0.18);
+  transform-origin: center;
+  opacity: 0.7;
+  transition: transform 200ms, opacity 200ms;
+}
+
+.mini__viz--playing .mini__bar {
+  animation: mini-viz 560ms ease-in-out infinite alternate;
+  opacity: 0.95;
+}
+
+@keyframes mini-viz {
+  0% {
+    transform: scaleY(0.18);
+  }
+  50% {
+    transform: scaleY(0.55);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+.mini__osd {
+  position: relative;
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  border-radius: 16px;
+  background: var(--surface-container);
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.mini__osd-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 16px;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.mini__osd-icon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-surface);
+  pointer-events: none;
+}
+
+.mini__osd-icon--on {
+  color: var(--on-primary);
+}
+
 .mtab {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+}
+
+.mtab__bgviz {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 0 14px;
+  filter: blur(22px);
+  opacity: 0.34;
+  transition: opacity 250ms ease;
+}
+
+.mtab__bgviz--playing {
+  opacity: 0.48;
+}
+
+.mtab__bgbar {
+  flex: 1;
+  border-radius: 999px 999px 0 0;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--primary) 85%, transparent),
+    color-mix(in srgb, var(--tertiary, var(--primary)) 40%, transparent)
+  );
+  transform-origin: bottom;
+  transform: scaleY(0.12);
+  transition: transform 280ms ease;
+  will-change: transform;
+}
+
+.mtab__bgviz--playing .mtab__bgbar {
+  animation: mtab-viz 650ms ease-in-out infinite alternate;
+}
+
+@keyframes mtab-viz {
+  0% {
+    transform: scaleY(0.18);
+  }
+  50% {
+    transform: scaleY(0.58);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+.mtab__main {
+  position: relative;
+  z-index: 1;
   display: flex;
   gap: 20px;
   align-items: center;
-  padding: 16px 20px;
 }
 
 .mtab__cover {
@@ -532,12 +821,13 @@ button {
 }
 
 .mtab__title {
+  width: 100%;
   font-size: 28px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: flex;
 }
 
 .mtab__artist {
@@ -555,60 +845,181 @@ button {
   color: var(--on-surface-variant);
 }
 
+.mtab__audio {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent);
+}
+
 /* ---------- System ---------- */
 
 .system {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: 1.32fr 1fr;
+  gap: 12px;
+  padding: 14px 18px;
   align-items: stretch;
-  gap: 28px;
-  padding: 16px 24px;
 }
 
-.system__bars {
-  flex: 1;
-  min-width: 0;
+.system__left {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
 }
 
-.sysrow__head {
+.sysgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sysmetric {
+  background: var(--surface-container-highest);
+  border-radius: 14px;
+  padding: 9px 12px 8px;
   display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.sysrow__track {
-  height: 10px;
-  background: var(--outline-variant);
-  border-radius: 5px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  position: relative;
   overflow: hidden;
 }
 
-.sysrow__fill {
+.sysmetric--disk {
+  padding-bottom: 10px;
+}
+
+.sysmetric__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sysmetric__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sysmetric__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--on-surface);
+  white-space: nowrap;
+}
+
+.sysmetric__sub {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.sysmetric__val {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sysmetric__rates {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sysrate--down {
+  color: var(--primary);
+}
+
+.sysrate--up {
+  color: var(--on-secondary-container);
+}
+
+.sysgraph {
+  width: 100%;
+  height: 44px;
+  display: block;
+}
+
+.sysgraph__grid {
+  stroke: var(--outline-variant);
+  stroke-width: 0.7;
+  stroke-dasharray: 2 3;
+  opacity: 0.6;
+}
+
+.sysdisk__track {
+  position: relative;
+  height: 10px;
+  background: color-mix(in srgb, var(--outline-variant) 55%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sysdisk__track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0 calc(25% - 1px),
+    color-mix(in srgb, var(--surface-container-highest) 75%, transparent) calc(25% - 1px) 25%
+  );
+  pointer-events: none;
+}
+
+.sysdisk__fill {
   height: 100%;
-  background: var(--primary);
-  border-radius: 5px;
-  transition: width 400ms;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--primary) 75%, transparent),
+    var(--primary)
+  );
+  border-radius: 999px;
+  transition: width 400ms ease;
 }
 
 .procs {
-  flex: 1;
-  min-width: 0;
+  background: var(--surface-container-highest);
+  border-radius: 14px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 7px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.procs__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .procs__title {
   font-size: 13px;
   font-weight: 700;
-  margin-bottom: 2px;
+}
+
+.procs__legend {
+  font-size: 11px;
+  color: var(--on-surface-variant);
 }
 
 .procs__empty {
@@ -616,24 +1027,72 @@ button {
   color: var(--on-surface-variant);
 }
 
+.procs__list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  justify-content: center;
+}
+
 .proc {
+  position: relative;
+  overflow: hidden;
   display: grid;
-  grid-template-columns: 1fr 54px 70px;
-  gap: 8px;
-  font-size: 13px;
-  align-items: baseline;
+  grid-template-columns: 1fr 48px 64px;
+  gap: 6px;
+  font-size: 12.5px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-container) 72%, transparent);
+}
+
+.proc__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  transition: width 350ms ease;
+  pointer-events: none;
 }
 
 .proc__name {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.proc__label {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.proc__badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--surface-container-highest);
+  color: var(--on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+
 .proc__cpu,
 .proc__mem {
+  position: relative;
+  z-index: 1;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.proc__cpu {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .proc__mem {

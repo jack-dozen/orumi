@@ -7,13 +7,15 @@ export type MediaInfo = {
   album: string;
   source: string;
   playing: boolean;
+  shuffle: boolean;
+  repeat: "off" | "list" | "track";
   position_ms: number;
   duration_ms: number;
   art_key: string;
   art: string | null;
 };
 
-export type MediaAction = "toggle" | "next" | "prev";
+export type MediaAction = "toggle" | "next" | "prev" | "shuffle" | "repeat";
 
 export type MediaState = {
   info: MediaInfo | null;

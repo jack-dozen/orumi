@@ -1,17 +1,26 @@
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 use windows::{
-    Media::Control::{
-        GlobalSystemMediaTransportControlsSession,
-        GlobalSystemMediaTransportControlsSessionManager,
-        GlobalSystemMediaTransportControlsSessionMediaProperties,
-        GlobalSystemMediaTransportControlsSessionPlaybackStatus,
+    Media::{
+        Control::{
+            GlobalSystemMediaTransportControlsSession,
+            GlobalSystemMediaTransportControlsSessionManager,
+            GlobalSystemMediaTransportControlsSessionMediaProperties,
+            GlobalSystemMediaTransportControlsSessionPlaybackInfo,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus,
+        },
+        MediaPlaybackAutoRepeatMode,
     },
     Storage::Streams::DataReader,
     Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED},
 };
+
+static FALLBACK_SHUFFLE: AtomicBool = AtomicBool::new(false);
+/// Fallback repeat mode for players without SMTC repeat reporting: 0 = off, 1 = list, 2 = track.
+static FALLBACK_REPEAT: AtomicU8 = AtomicU8::new(0);
 
 #[derive(Serialize)]
 pub struct MediaInfo {
@@ -20,6 +29,8 @@ pub struct MediaInfo {
     album: String,
     source: String,
     playing: bool,
+    shuffle: bool,
+    repeat: String,
     position_ms: u64,
     duration_ms: u64,
     /// Track marker. A change means the cover needs to be fetched again.
@@ -85,6 +96,38 @@ fn pretty_source(raw: &str) -> String {
     base.trim_end_matches(".exe").to_string()
 }
 
+fn repeat_mode_to_str(mode: MediaPlaybackAutoRepeatMode) -> &'static str {
+    match mode {
+        MediaPlaybackAutoRepeatMode::List => "list",
+        MediaPlaybackAutoRepeatMode::Track => "track",
+        _ => "off",
+    }
+}
+
+fn fallback_repeat_str() -> &'static str {
+    match FALLBACK_REPEAT.load(Ordering::Relaxed) {
+        1 => "list",
+        2 => "track",
+        _ => "off",
+    }
+}
+
+fn read_shuffle_repeat(
+    playback: Option<&GlobalSystemMediaTransportControlsSessionPlaybackInfo>,
+) -> (bool, String) {
+    let shuffle = playback
+        .and_then(|p| p.IsShuffleActive().ok())
+        .and_then(|r| r.Value().ok())
+        .unwrap_or_else(|| FALLBACK_SHUFFLE.load(Ordering::Relaxed));
+    let repeat = playback
+        .and_then(|p| p.AutoRepeatMode().ok())
+        .and_then(|r| r.Value().ok())
+        .map(repeat_mode_to_str)
+        .unwrap_or_else(fallback_repeat_str)
+        .to_string();
+    (shuffle, repeat)
+}
+
 fn read_media(known_art_key: Option<String>) -> Option<MediaInfo> {
     let session = current_session()?;
     let props = session.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
@@ -97,11 +140,13 @@ fn read_media(known_art_key: Option<String>) -> Option<MediaInfo> {
         .map(|s| pretty_source(&s.to_string()))
         .unwrap_or_default();
 
-    let playing = session
-        .GetPlaybackInfo()
-        .and_then(|i| i.PlaybackStatus())
+    let playback = session.GetPlaybackInfo().ok();
+    let playing = playback
+        .as_ref()
+        .and_then(|i| i.PlaybackStatus().ok())
         .map(|s| s == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing)
         .unwrap_or(false);
+    let (shuffle, repeat) = read_shuffle_repeat(playback.as_ref());
 
     let (position_ms, duration_ms) = match session.GetTimelineProperties() {
         Ok(t) => {
@@ -149,6 +194,8 @@ fn read_media(known_art_key: Option<String>) -> Option<MediaInfo> {
         album,
         source,
         playing,
+        shuffle,
+        repeat,
         position_ms,
         duration_ms,
         art_key,
@@ -163,7 +210,7 @@ pub async fn get_media(known_art_key: Option<String>) -> Result<Option<MediaInfo
         .map_err(|e| e.to_string())
 }
 
-/// action: "toggle" | "next" | "prev"
+/// action: "toggle" | "next" | "prev" | "shuffle" | "repeat"
 #[tauri::command]
 pub async fn media_control(action: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -177,6 +224,26 @@ pub async fn media_control(action: String) -> Result<(), String> {
             }
             "prev" => {
                 let _ = session.TrySkipPreviousAsync().and_then(|op| op.join());
+            }
+            "shuffle" => {
+                let playback = session.GetPlaybackInfo().ok();
+                let (current, _) = read_shuffle_repeat(playback.as_ref());
+                let next = !current;
+                FALLBACK_SHUFFLE.store(next, Ordering::Relaxed);
+                let _ = session.TryChangeShuffleActiveAsync(next).and_then(|op| op.join());
+            }
+            "repeat" => {
+                let playback = session.GetPlaybackInfo().ok();
+                let (_, current) = read_shuffle_repeat(playback.as_ref());
+                let (next_code, next_mode) = match current.as_str() {
+                    "off" => (1, MediaPlaybackAutoRepeatMode::List),
+                    "list" => (2, MediaPlaybackAutoRepeatMode::Track),
+                    _ => (0, MediaPlaybackAutoRepeatMode::None),
+                };
+                FALLBACK_REPEAT.store(next_code, Ordering::Relaxed);
+                let _ = session
+                    .TryChangeAutoRepeatModeAsync(next_mode)
+                    .and_then(|op| op.join());
             }
             _ => {}
         }

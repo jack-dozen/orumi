@@ -5,7 +5,7 @@ use std::{
 
 use std::collections::HashMap;
 use serde::Serialize;
-use sysinfo::{Disks, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{Disks, Networks, ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::State;
 
 /// How often to reread disk information.
@@ -18,12 +18,16 @@ pub struct Stats {
     mem_total: u64,
     disk_used: u64,
     disk_total: u64,
+    net_down: u64,
+    net_up: u64,
 }
 
 struct Inner {
     sys: System,
     disk: (u64, u64),
     disk_at: Option<Instant>,
+    nets: Option<Networks>,
+    net_at: Instant,
 }
 
 pub struct StatsState(Mutex<Inner>);
@@ -34,10 +38,13 @@ impl StatsState {
         // The first CPU reading is always 0, so warm it up first.
         sys.refresh_cpu_usage();
         sys.refresh_memory();
+        let nets = Networks::new_with_refreshed_list().ok();
         Self(Mutex::new(Inner {
             sys,
             disk: (0, 0),
             disk_at: None,
+            nets,
+            net_at: Instant::now(),
         }))
     }
 }
@@ -74,12 +81,40 @@ pub async fn get_stats(state: State<'_, StatsState>) -> Result<Stats, String> {
         inner.disk_at = Some(Instant::now());
     }
 
+    let net_elapsed = inner.net_at.elapsed().as_secs_f64();
+    inner.net_at = Instant::now();
+    let (net_down, net_up) = match inner.nets.as_mut() {
+        Some(nets) => {
+            nets.refresh(true);
+            if (0.2..=2.5).contains(&net_elapsed) {
+                let mut rx = 0u64;
+                let mut tx = 0u64;
+                for (name, data) in nets.iter() {
+                    if name.to_string_lossy().to_ascii_lowercase().contains("loopback") {
+                        continue;
+                    }
+                    rx = rx.saturating_add(data.received());
+                    tx = tx.saturating_add(data.transmitted());
+                }
+                (
+                    (rx as f64 / net_elapsed) as u64,
+                    (tx as f64 / net_elapsed) as u64,
+                )
+            } else {
+                (0, 0)
+            }
+        }
+        None => (0, 0),
+    };
+
     Ok(Stats {
         cpu: inner.sys.global_cpu_usage(),
         mem_used: inner.sys.used_memory(),
         mem_total: inner.sys.total_memory(),
         disk_used: inner.disk.0,
         disk_total: inner.disk.1,
+        net_down,
+        net_up,
     })
 }
 

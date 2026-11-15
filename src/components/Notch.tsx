@@ -37,10 +37,58 @@ const fmtMem = (bytes: number) =>
     ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
     : `${Math.round(bytes / 1024 ** 2)} MB`;
 
+const fmtRate = (bytesPerSec: number) => {
+  if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)} B/s`;
+  if (bytesPerSec < 1024 * 1024) {
+    const kb = bytesPerSec / 1024;
+    return `${kb >= 100 ? Math.round(kb) : kb.toFixed(1)} KB/s`;
+  }
+  return `${(bytesPerSec / 1024 ** 2).toFixed(1)} MB/s`;
+};
+
+const HIST_LEN = 28;
+
+type SysHistory = {
+  seeded: boolean;
+  cpu: number[];
+  ram: number[];
+  gpu: number[];
+  down: number[];
+  up: number[];
+};
+
+function emptyHistory(): SysHistory {
+  return {
+    seeded: false,
+    cpu: Array(HIST_LEN).fill(0),
+    ram: Array(HIST_LEN).fill(0),
+    gpu: Array(HIST_LEN).fill(0),
+    down: Array(HIST_LEN).fill(0),
+    up: Array(HIST_LEN).fill(0),
+  };
+}
+
+function pushSample(arr: number[], value: number): number[] {
+  return [...arr.slice(1), value];
+}
+
+function sparkPaths(values: number[], max: number, w = 200, h = 48) {
+  const safeMax = Math.max(1, max);
+  const pts = values.map((v, i) => {
+    const x = (i / Math.max(1, values.length - 1)) * w;
+    const ratio = Math.max(0, Math.min(1, v / safeMax));
+    const y = h - 3 - ratio * (h - 8);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const line = `M ${pts.join(" L ")}`;
+  const area = `${line} L ${w},${h} L 0,${h} Z`;
+  return { line, area };
+}
+
 /** Calendar cell for a full month: null = empty, number = date. */
-function monthCells(now: Date): (number | null)[] {
-  const first = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
-  const total = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+function monthCells(year: number, month: number): (number | null)[] {
+  const first = new Date(year, month, 1).getDay();
+  const total = new Date(year, month + 1, 0).getDate();
   const cells: (number | null)[] = Array(first).fill(null);
   for (let d = 1; d <= total; d++) cells.push(d);
   return cells;
@@ -61,10 +109,22 @@ function Dashboard({
 }) {
   const now = useNow();
   const today = now.getDate();
+  const [monthOffset, setMonthOffset] = useState(0);
   const ramPct = stats ? (stats.mem_used / stats.mem_total) * 100 : null;
+  const showMini = Boolean(media.info);
+
+  useEffect(() => {
+    if (!visible) setMonthOffset(0);
+  }, [visible]);
+
+  const viewDate = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+  const viewYear = viewDate.getFullYear();
+  const viewMonth = viewDate.getMonth();
+  const isCurrentMonth = viewYear === now.getFullYear() && viewMonth === now.getMonth();
+  const monthLabel = viewDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
   return (
-    <div className="dash">
+    <div className={`dash ${showMini ? "dash--media" : ""}`}>
       <div className="dash__col">
         <div className="card card--clock">
           {pad(now.getHours())} : {pad(now.getMinutes())}
@@ -77,40 +137,185 @@ function Dashboard({
         </div>
       </div>
 
-      <div className="card calendar">
-        {DAYS.map((d, i) => (
-          <div key={d} className={`calendar__head ${i === 0 ? "calendar__sun" : ""}`}>
-            {d}
-          </div>
-        ))}
-        {monthCells(now).map((d, i) => (
-          <div
-            key={i}
-            className={`calendar__day ${i % 7 === 0 ? "calendar__sun" : ""} ${
-              d === today ? "calendar__today" : ""
-            }`}
+      <div
+        className="card calendar"
+        onWheel={(e) => {
+          if (e.deltaY === 0) return;
+          setMonthOffset((m) => m + (e.deltaY > 0 ? 1 : -1));
+        }}
+      >
+        <div className="calendar__nav">
+          <button
+            type="button"
+            className="calendar__btn"
+            title="Previous month"
+            onClick={() => setMonthOffset((m) => m - 1)}
           >
-            {d}
-          </div>
-        ))}
+            <Icon name="chevron_right" size={18} className="calendar__prev" />
+          </button>
+          <button
+            type="button"
+            className="calendar__title"
+            title={monthOffset !== 0 ? "Back to current month" : undefined}
+            onClick={() => setMonthOffset(0)}
+          >
+            {monthLabel}
+          </button>
+          <button
+            type="button"
+            className="calendar__btn"
+            title="Next month"
+            onClick={() => setMonthOffset((m) => m + 1)}
+          >
+            <Icon name="chevron_right" size={18} />
+          </button>
+        </div>
+        <div className="calendar__grid">
+          {DAYS.map((d, i) => (
+            <div key={d} className={`calendar__head ${i === 0 ? "calendar__sun" : ""}`}>
+              {d}
+            </div>
+          ))}
+          {monthCells(viewYear, viewMonth).map((d, i) => (
+            <div
+              key={i}
+              className={`calendar__day ${i % 7 === 0 ? "calendar__sun" : ""} ${
+                isCurrentMonth && d === today ? "calendar__today" : ""
+              }`}
+            >
+              {d}
+            </div>
+          ))}
+        </div>
       </div>
 
-      <MiniPlayer media={media} />
-      <VolumeBrightness active={visible} vertical />
+      {showMini && <MiniPlayer media={media} active={visible} />}
     </div>
   );
 }
 
-function StatBar({ label, pct, detail }: { label: string; pct: number; detail: string }) {
+function SparkGrid() {
   return (
-    <div className="sysrow">
-      <div className="sysrow__head">
-        <span>{label}</span>
-        <span>{detail}</span>
+    <>
+      {[12, 24, 36].map((y) => (
+        <line
+          key={y}
+          className="sysgraph__grid"
+          x1="0"
+          y1={y}
+          x2="200"
+          y2={y}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+    </>
+  );
+}
+
+function MetricGraphCard({
+  id,
+  title,
+  value,
+  sub,
+  series,
+}: {
+  id: string;
+  title: string;
+  value: string;
+  sub?: string;
+  series: number[];
+}) {
+  const { line, area } = sparkPaths(series, 100);
+  const gradId = `sys-grad-${id}`;
+  return (
+    <div className="sysmetric">
+      <div className="sysmetric__head">
+        <div className="sysmetric__meta">
+          <span className="sysmetric__title">{title}</span>
+          {sub && <span className="sysmetric__sub">{sub}</span>}
+        </div>
+        <span className="sysmetric__val">{value}</span>
       </div>
-      <div className="sysrow__track">
-        <div className="sysrow__fill" style={{ width: `${Math.min(100, pct)}%` }} />
+      <svg className="sysgraph" viewBox="0 0 200 48" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        <SparkGrid />
+        <path d={area} fill={`url(#${gradId})`} />
+        <path
+          d={line}
+          fill="none"
+          stroke="var(--primary)"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function WifiGraphCard({
+  down,
+  up,
+  downHist,
+  upHist,
+}: {
+  down: number;
+  up: number;
+  downHist: number[];
+  upHist: number[];
+}) {
+  const peak = Math.max(64 * 1024, ...downHist, ...upHist);
+  const downPath = sparkPaths(downHist, peak);
+  const upPath = sparkPaths(upHist, peak);
+  return (
+    <div className="sysmetric">
+      <div className="sysmetric__head">
+        <span className="sysmetric__title">Wi-Fi</span>
+        <div className="sysmetric__rates">
+          <span className="sysrate--down">↓ {fmtRate(down)}</span>
+          <span className="sysrate--up">↑ {fmtRate(up)}</span>
+        </div>
       </div>
+      <svg className="sysgraph" viewBox="0 0 200 48" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="sys-grad-down" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.38" />
+            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0.02" />
+          </linearGradient>
+          <linearGradient id="sys-grad-up" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--on-secondary-container)" stopOpacity="0.24" />
+            <stop offset="100%" stopColor="var(--on-secondary-container)" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        <SparkGrid />
+        <path d={upPath.area} fill="url(#sys-grad-up)" />
+        <path d={downPath.area} fill="url(#sys-grad-down)" />
+        <path
+          d={upPath.line}
+          fill="none"
+          stroke="var(--on-secondary-container)"
+          strokeWidth="1.4"
+          strokeDasharray="4 3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        <path
+          d={downPath.line}
+          fill="none"
+          stroke="var(--primary)"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
     </div>
   );
 }
@@ -127,54 +332,92 @@ function SystemTab({
   stats,
   procs,
   gpu,
-  wifi,
+  hist,
 }: {
   stats: Stats | null;
   procs: ProcEntry[];
   gpu: number | null;
-  wifi: WifiStatus | null;
+  hist: SysHistory;
 }) {
   if (!stats) return <div className="card card--placeholder card--fill">loading…</div>;
 
+  const ramPct = stats.mem_total > 0 ? (stats.mem_used / stats.mem_total) * 100 : 0;
+  const diskPct = stats.disk_total > 0 ? (stats.disk_used / stats.disk_total) * 100 : 0;
+  const procPeak = Math.max(1, ...procs.map((p) => p.cpu));
+
   return (
     <div className="card system">
-      <div className="system__bars">
-        <StatBar label="CPU" pct={stats.cpu} detail={`${Math.round(stats.cpu)}%`} />
-        <StatBar
-          label="RAM"
-          pct={(stats.mem_used / stats.mem_total) * 100}
-          detail={`${gib(stats.mem_used)} / ${gib(stats.mem_total)} GB`}
-        />
-        <StatBar
-          label="Disk C:"
-          pct={stats.disk_total ? (stats.disk_used / stats.disk_total) * 100 : 0}
-          detail={`${gib(stats.disk_used)} / ${gib(stats.disk_total)} GB`}
-        />
-        <StatBar
-          label="GPU"
-          pct={gpu ?? 0}
-          detail={gpu === null ? "—" : `${Math.round(gpu)}%`}
-        />
-        <StatBar
-          label="WiFi"
-          pct={wifi?.connected ? wifi.signal : 0}
-          detail={wifiLabel(wifi)}
-        />
+      <div className="system__left">
+        <div className="sysgrid">
+          <MetricGraphCard
+            id="cpu"
+            title="CPU"
+            value={`${Math.round(stats.cpu)}%`}
+            series={hist.cpu}
+          />
+          <MetricGraphCard
+            id="ram"
+            title="RAM"
+            sub={`${gib(stats.mem_used)} / ${gib(stats.mem_total)} GB`}
+            value={`${Math.round(ramPct)}%`}
+            series={hist.ram}
+          />
+          <MetricGraphCard
+            id="gpu"
+            title="GPU"
+            value={gpu === null ? "—" : `${Math.round(gpu)}%`}
+            series={hist.gpu}
+          />
+          <WifiGraphCard
+            down={stats.net_down}
+            up={stats.net_up}
+            downHist={hist.down}
+            upHist={hist.up}
+          />
+        </div>
+
+        <div className="sysmetric sysmetric--disk">
+          <div className="sysmetric__head">
+            <div className="sysmetric__meta">
+              <span className="sysmetric__title">Disk C:</span>
+              <span className="sysmetric__sub">
+                {gib(stats.disk_used)} / {gib(stats.disk_total)} GB
+              </span>
+            </div>
+            <span className="sysmetric__val">{Math.round(diskPct)}%</span>
+          </div>
+          <div className="sysdisk__track">
+            <div className="sysdisk__fill" style={{ width: `${Math.min(100, diskPct)}%` }} />
+          </div>
+        </div>
       </div>
 
       <div className="procs">
-        <div className="procs__title">Top processes</div>
-        {procs.length === 0 && <div className="procs__empty">loading…</div>}
-        {procs.map((p) => (
-          <div className="proc" key={p.name}>
-            <span className="proc__name">
-              {p.name}
-              {p.count > 1 ? ` ×${p.count}` : ""}
-            </span>
-            <span className="proc__cpu">{p.cpu.toFixed(1)}%</span>
-            <span className="proc__mem">{fmtMem(p.mem)}</span>
+        <div className="procs__head">
+          <span className="procs__title">Top processes</span>
+          <span className="procs__legend">CPU · RAM</span>
+        </div>
+        {procs.length === 0 ? (
+          <div className="procs__empty">loading…</div>
+        ) : (
+          <div className="procs__list">
+            {procs.map((p) => (
+              <div className="proc" key={p.name}>
+                <span
+                  className="proc__fill"
+                  style={{ width: `${Math.min(100, (p.cpu / procPeak) * 100)}%` }}
+                  aria-hidden="true"
+                />
+                <span className="proc__name">
+                  <span className="proc__label">{p.name}</span>
+                  {p.count > 1 && <span className="proc__badge">×{p.count}</span>}
+                </span>
+                <span className="proc__cpu">{p.cpu.toFixed(1)}%</span>
+                <span className="proc__mem">{fmtMem(p.mem)}</span>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
@@ -446,26 +689,69 @@ export default function Notch() {
   const media = useMedia(visible && (tab === "dashboard" || tab === "media"));
   const procs = useProcesses(visible && tab === "system");
   const gpu = useGpu(visible && (tab === "dashboard" || tab === "system"));
-  const wifi = useWifi(visible && (tab === "system" || tab === "settings"));
+  const wifi = useWifi(visible && tab === "settings");
   const cfg = useConfig();
   const weather = useWeather(cfg?.weather_city ?? "Bandung");
 
-  // Follow content height dynamically (keeps short tabs like quick settings compact).
+  const [sysHist, setSysHist] = useState<SysHistory>(emptyHistory);
+  const gpuRef = useRef<number | null>(gpu);
+  gpuRef.current = gpu;
+
+  useEffect(() => {
+    if (!stats) return;
+    const ramPct = stats.mem_total > 0 ? (stats.mem_used / stats.mem_total) * 100 : 0;
+    const gpuVal = gpuRef.current ?? 0;
+    setSysHist((prev) => {
+      if (!prev.seeded) {
+        return {
+          seeded: true,
+          cpu: Array(HIST_LEN).fill(stats.cpu),
+          ram: Array(HIST_LEN).fill(ramPct),
+          gpu: Array(HIST_LEN).fill(gpuVal),
+          down: pushSample(prev.down, stats.net_down),
+          up: pushSample(prev.up, stats.net_up),
+        };
+      }
+      return {
+        seeded: true,
+        cpu: pushSample(prev.cpu, stats.cpu),
+        ram: pushSample(prev.ram, ramPct),
+        gpu: pushSample(prev.gpu, gpuVal),
+        down: pushSample(prev.down, stats.net_down),
+        up: pushSample(prev.up, stats.net_up),
+      };
+    });
+  }, [stats]);
+
+  const showMini = Boolean(media.info);
+  const width =
+    tab === "dashboard"
+      ? showMini
+        ? 740
+        : 550
+      : tab === "media"
+        ? 740
+        : tab === "system"
+          ? 760
+          : 820;
+
+  // Follow content size dynamically (keeps compact tabs slim and centered).
   const innerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number | null>(null);
   useLayoutEffect(() => {
     const el = innerRef.current;
     if (!el) return;
-    const measure = () => {
-      const h = el.offsetHeight;
-      setHeight(h);
-      invoke("notch_set_height", { height: h }).catch(() => {});
-    };
+    const measure = () => setHeight(el.offsetHeight);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  useLayoutEffect(() => {
+    if (height === null) return;
+    invoke("notch_set_height", { height, width }).catch(() => {});
+  }, [height, width]);
 
   // Notch closed: return to "does not take focus" mode (if it was used for typing).
   useEffect(() => {
@@ -506,7 +792,7 @@ export default function Notch() {
       className={`notch ${visible && !instantHide ? "notch--visible" : ""} ${
         instantHide ? "notch--instant" : ""
       }`}
-      style={{ height: height ?? undefined }}
+      style={{ width, height: height ?? undefined }}
     >
       <div className="notch__inner" ref={innerRef}>
         <div className="tabs">
@@ -526,8 +812,10 @@ export default function Notch() {
           {tab === "dashboard" && (
             <Dashboard stats={stats} media={media} gpu={gpu} weather={weather} visible={visible} />
           )}
-          {tab === "media" && <MediaTab media={media} />}
-          {tab === "system" && <SystemTab stats={stats} procs={procs} gpu={gpu} wifi={wifi} />}
+          {tab === "media" && <MediaTab media={media} active={visible} />}
+          {tab === "system" && (
+            <SystemTab stats={stats} procs={procs} gpu={gpu} hist={sysHist} />
+          )}
           {tab === "settings" && (
             <QuickSettings
               wifi={wifi}
