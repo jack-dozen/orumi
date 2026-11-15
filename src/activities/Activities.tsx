@@ -408,7 +408,7 @@ export default function Activities() {
       <div className="act__stage" data-bg>
         <section className="act__wins" data-bg inert={view !== "ws"}>
           {shownWins.length === 0 ? (
-            <p className="act__empty">Workspace ini belum punya window</p>
+            <p className="act__empty">No open windows in this workspace</p>
           ) : (
             <div className="act__cards" data-bg>
               {shownWins.map((w) => (
@@ -443,7 +443,7 @@ export default function Activities() {
                       size={24}
                     />
                     <span className="act-card__title">{w.title || w.exe}</span>
-                    {w.minimized && <span className="act-card__tag">diperkecil</span>}
+                    {w.minimized && <span className="act-card__tag">minimized</span>}
                   </span>
                 </button>
               ))}
@@ -455,7 +455,7 @@ export default function Activities() {
           <input
             ref={inputRef}
             className="act__search"
-            placeholder={cfg?.search_placeholder || "Cari aplikasi"}
+            placeholder={cfg?.search_placeholder || "Search apps"}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -495,12 +495,12 @@ export default function Activities() {
 
           {list.length === 0 && (
             <p className="act__empty">
-              {apps.length === 0 ? "Memuat daftar aplikasi…" : "Tidak ada aplikasi yang cocok"}
+              {apps.length === 0 ? "Loading applications…" : "No matching applications"}
             </p>
           )}
 
           {!searching && (
-            <div className="act-rail" role="navigation" aria-label="Lompat ke huruf">
+            <div className="act-rail" role="navigation" aria-label="Jump to letter">
               {RAIL.map((l) => {
                 const has = present.has(l);
                 return (
@@ -513,7 +513,7 @@ export default function Activities() {
                     ].join(" ")}
                     data-letter={l}
                     disabled={!has}
-                    aria-label={l === "#" ? "Simbol dan angka" : l}
+                    aria-label={l === "#" ? "Symbols and numbers" : l}
                     onClick={() => jump(l)}
                   />
                 );
@@ -525,7 +525,7 @@ export default function Activities() {
 
       <button className="act__switch" onClick={() => setView(view === "ws" ? "apps" : "ws")}>
         <Icon name={view === "ws" ? "apps" : "dashboard"} size={20} />
-        {view === "ws" ? "Semua aplikasi" : "Workspace"}
+        {view === "ws" ? "All apps" : "Workspaces"}
       </button>
     </div>
   );

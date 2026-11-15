@@ -77,10 +77,10 @@ fn resolve_dir(app: &AppHandle, configured: &str) -> Option<PathBuf> {
 
 fn scan_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     if !dir.is_absolute() {
-        return Err("Gunakan path lengkap, misalnya D:\\Wallpapers".into());
+        return Err("Use a full path, e.g. D:\\Wallpapers".into());
     }
     let entries = fs::read_dir(dir)
-        .map_err(|_| "Folder tidak ditemukan atau tidak bisa dibaca".to_string())?;
+        .map_err(|_| "Folder not found or cannot be read".to_string())?;
 
     let mut files: Vec<PathBuf> = entries
         .filter_map(|e| e.ok())
@@ -187,7 +187,7 @@ pub async fn list_wallpapers(thumbs: bool, app: AppHandle) -> Result<WallpaperLi
 
     tauri::async_runtime::spawn_blocking(move || {
         let Some(dir) = dir else {
-            return failed(String::new(), "Folder Pictures tidak ditemukan");
+            return failed(String::new(), "Pictures folder not found");
         };
         let shown = dir.to_string_lossy().into_owned();
         let files = match scan_files(&dir) {
@@ -245,7 +245,7 @@ pub async fn list_wallpapers(thumbs: bool, app: AppHandle) -> Result<WallpaperLi
 pub fn set_wallpaper(path: String, app: AppHandle) -> Result<(), String> {
     let p = Path::new(&path);
     if !is_image(p) || !p.is_file() {
-        return Err("File wallpaper tidak valid".into());
+        return Err("Invalid wallpaper file".into());
     }
     let mut wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
@@ -275,7 +275,7 @@ pub fn set_wallpaper(path: String, app: AppHandle) -> Result<(), String> {
 pub fn run_wallpaper_command(app: AppHandle) -> Result<(), String> {
     let cmd = crate::config::current(&app).wallpaper_command;
     if cmd.trim().is_empty() {
-        return Err("Perintah belum diatur di Settings → Aplikasi".into());
+        return Err("Wallpaper command is empty (set it in Settings → General)".into());
     }
     Command::new("cmd")
         .args(["/C", cmd.as_str()])

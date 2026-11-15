@@ -9,40 +9,40 @@ export type Weather = {
 
 const REFRESH_MS = 30 * 60 * 1000;
 const RETRY_MS = 2 * 60 * 1000;
-const GEO_KEY = "edgeshell-geo";
-const WEATHER_KEY = "edgeshell-weather";
+const GEO_KEY = "edgeshell-geo-en";
+const WEATHER_KEY = "edgeshell-weather-en";
 
 // WMO weather code -> [text, daytime icon, nighttime icon]. Icons are Material Symbols names.
 // https://open-meteo.com/en/docs#weathervariables
 const WMO: Record<number, [string, string, string]> = {
-  0: ["cerah", "sunny", "clear_night"],
-  1: ["cerah", "sunny", "clear_night"],
-  2: ["berawan sebagian", "partly_cloudy_day", "partly_cloudy_night"],
-  3: ["mendung", "cloud", "cloud"],
-  45: ["berkabut", "foggy", "foggy"],
-  48: ["berkabut", "foggy", "foggy"],
-  51: ["gerimis ringan", "rainy", "rainy"],
-  53: ["gerimis", "rainy", "rainy"],
-  55: ["gerimis lebat", "rainy", "rainy"],
-  56: ["gerimis beku", "rainy", "rainy"],
-  57: ["gerimis beku", "rainy", "rainy"],
-  61: ["hujan ringan", "rainy", "rainy"],
-  63: ["hujan", "rainy", "rainy"],
-  65: ["hujan lebat", "rainy", "rainy"],
-  66: ["hujan beku", "rainy", "rainy"],
-  67: ["hujan beku", "rainy", "rainy"],
-  71: ["salju ringan", "weather_snowy", "weather_snowy"],
-  73: ["salju", "weather_snowy", "weather_snowy"],
-  75: ["salju lebat", "weather_snowy", "weather_snowy"],
-  77: ["butiran salju", "weather_snowy", "weather_snowy"],
-  80: ["hujan lokal ringan", "rainy", "rainy"],
-  81: ["hujan lokal", "rainy", "rainy"],
-  82: ["hujan lokal lebat", "rainy", "rainy"],
-  85: ["hujan salju", "weather_snowy", "weather_snowy"],
-  86: ["hujan salju lebat", "weather_snowy", "weather_snowy"],
-  95: ["badai petir", "thunderstorm", "thunderstorm"],
-  96: ["badai petir dan es", "thunderstorm", "thunderstorm"],
-  99: ["badai petir dan es", "thunderstorm", "thunderstorm"],
+  0: ["clear", "sunny", "clear_night"],
+  1: ["mainly clear", "sunny", "clear_night"],
+  2: ["partly cloudy", "partly_cloudy_day", "partly_cloudy_night"],
+  3: ["overcast", "cloud", "cloud"],
+  45: ["foggy", "foggy", "foggy"],
+  48: ["foggy", "foggy", "foggy"],
+  51: ["light drizzle", "rainy", "rainy"],
+  53: ["drizzle", "rainy", "rainy"],
+  55: ["heavy drizzle", "rainy", "rainy"],
+  56: ["freezing drizzle", "rainy", "rainy"],
+  57: ["freezing drizzle", "rainy", "rainy"],
+  61: ["light rain", "rainy", "rainy"],
+  63: ["rain", "rainy", "rainy"],
+  65: ["heavy rain", "rainy", "rainy"],
+  66: ["freezing rain", "rainy", "rainy"],
+  67: ["freezing rain", "rainy", "rainy"],
+  71: ["light snow", "weather_snowy", "weather_snowy"],
+  73: ["snow", "weather_snowy", "weather_snowy"],
+  75: ["heavy snow", "weather_snowy", "weather_snowy"],
+  77: ["snow grains", "weather_snowy", "weather_snowy"],
+  80: ["light showers", "rainy", "rainy"],
+  81: ["showers", "rainy", "rainy"],
+  82: ["heavy showers", "rainy", "rainy"],
+  85: ["snow showers", "weather_snowy", "weather_snowy"],
+  86: ["heavy snow showers", "weather_snowy", "weather_snowy"],
+  95: ["thunderstorm", "thunderstorm", "thunderstorm"],
+  96: ["thunderstorm with hail", "thunderstorm", "thunderstorm"],
+  99: ["thunderstorm with hail", "thunderstorm", "thunderstorm"],
 };
 
 type Geo = { query: string; lat: number; lon: number; name: string };
@@ -70,11 +70,11 @@ async function geocode(city: string): Promise<Geo> {
   if (cached && cached.query === city) return cached;
 
   const res = await fetch(
-    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=id&format=json`,
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`,
   );
   if (!res.ok) throw new Error(`geocoding ${res.status}`);
   const first = (await res.json())?.results?.[0];
-  if (!first) throw new Error("kota tidak ditemukan");
+  if (!first) throw new Error("city not found");
 
   const geo: Geo = { query: city, lat: first.latitude, lon: first.longitude, name: first.name };
   writeCache(GEO_KEY, geo);
@@ -87,10 +87,10 @@ async function fetchCurrent(geo: Geo): Promise<Weather> {
   );
   if (!res.ok) throw new Error(`forecast ${res.status}`);
   const cur = (await res.json())?.current;
-  if (typeof cur?.temperature_2m !== "number") throw new Error("respons tidak valid");
+  if (typeof cur?.temperature_2m !== "number") throw new Error("invalid response");
 
   const [label, day, night] = WMO[cur.weather_code] ?? [
-    "tidak diketahui",
+    "unknown",
     "device_thermostat",
     "device_thermostat",
   ];

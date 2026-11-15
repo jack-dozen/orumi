@@ -116,11 +116,11 @@ function StatBar({ label, pct, detail }: { label: string; pct: number; detail: s
 }
 
 function wifiLabel(wifi: WifiStatus | null): string {
-  if (!wifi) return "memuat…";
-  if (!wifi.adapter) return "tidak ada adapter";
-  if (wifi.location_denied) return "akses diblokir Windows";
-  if (!wifi.connected) return "tidak tersambung";
-  return `${wifi.ssid ?? "tersambung"} · ${wifi.signal}%`;
+  if (!wifi) return "loading…";
+  if (!wifi.adapter) return "no adapter";
+  if (wifi.location_denied) return "blocked by Windows";
+  if (!wifi.connected) return "disconnected";
+  return `${wifi.ssid ?? "connected"} · ${wifi.signal}%`;
 }
 
 function SystemTab({
@@ -134,7 +134,7 @@ function SystemTab({
   gpu: number | null;
   wifi: WifiStatus | null;
 }) {
-  if (!stats) return <div className="card card--placeholder card--fill">memuat…</div>;
+  if (!stats) return <div className="card card--placeholder card--fill">loading…</div>;
 
   return (
     <div className="card system">
@@ -163,8 +163,8 @@ function SystemTab({
       </div>
 
       <div className="procs">
-        <div className="procs__title">Proses teratas</div>
-        {procs.length === 0 && <div className="procs__empty">memuat…</div>}
+        <div className="procs__title">Top processes</div>
+        {procs.length === 0 && <div className="procs__empty">loading…</div>}
         {procs.map((p) => (
           <div className="proc" key={p.name}>
             <span className="proc__name">
@@ -202,9 +202,9 @@ type QuickTileDef =
     };
 
 const POWER_SUB: Record<PowerMode, string> = {
-  saver: "Hemat daya",
-  balanced: "Seimbang",
-  performance: "Performa tinggi",
+  saver: "Power saver",
+  balanced: "Balanced",
+  performance: "Best performance",
 };
 
 const QUICK_TILES: QuickTileDef[] = [
@@ -214,7 +214,7 @@ const QUICK_TILES: QuickTileDef[] = [
     title: "Wi-Fi",
     icon: (s) => (s.wifi ? "wifi" : "wifi_off"),
     active: (s) => s.wifi === true,
-    sub: (s, wifi) => (s.wifi ? wifiLabel(wifi) : "Mati"),
+    sub: (s, wifi) => (s.wifi ? wifiLabel(wifi) : "Off"),
     settings: "wifi",
   },
   {
@@ -223,16 +223,16 @@ const QUICK_TILES: QuickTileDef[] = [
     title: "Bluetooth",
     icon: (s) => (s.bluetooth ? "bluetooth" : "bluetooth_disabled"),
     active: (s) => s.bluetooth === true,
-    sub: (s) => (s.bluetooth ? "Nyala" : "Mati"),
+    sub: (s) => (s.bluetooth ? "On" : "Off"),
     settings: "bluetooth",
   },
   {
     kind: "toggle",
     key: "airplane",
-    title: "Mode pesawat",
+    title: "Airplane mode",
     icon: () => "airplanemode_active",
     active: (s) => s.airplane,
-    sub: (s) => (s.airplane ? "Nyala" : "Mati"),
+    sub: (s) => (s.airplane ? "On" : "Off"),
     settings: "airplane",
   },
   {
@@ -241,55 +241,55 @@ const QUICK_TILES: QuickTileDef[] = [
     title: "Hotspot",
     icon: () => "wifi_tethering",
     active: (s) => s.hotspot === true,
-    sub: (s) => (s.hotspot ? "Nyala" : "Mati"),
+    sub: (s) => (s.hotspot ? "On" : "Off"),
     settings: "hotspot",
   },
   {
     kind: "toggle",
     key: "dnd",
-    title: "Jangan ganggu",
+    title: "Do not disturb",
     icon: () => "do_not_disturb_on",
     active: (s) => s.dnd,
-    sub: (s) => (s.dnd ? "Dibisukan" : "Mati"),
+    sub: (s) => (s.dnd ? "Muted" : "Off"),
     settings: "dnd",
   },
   {
     kind: "toggle",
     key: "mic",
-    title: "Mikrofon",
+    title: "Microphone",
     icon: (s) => (s.mic ? "mic" : "mic_off"),
     active: (s) => s.mic === true,
-    sub: (s) => (s.mic ? "Aktif" : "Dibisukan"),
+    sub: (s) => (s.mic ? "Active" : "Muted"),
     settings: "sound",
   },
   {
     kind: "toggle",
     key: "caffeine",
-    title: "Tetap nyala",
+    title: "Keep awake",
     icon: () => "coffee",
     active: (s) => s.caffeine,
-    sub: (s) => (s.caffeine ? "Cegah sleep" : "Mati"),
+    sub: (s) => (s.caffeine ? "Prevent sleep" : "Off"),
     settings: "power",
   },
   {
     kind: "toggle",
     key: "power_mode",
-    title: "Mode daya",
+    title: "Power mode",
     icon: (s) =>
       s.power_mode === "saver" ? "eco" : s.power_mode === "performance" ? "bolt" : "battery_full",
     active: (s) => s.power_mode !== "balanced",
-    sub: (s) => POWER_SUB[s.power_mode] ?? "Seimbang",
+    sub: (s) => POWER_SUB[s.power_mode] ?? "Balanced",
     settings: "power",
   },
   {
     kind: "toggle",
     key: "dark_mode",
-    title: "Tema Windows",
+    title: "Windows theme",
     icon: (s) => (s.dark_mode ? "dark_mode" : "light_mode"),
     active: (s) => s.dark_mode,
     sub: (s, _w, autoTheme) => {
-      const label = s.dark_mode ? "Gelap" : "Terang";
-      return autoTheme ? `Ikut wallpaper · ${label}` : label;
+      const label = s.dark_mode ? "Dark" : "Light";
+      return autoTheme ? `Follow wallpaper · ${label}` : label;
     },
     settings: "colors",
     locked: (autoTheme) => autoTheme,
@@ -297,7 +297,7 @@ const QUICK_TILES: QuickTileDef[] = [
   {
     kind: "action",
     key: "snip",
-    title: "Cuplikan layar",
+    title: "Screen snip",
     icon: "content_cut",
     sub: "Win+Shift+S",
     settings: "display",
@@ -312,9 +312,9 @@ const QUICK_TILES: QuickTileDef[] = [
   {
     kind: "action",
     key: "display_off",
-    title: "Matikan layar",
+    title: "Display off",
     icon: "bedtime",
-    sub: "Layar mati",
+    sub: "Turn off screen",
     settings: "power",
     run: () => {
       invoke("set_panel", { label: "notch", open: false }).catch(() => {});
@@ -324,9 +324,9 @@ const QUICK_TILES: QuickTileDef[] = [
   {
     kind: "action",
     key: "lock",
-    title: "Kunci layar",
+    title: "Lock screen",
     icon: "lock",
-    sub: "Kunci PC",
+    sub: "Lock PC",
     run: () => {
       invoke("set_panel", { label: "notch", open: false }).catch(() => {});
       invoke("run_action", { id: "lock" }).catch(() => {});
@@ -392,8 +392,8 @@ function QuickSettings({
               disabled={!state || missing || locked || busy !== null}
               title={
                 locked
-                  ? "Mode tema Windows otomatis mengikuti wallpaper (ubah di >settings)"
-                  : "Klik kanan untuk membuka pengaturan Windows"
+                  ? "Windows theme follows wallpaper automatically (change in >settings)"
+                  : "Right-click to open Windows Settings"
               }
               onClick={() => toggle(t.key, nextValue)}
               onContextMenu={(e) => {
@@ -406,9 +406,9 @@ function QuickSettings({
                 <span className="qtile__title">{t.title}</span>
                 <span className="qtile__sub">
                   {!state
-                    ? "memuat…"
+                    ? "loading…"
                     : missing
-                      ? "tidak ada"
+                      ? "unavailable"
                       : busy === t.key
                         ? "…"
                         : t.sub(state, wifi, autoTheme)}
@@ -421,15 +421,15 @@ function QuickSettings({
 
       {wifi?.location_denied && (
         <div className="settings__warn">
-          Windows memblokir akses WiFi untuk app ini. Aktifkan "Let desktop apps access your
-          location" di pengaturan lokasi.{" "}
+          Windows blocked Wi-Fi access for this app. Enable "Let desktop apps access your location"
+          in Location settings.{" "}
           <button className="settings__link" onClick={() => openPage("location")}>
-            Buka pengaturan lokasi
+            Open Location settings
           </button>
         </div>
       )}
 
-      <div className="quick__hint">Klik kanan tile untuk membuka pengaturan Windows</div>
+      <div className="quick__hint">Right-click a tile to open Windows Settings</div>
 
       <VolumeBrightness active={visible} />
     </div>

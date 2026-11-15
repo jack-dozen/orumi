@@ -30,13 +30,13 @@ function Controls({ media }: { media: MediaState }) {
   const { info, control } = media;
   return (
     <div className="mcontrols">
-      <button onClick={() => control("prev")} title="Sebelumnya">
+      <button onClick={() => control("prev")} title="Previous">
         <Icon name="skip_previous" size={26} fill />
       </button>
-      <button className="mcontrols__play" onClick={() => control("toggle")} title="Putar / jeda">
+      <button className="mcontrols__play" onClick={() => control("toggle")} title="Play / pause">
         <Icon name={info?.playing ? "pause" : "play_arrow"} size={30} fill />
       </button>
-      <button onClick={() => control("next")} title="Berikutnya">
+      <button onClick={() => control("next")} title="Next">
         <Icon name="skip_next" size={26} fill />
       </button>
     </div>
@@ -57,7 +57,7 @@ function Cover({ art, className }: { art: string | null; className: string }) {
 export function MiniPlayer({ media }: { media: MediaState }) {
   const { info, art } = media;
   if (!info) {
-    return <div className="card card--placeholder">tidak ada media</div>;
+    return <div className="card card--placeholder">no media</div>;
   }
   return (
     <div className="card mini">
@@ -73,7 +73,7 @@ export function MiniPlayer({ media }: { media: MediaState }) {
 export function MediaTab({ media }: { media: MediaState }) {
   const { info, art } = media;
   if (!info) {
-    return <div className="card card--placeholder card--fill">Tidak ada media yang diputar</div>;
+    return <div className="card card--placeholder card--fill">No media playing</div>;
   }
   return (
     <div className="card mtab">

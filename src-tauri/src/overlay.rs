@@ -309,7 +309,7 @@ pub async fn list_audio_outputs() -> Result<Vec<AudioOutput>, String> {
         for i in 0..count {
             let Ok(dev) = col.Item(i) else { continue };
             let Some(id) = device_id(&dev) else { continue };
-            let name = device_name(&dev).unwrap_or_else(|| "Perangkat Audio".into());
+            let name = device_name(&dev).unwrap_or_else(|| "Audio Device".into());
             let active = active_id.as_deref() == Some(id.as_str());
             out.push(AudioOutput { id, name, active });
         }

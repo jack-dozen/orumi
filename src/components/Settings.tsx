@@ -90,7 +90,7 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
     <div className="hotkeyfield">
       <input
         className="sinput"
-        value={capturing ? "Tekan kombinasi…" : text}
+        value={capturing ? "Press shortcut…" : text}
         readOnly={capturing}
         spellCheck={false}
         onChange={(e) => setText(e.target.value)}
@@ -105,7 +105,7 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
       />
       <button
         className={`hotkey__cap ${capturing ? "hotkey__cap--on" : ""}`}
-        title="Tangkap kombinasi dari keyboard"
+        title="Capture shortcut from keyboard"
         onClick={() => setCapturing((c) => !c)}
       >
         <Icon name="keyboard" size={18} />
@@ -142,14 +142,14 @@ export default function AppSettings() {
         if (active) setPreviews(enabled);
       })
       .catch((error) => {
-        if (active) setNote(`Gagal membaca mode pratinjau Alt+Tab: ${String(error)}`);
+        if (active) setNote(`Failed to read Alt+Tab preview mode: ${String(error)}`);
       });
     return () => {
       active = false;
     };
   }, []);
 
-  if (!cfg) return <div className="card card--placeholder card--fill">memuat…</div>;
+  if (!cfg) return <div className="card card--placeholder card--fill">loading…</div>;
 
   const save = async (patch: Partial<Config>): Promise<string[]> => {
     setOk("");
@@ -167,7 +167,7 @@ export default function AppSettings() {
 
   const setHotkey = (which: keyof Config["hotkeys"]) => async (v: string) => {
     const warnings = await save({ hotkeys: { ...cfg.hotkeys, [which]: v } });
-    if (warnings.length === 0) setOk(`Hotkey ${v} terdaftar di Windows.`);
+    if (warnings.length === 0) setOk(`Hotkey ${v} registered with Windows.`);
   };
 
   const setPreviewMode = async (enabled: boolean) => {
@@ -177,7 +177,7 @@ export default function AppSettings() {
       await invoke("switcher_set_previews", { enabled });
       setPreviews(enabled);
     } catch (error) {
-      setNote(`Gagal mengubah mode pratinjau Alt+Tab: ${String(error)}`);
+      setNote(`Failed to change Alt+Tab preview mode: ${String(error)}`);
     } finally {
       setPreviewModePending(false);
     }
@@ -186,9 +186,9 @@ export default function AppSettings() {
   return (
     <div className="card appset">
       <div className="appset__col">
-        <div className="appset__title">Tampilan</div>
+        <div className="appset__title">Appearance</div>
 
-        <Row label={`Skala UI ${scale}%`}>
+        <Row label={`UI scale ${scale}%`}>
           <input
             type="range"
             min={60}
@@ -201,7 +201,7 @@ export default function AppSettings() {
           />
         </Row>
 
-        <Row label="Kota cuaca">
+        <Row label="Weather city">
           <input
             className="sinput"
             value={city}
@@ -218,11 +218,11 @@ export default function AppSettings() {
             }}
           />
         </Row>
-        <Row label="Placeholder cari">
+        <Row label="Search placeholder">
           <input
             className="sinput"
             value={searchPlaceholder}
-            placeholder="Kosong = bawaan"
+            placeholder="Empty = default"
             spellCheck={false}
             onChange={(e) => setSearchPlaceholder(e.target.value)}
             onFocus={() => activate(true)}
@@ -244,17 +244,17 @@ export default function AppSettings() {
               className={cfg.alt_tab ? "segmented__on" : ""}
               onClick={() => save({ alt_tab: true })}
             >
-              Kustom
+              Custom
             </button>
             <button
               className={!cfg.alt_tab ? "segmented__on" : ""}
               onClick={() => save({ alt_tab: false })}
             >
-              Bawaan Windows
+              Windows default
             </button>
           </div>
         </Row>
-        <Row label="Tampilan Alt+Tab">
+        <Row label="Alt+Tab style">
           <div className="segmented segmented--small">
             <button
               type="button"
@@ -263,7 +263,7 @@ export default function AppSettings() {
               disabled={previewModePending}
               onClick={() => setPreviewMode(true)}
             >
-              Pratinjau
+              Previews
             </button>
             <button
               type="button"
@@ -272,11 +272,11 @@ export default function AppSettings() {
               disabled={previewModePending}
               onClick={() => setPreviewMode(false)}
             >
-              Ikon saja
+              Icons only
             </button>
           </div>
         </Row>
-        <Row label="Taskbar Windows">
+        <Row label="Windows taskbar">
           <div className="segmented segmented--small">
             <button
               className={cfg.taskbar_autohide && !cfg.taskbar_hidden ? "segmented__on" : ""}
@@ -288,33 +288,33 @@ export default function AppSettings() {
               className={cfg.taskbar_hidden ? "segmented__on" : ""}
               onClick={() => save({ taskbar_autohide: true, taskbar_hidden: true })}
             >
-              Sembunyi
+              Hidden
             </button>
             <button
               className={!cfg.taskbar_autohide && !cfg.taskbar_hidden ? "segmented__on" : ""}
               onClick={() => save({ taskbar_autohide: false, taskbar_hidden: false })}
             >
-              Biarkan
+              Keep
             </button>
           </div>
         </Row>
-        <Row label="Daftar app di bar">
+        <Row label="Bar app list">
           <div className="segmented segmented--small">
             <button
               className={cfg.bar_app_style === "icons" ? "segmented__on" : ""}
               onClick={() => save({ bar_app_style: "icons" })}
             >
-              Ikon
+              Icons
             </button>
             <button
               className={cfg.bar_app_style === "dots" ? "segmented__on" : ""}
               onClick={() => save({ bar_app_style: "dots" })}
             >
-              Titik
+              Dots
             </button>
           </div>
         </Row>
-        <Row label="Tema Windows">
+        <Row label="Windows theme">
           <div className="segmented segmented--small">
             <button
               className={(cfg.windows_theme_mode ?? "manual") !== "auto" ? "segmented__on" : ""}
@@ -326,7 +326,7 @@ export default function AppSettings() {
               className={cfg.windows_theme_mode === "auto" ? "segmented__on" : ""}
               onClick={() => save({ windows_theme_mode: "auto" })}
             >
-              Ikut wallpaper
+              Follow wallpaper
             </button>
           </div>
         </Row>
@@ -335,7 +335,7 @@ export default function AppSettings() {
       </div>
 
       <div className="appset__col">
-        <div className="appset__title">Pintasan keyboard</div>
+        <div className="appset__title">Keyboard shortcuts</div>
         <Row label="Bar">
           <HotkeyField
             key={`bar-${resetKey}`}
@@ -360,9 +360,9 @@ export default function AppSettings() {
         {note && <div className="settings__warn">{note}</div>}
         {ok && <div className="hotkeynote hotkeynote--ok">{ok}</div>}
         <div className="hotkeynote">
-          Windows hanya menolak kombinasi yang dipakai app lewat pendaftaran hotkey biasa. App
-          yang memantau keyboard sendiri (mis. Google Drive, AutoHotkey) tidak terdeteksi: kalau
-          app lain ikut terbuka saat hotkey ditekan, ganti kombinasinya.
+          Windows only rejects shortcuts registered through standard hotkey APIs. Apps that use
+          their own keyboard hooks (e.g. Google Drive, AutoHotkey) are not detected: if another
+          app opens when pressing a shortcut, choose a different combination.
         </div>
       </div>
     </div>
@@ -372,10 +372,10 @@ export default function AppSettings() {
 // ---------- Colors ----------
 
 const SLOTS = [
-  { key: "bg0", label: "Latar panel", note: "bg0", token: "--surface" },
-  { key: "bg1", label: "Latar kartu", note: "bg1", token: "--surface-container-high" },
-  { key: "fg", label: "Teks", note: "fg", token: "--on-surface" },
-  { key: "accent", label: "Aksen", note: "accent", token: "--primary" },
+  { key: "bg0", label: "Panel background", note: "bg0", token: "--surface" },
+  { key: "bg1", label: "Card background", note: "bg1", token: "--surface-container-high" },
+  { key: "fg", label: "Text", note: "fg", token: "--on-surface" },
+  { key: "accent", label: "Accent", note: "accent", token: "--primary" },
 ] as const;
 
 type SlotKey = (typeof SLOTS)[number]["key"];
@@ -402,7 +402,7 @@ export function ColorSettings() {
     });
   }, [cfg]);
 
-  if (!cfg) return <div className="card card--placeholder card--fill">memuat…</div>;
+  if (!cfg) return <div className="card card--placeholder card--fill">loading…</div>;
 
   const patchSlot = (key: SlotKey, patch: Partial<ColorSlot>) =>
     saveConfig({
@@ -493,7 +493,7 @@ export function ColorSettings() {
       </div>
 
       <div className="colorfoot">
-        <span className={tintMatters ? "" : "colorfoot--off"}>Warna wallpaper di latar {tint}%</span>
+        <span className={tintMatters ? "" : "colorfoot--off"}>Wallpaper tint on background {tint}%</span>
         <input
           type="range"
           min={0}
@@ -506,7 +506,7 @@ export function ColorSettings() {
           onKeyUp={() => saveConfig({ ...cfg, bg_tint: tint }).catch(() => {})}
         />
         <button className="linkbtn" onClick={resetAll}>
-          Semua ke wallpaper
+          Reset all to wallpaper
         </button>
       </div>
     </div>

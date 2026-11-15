@@ -4,8 +4,8 @@ import AppSettings, { ColorSettings } from "./Settings";
 type Section = "app" | "color";
 
 const SECTIONS: [Section, string][] = [
-  ["app", "Aplikasi"],
-  ["color", "Warna"],
+  ["app", "General"],
+  ["color", "Colors"],
 ];
 
 /** ORUMI's own settings, shown inside the launcher (`>setting`). Esc goes back to the list. */
@@ -54,7 +54,7 @@ export default function LauncherSettings({
         {section === "app" && <AppSettings />}
         {section === "color" && <ColorSettings />}
       </div>
-      <div className="lsettings__hint">Esc untuk kembali</div>
+      <div className="lsettings__hint">Esc to go back</div>
     </div>
   );
 }

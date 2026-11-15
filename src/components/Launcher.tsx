@@ -33,17 +33,17 @@ type ActionDef = {
 };
 
 const ACTIONS: ActionDef[] = [
-  { id: "wallpaper", name: "Wallpaper", hint: "Ganti wallpaper desktop", glyph: "wallpaper" },
-  { id: "switch_window", name: "Switch window", hint: "Pindah window terbuka (Alt+Tab)", glyph: "apps" },
-  { id: "settings", name: "Settings", hint: "Pengaturan ORUMI", glyph: "tune" },
-  { id: "lock", name: "Lock", hint: "Kunci layar", glyph: "lock" },
-  { id: "sleep", name: "Sleep", hint: "Tidurkan PC", glyph: "bedtime" },
-  { id: "hibernate", name: "Hibernate", hint: "Simpan sesi ke disk lalu mati", glyph: "schedule" },
-  { id: "restart", name: "Restart", hint: "Mulai ulang PC", glyph: "restart_alt", dangerous: true },
-  { id: "shutdown", name: "Shutdown", hint: "Matikan PC", glyph: "power_settings_new", dangerous: true },
-  { id: "display_off", name: "Display off", hint: "Matikan layar saja", glyph: "desktop_access_disabled" },
-  { id: "logout", name: "Sign out", hint: "Keluar dari akun", glyph: "logout", dangerous: true },
-  { id: "reload_apps", name: "Reload apps", hint: "Muat ulang daftar aplikasi", glyph: "refresh" },
+  { id: "wallpaper", name: "Wallpaper", hint: "Change desktop wallpaper", glyph: "wallpaper" },
+  { id: "switch_window", name: "Switch window", hint: "Switch open windows (Alt+Tab)", glyph: "apps" },
+  { id: "settings", name: "Settings", hint: "ORUMI settings", glyph: "tune" },
+  { id: "lock", name: "Lock", hint: "Lock the screen", glyph: "lock" },
+  { id: "sleep", name: "Sleep", hint: "Put PC to sleep", glyph: "bedtime" },
+  { id: "hibernate", name: "Hibernate", hint: "Save session to disk and power off", glyph: "schedule" },
+  { id: "restart", name: "Restart", hint: "Restart the PC", glyph: "restart_alt", dangerous: true },
+  { id: "shutdown", name: "Shutdown", hint: "Shut down the PC", glyph: "power_settings_new", dangerous: true },
+  { id: "display_off", name: "Display off", hint: "Turn off the display only", glyph: "desktop_access_disabled" },
+  { id: "logout", name: "Sign out", hint: "Sign out of your account", glyph: "logout", dangerous: true },
+  { id: "reload_apps", name: "Reload apps", hint: "Reload the application list", glyph: "refresh" },
 ];
 
 const MAX_SHOWN = 8;
@@ -269,10 +269,10 @@ export default function Launcher() {
 
   const emptyText =
     mode === "actions"
-      ? "Tidak ada aksi yang cocok"
+      ? "No matching actions"
       : apps.length === 0
-        ? "Memuat daftar aplikasi…"
-        : "Tidak ada hasil";
+        ? "Loading applications…"
+        : "No results";
 
   const width =
     view === "wallpaper" && pickerWidth
@@ -329,7 +329,7 @@ export default function Launcher() {
                           <span
                             className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}
                           >
-                            {armed === item.key ? "Tekan Enter lagi untuk konfirmasi" : item.hint}
+                            {armed === item.key ? "Press Enter again to confirm" : item.hint}
                           </span>
                         )}
                       </div>
@@ -342,7 +342,7 @@ export default function Launcher() {
                 <button
                   type="button"
                   className={`lsearch__mode ${mode === "actions" ? "lsearch__mode--actions" : ""}`}
-                  title={mode === "actions" ? "Kembali ke daftar aplikasi" : "Aksi sistem (>)"}
+                  title={mode === "actions" ? "Back to application list" : "System actions (>)"}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     setMode((m) => (m === "apps" ? "actions" : "apps"));
@@ -374,8 +374,8 @@ export default function Launcher() {
                   className="lsearch"
                   placeholder={
                     mode === "actions"
-                      ? "Cari aksi sistem…"
-                      : cfg?.search_placeholder || "Cari aplikasi…  (> aksi sistem)"
+                      ? "Search system actions…"
+                      : cfg?.search_placeholder || "Search apps…  (> system actions)"
                   }
                   value={query}
                   onChange={(e) => {

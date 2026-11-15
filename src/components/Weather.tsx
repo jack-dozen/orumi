@@ -3,7 +3,7 @@ import Icon from "./Icon";
 
 export default function WeatherCard({ weather }: { weather: Weather | null }) {
   if (!weather) {
-    return <div className="card card--placeholder">memuat cuaca…</div>;
+    return <div className="card card--placeholder">loading weather…</div>;
   }
   return (
     <div className="card weather">

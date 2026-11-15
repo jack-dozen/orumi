@@ -48,20 +48,20 @@ export default function WallpaperSettings() {
   return (
     <>
       <div className="srow">
-        <div className="srow__label">Pengalih wallpaper (launcher: &gt; lalu Wallpaper)</div>
+        <div className="srow__label">Wallpaper switcher (launcher: &gt; then Wallpaper)</div>
         <div className="srow__ctl">
           <div className="segmented segmented--small">
             <button
               className={builtin ? "segmented__on" : ""}
               onClick={() => save({ wallpaper_switcher: "builtin" })}
             >
-              Bawaan
+              Built-in
             </button>
             <button
               className={!builtin ? "segmented__on" : ""}
               onClick={() => save({ wallpaper_switcher: "external" })}
             >
-              Perintah luar
+              External command
             </button>
           </div>
         </div>
@@ -69,7 +69,7 @@ export default function WallpaperSettings() {
 
       {builtin ? (
         <div className="srow">
-          <div className="srow__label">Folder wallpaper (kosong = Pictures)</div>
+          <div className="srow__label">Wallpaper folder (empty = Pictures)</div>
           <div className="srow__ctl">
             <input
               className="sinput"
@@ -89,18 +89,18 @@ export default function WallpaperSettings() {
           </div>
           {info && (
             <div className={`hotkeynote ${info.error ? "settings__warn" : ""}`}>
-              {info.error ?? `${info.count} gambar di ${info.dir}`}
+              {info.error ?? `${info.count} images in ${info.dir}`}
             </div>
           )}
         </div>
       ) : (
         <div className="srow">
-          <div className="srow__label">Perintah yang dijalankan</div>
+          <div className="srow__label">Command to run</div>
           <div className="srow__ctl">
             <input
               className="sinput"
               value={cmd}
-              placeholder='mis. "C:\Tools\wallswitch.exe"'
+              placeholder='e.g. "C:\Tools\wallswitch.exe"'
               spellCheck={false}
               onChange={(e) => setCmd(e.target.value)}
               onFocus={() => activate(true)}

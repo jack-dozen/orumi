@@ -287,7 +287,7 @@ export default function Overlay() {
         </div>
       )}
       {power}
-      {armed && <div className="ocaption">klik lagi untuk konfirmasi</div>}
+      {armed && <div className="ocaption">click again to confirm</div>}
     </div>
   );
 }

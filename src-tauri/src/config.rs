@@ -202,7 +202,7 @@ pub fn load(app: &AppHandle) -> Config {
 }
 
 fn save(app: &AppHandle, cfg: &Config) -> Result<(), String> {
-    let path = config_path(app).ok_or("folder config tidak ditemukan")?;
+    let path = config_path(app).ok_or("config folder not found")?;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -290,10 +290,12 @@ fn apply_hotkeys(app: &AppHandle, hk: &Hotkeys) -> Vec<String> {
                     map.push((sc, label));
                 }
                 Err(e) => warnings.push(format!(
-                    "Hotkey {text} ({name}) tidak bisa dipakai, mungkin dipakai app lain: {e}"
+                    "Cannot register '{text}' ({name}) — likely already in use by another app or Windows: {e}"
                 )),
             },
-            None => warnings.push(format!("Hotkey {name} tidak valid: {text}")),
+            None => warnings.push(format!(
+                "Unrecognized format for {name}: '{text}' (e.g. Ctrl+Alt+B)"
+            )),
         }
     }
     if let Ok(mut m) = HOTKEY_MAP.lock() {

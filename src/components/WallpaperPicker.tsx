@@ -60,7 +60,7 @@ export default function WallpaperPicker({
         setVirtual(r.start ?? 0); // start at the currently active wallpaper
       })
       .catch(() =>
-        setList({ dir: "", items: [], start: null, error: "Gagal membaca folder wallpaper" }),
+        setList({ dir: "", items: [], start: null, error: "Failed to read wallpaper folder" }),
       );
     rootRef.current?.focus();
   }, []);
@@ -127,7 +127,7 @@ export default function WallpaperPicker({
 
   if (!list) {
     return (
-      <div className="wpick wpick__msg">Menyiapkan thumbnail (hanya sekali per gambar)…</div>
+      <div className="wpick wpick__msg">Preparing thumbnails (once per image)…</div>
     );
   }
 
@@ -135,9 +135,9 @@ export default function WallpaperPicker({
     return (
       <div className="wpick" ref={rootRef} tabIndex={-1}>
         <div className="wpick__msg">
-          {list.error ?? "Tidak ada gambar di folder ini"}
+          {list.error ?? "No images in this folder"}
           {list.dir && <div className="wpick__dir">{list.dir}</div>}
-          <div className="wpick__dir">Atur folder di Settings → Aplikasi. · Esc untuk kembali</div>
+          <div className="wpick__dir">Set folder in Settings → General. · Esc to go back</div>
         </div>
       </div>
     );
@@ -186,7 +186,7 @@ export default function WallpaperPicker({
       <div className="cw-stage">{slots}</div>
       <div className="wpick__title">
         {list.items[active].name}
-        {list.start === active && " · wallpaper saat ini"}
+        {list.start === active && " · current wallpaper"}
       </div>
     </div>
   );

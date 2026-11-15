@@ -71,7 +71,7 @@ export default function Preview() {
                     <AppIcon target={it.icon} fallback="?" size={48} />
                   </div>
                 )}
-                {it.minimized && <span className="pvbadge">diperkecil</span>}
+                {it.minimized && <span className="pvbadge">minimized</span>}
               </div>
               <div className="pvtitle">
                 <AppIcon target={it.icon} fallback="•" size={16} />

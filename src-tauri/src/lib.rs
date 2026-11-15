@@ -236,21 +236,21 @@ pub fn run() {
 
             // --- Tray icon ---
             let bar_item =
-                MenuItem::with_id(app, "toggle_bar", "Tampilkan / sembunyikan bar", true, None::<&str>)?;
+                MenuItem::with_id(app, "toggle_bar", "Show / hide bar", true, None::<&str>)?;
             let notch_item =
-                MenuItem::with_id(app, "toggle_notch", "Tampilkan / sembunyikan notch", true, None::<&str>)?;
+                MenuItem::with_id(app, "toggle_notch", "Show / hide notch", true, None::<&str>)?;
             let launcher_item =
-                MenuItem::with_id(app, "toggle_launcher", "Buka launcher", true, None::<&str>)?;
+                MenuItem::with_id(app, "toggle_launcher", "Open launcher", true, None::<&str>)?;
             let settings_item =
-                MenuItem::with_id(app, "settings", "Pengaturan", true, None::<&str>)?;
+                MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let alt_item = MenuItem::with_id(
                 app,
                 "toggle_alt_tab",
-                "Nyalakan/matikan Alt+Tab kustom",
+                "Toggle custom Alt+Tab",
                 true,
                 None::<&str>,
             )?;
-            let quit_item = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
                 &[&bar_item, &notch_item, &launcher_item, &settings_item, &alt_item, &quit_item],

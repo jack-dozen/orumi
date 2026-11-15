@@ -111,7 +111,7 @@ export default function VolumeBrightness({
         {!vertical && (
           <button
             className={`vb__pick ${outputsOpen ? "vb__pick--open" : ""}`}
-            title="Pilih perangkat output audio"
+            title="Select audio output device"
             onClick={toggleOutputs}
           >
             <Icon name="expand_more" size={20} />
@@ -121,7 +121,7 @@ export default function VolumeBrightness({
       {!vertical && outputsOpen && (
         <div className="vb__devices">
           {outputs.length === 0 ? (
-            <div className="vb__na">Tidak ada perangkat output ditemukan</div>
+            <div className="vb__na">No output devices found</div>
           ) : (
             outputs.map((d) => (
               <button
@@ -145,7 +145,7 @@ export default function VolumeBrightness({
           <Icon name="brightness_medium" size={22} />
         </span>
         {bright === null ? (
-          <span className="vb__na">Brightness tidak tersedia (bukan layar laptop)</span>
+          <span className="vb__na">Brightness unavailable (not a laptop display)</span>
         ) : (
           slider(bright, onBrightness)
         )}

@@ -14,9 +14,9 @@ import Icon from "./Icon";
 const pad = (n: number) => String(n).padStart(2, "0");
 
 const POWER_LABEL: Record<PowerMode, string> = {
-  saver: "Hemat daya",
-  balanced: "Seimbang",
-  performance: "Performa tinggi",
+  saver: "Power saver",
+  balanced: "Balanced",
+  performance: "Best performance",
 };
 
 const POWER_BADGE: Record<PowerMode, string> = {
@@ -149,10 +149,10 @@ export default function Bar() {
   const wifiTitle = !wifi
     ? "WiFi"
     : !wifi.adapter
-      ? "Tidak ada adapter WiFi"
+      ? "No Wi-Fi adapter"
       : wifi.connected
-        ? `${wifi.ssid ?? "Tersambung"} · ${wifi.signal}%`
-        : "WiFi tidak tersambung";
+        ? `${wifi.ssid ?? "Connected"} · ${wifi.signal}%`
+        : "Wi-Fi disconnected";
 
   return (
     <div className={`bar ${visible ? "bar--visible" : ""}`}>
@@ -169,7 +169,7 @@ export default function Bar() {
             <rect x="12.5" y="12.5" width="9.5" height="9.5" rx="1" />
           </svg>
         </div>
-        <div className="bar__item" title="Workspace (belum dibuat)">
+        <div className="bar__item" title="Workspaces (coming soon)">
           <Icon name="more_vert" size={22} />
         </div>
       </div>
@@ -213,7 +213,7 @@ export default function Bar() {
       <div className="bar__group">
         <div
           className="bar__item"
-          title="Ikon tray (ikon tersembunyi)"
+          title="Tray icons (hidden icons)"
           onClick={() => invoke("tray_toggle").catch(() => {})}
         >
           <Icon name="chevron_right" size={22} />
@@ -248,8 +248,8 @@ export default function Bar() {
                     : ""
               }`}
               title={`${battery.percent}%${
-                battery.charging ? " · mengisi" : battery.plugged ? " · tersambung ke listrik" : ""
-              } · Mode daya: ${POWER_LABEL[powerMode]} (klik: ganti)`}
+                battery.charging ? " · charging" : battery.plugged ? " · plugged in" : ""
+              } · Power mode: ${POWER_LABEL[powerMode]} (click to switch)`}
               onClick={cyclePower}
               onContextMenu={(e) => {
                 e.preventDefault();
