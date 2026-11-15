@@ -28,6 +28,7 @@ export type Config = {
   bar_app_style: "icons" | "dots";
   search_placeholder: string;
   windows_theme_mode: "manual" | "auto";
+  autostart: boolean;
   hotkeys: Hotkeys;
 };
 

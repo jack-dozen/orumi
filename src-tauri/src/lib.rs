@@ -200,6 +200,9 @@ pub fn run() {
             capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
             taskbar::apply(app.handle(), cfg.taskbar_autohide, cfg.taskbar_hidden);
+            if cfg.autostart {
+                let _ = config::apply_autostart(true);
+            }
             app.manage(config::ConfigState::new(cfg.clone()));
 
             // --- All panels ---

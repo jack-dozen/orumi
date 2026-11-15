@@ -95,6 +95,8 @@ pub struct Config {
     pub search_placeholder: String,
     /// "manual" or "auto" (follows wallpaper luminance for Windows dark/light mode).
     pub windows_theme_mode: String,
+    /// Launch ORUMI automatically when signing in to Windows (HKCU\...\Run).
+    pub autostart: bool,
     pub hotkeys: Hotkeys,
 }
 
@@ -115,6 +117,7 @@ impl Default for Config {
             bar_app_style: "icons".into(),
             search_placeholder: String::new(),
             windows_theme_mode: "manual".into(),
+            autostart: false,
             hotkeys: Hotkeys::default(),
         }
     }
@@ -328,6 +331,46 @@ pub fn init_hotkeys(app: &AppHandle, hk: &Hotkeys) -> tauri::Result<()> {
     Ok(())
 }
 
+// ---------- Startup ----------
+
+const RUN_KEY: windows::core::PCWSTR =
+    windows::core::w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+const RUN_VALUE: windows::core::PCWSTR = windows::core::w!("ORUMI");
+
+/// Register or remove the Windows per-user Run entry (`HKCU\...\Run\ORUMI`).
+pub fn apply_autostart(enable: bool) -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
+        System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ},
+    };
+
+    unsafe {
+        if enable {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let quoted = format!("\"{}\"", exe.display());
+            let mut wide: Vec<u16> = quoted.encode_utf16().collect();
+            wide.push(0);
+            let status = RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                RUN_KEY,
+                RUN_VALUE,
+                REG_SZ.0,
+                Some(wide.as_ptr() as *const std::ffi::c_void),
+                (wide.len() * 2) as u32,
+            );
+            if status != ERROR_SUCCESS {
+                return Err(format!("Failed to register startup entry (Win32 error {})", status.0));
+            }
+        } else {
+            let status = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE);
+            if status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND {
+                return Err(format!("Failed to remove startup entry (Win32 error {})", status.0));
+            }
+        }
+    }
+    Ok(())
+}
+
 // ---------- Commands ----------
 /// Save the most recently applied wallpaper. Backend-only, so it does not go through set_config.
 pub fn remember_wallpaper(app: &AppHandle, path: &str) {
@@ -386,6 +429,13 @@ pub fn set_config(
             warnings = w;
             new.hotkeys = old.hotkeys.clone();
             let _ = apply_hotkeys(&app, &old.hotkeys);
+        }
+    }
+
+    if new.autostart != old.autostart {
+        if let Err(e) = apply_autostart(new.autostart) {
+            warnings.push(e);
+            new.autostart = old.autostart;
         }
     }
 
