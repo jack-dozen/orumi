@@ -12,12 +12,21 @@ use std::{
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
-use windows::Win32::{
-    Media::Audio::{
-        eConsole, eRender, Endpoints::IAudioEndpointVolume, IMMDeviceEnumerator,
-        MMDeviceEnumerator,
+use windows::{
+    core::{GUID, HRESULT, Interface, IUnknown, PCWSTR},
+    Win32::{
+        Foundation::PROPERTYKEY,
+        Media::Audio::{
+            eConsole, eRender, Endpoints::IAudioEndpointVolume, IMMDevice, IMMDeviceEnumerator,
+            MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+        },
+        System::Com::{
+            CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+            StructuredStorage::{PropVariantClear, PropVariantToStringAlloc},
+            CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
+        },
+        UI::Shell::PropertiesSystem::IPropertyStore,
     },
-    System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED},
 };
 
 use crate::edge::Panels;
@@ -203,4 +212,157 @@ pub async fn toggle_mute() -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+// ---------- Audio Output Device Switcher ----------
+
+#[derive(Serialize, Clone)]
+pub struct AudioOutput {
+    pub id: String,
+    pub name: String,
+    pub active: bool,
+}
+
+const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID {
+        data1: 0xa45c254e,
+        data2: 0xdf1c,
+        data3: 0x4efd,
+        data4: [0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0],
+    },
+    pid: 14,
+};
+
+const CLSID_POLICY_CONFIG_CLIENT: GUID = GUID {
+    data1: 0x870af99c,
+    data2: 0x171d,
+    data3: 0x4f9e,
+    data4: [0xaf, 0x0d, 0xe6, 0x3d, 0xf4, 0x0c, 0x2b, 0xc9],
+};
+
+const IID_IPOLICY_CONFIG: GUID = GUID {
+    data1: 0xf8679f50,
+    data2: 0x850a,
+    data3: 0x41cf,
+    data4: [0x9c, 0x72, 0x43, 0x0f, 0x29, 0x02, 0x90, 0xc8],
+};
+
+const IID_IPOLICY_CONFIG_VISTA: GUID = GUID {
+    data1: 0x568b9108,
+    data2: 0x44bf,
+    data3: 0x40b4,
+    data4: [0x90, 0x06, 0x86, 0xaf, 0xe5, 0xb5, 0xa6, 0x20],
+};
+
+#[repr(C)]
+struct IPolicyConfigVtbl {
+    query_interface: unsafe extern "system" fn(*mut std::ffi::c_void, *const GUID, *mut *mut std::ffi::c_void) -> HRESULT,
+    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    _reserved_3_to_12: [*const std::ffi::c_void; 10],
+    set_default_endpoint: unsafe extern "system" fn(*mut std::ffi::c_void, PCWSTR, u32) -> HRESULT,
+}
+
+#[repr(C)]
+struct IPolicyConfigVistaVtbl {
+    query_interface: unsafe extern "system" fn(*mut std::ffi::c_void, *const GUID, *mut *mut std::ffi::c_void) -> HRESULT,
+    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    _reserved_3_to_11: [*const std::ffi::c_void; 9],
+    set_default_endpoint: unsafe extern "system" fn(*mut std::ffi::c_void, PCWSTR, u32) -> HRESULT,
+}
+
+unsafe fn device_id(dev: &IMMDevice) -> Option<String> {
+    let pwstr = dev.GetId().ok()?;
+    let s = String::from_utf16_lossy(pwstr.as_wide());
+    CoTaskMemFree(Some(pwstr.0 as _));
+    (!s.is_empty()).then_some(s)
+}
+
+unsafe fn device_name(dev: &IMMDevice) -> Option<String> {
+    let store: IPropertyStore = dev.OpenPropertyStore(STGM_READ).ok()?;
+    let mut prop = store.GetValue(&PKEY_DEVICE_FRIENDLY_NAME).ok()?;
+    let text = PropVariantToStringAlloc(&prop).ok().map(|pwstr| {
+        let value = String::from_utf16_lossy(pwstr.as_wide()).trim().to_string();
+        CoTaskMemFree(Some(pwstr.0 as _));
+        value
+    });
+    let _ = PropVariantClear(&mut prop);
+    text.filter(|s| !s.is_empty())
+}
+
+#[tauri::command]
+pub async fn list_audio_outputs() -> Result<Vec<AudioOutput>, String> {
+    tauri::async_runtime::spawn_blocking(|| unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
+        let active_id = enumerator
+            .GetDefaultAudioEndpoint(eRender, eConsole)
+            .ok()
+            .and_then(|d| device_id(&d));
+        let col = enumerator
+            .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+            .map_err(|e| e.to_string())?;
+        let count = col.GetCount().map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for i in 0..count {
+            let Ok(dev) = col.Item(i) else { continue };
+            let Some(id) = device_id(&dev) else { continue };
+            let name = device_name(&dev).unwrap_or_else(|| "Perangkat Audio".into());
+            let active = active_id.as_deref() == Some(id.as_str());
+            out.push(AudioOutput { id, name, active });
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn set_audio_output(id: String, app: AppHandle) -> Result<(), String> {
+    LAST_OWN_CHANGE_MS.store(now_ms(), Ordering::Relaxed);
+    let new_vol = tauri::async_runtime::spawn_blocking(move || unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let unknown: IUnknown =
+            CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)
+                .map_err(|e| e.to_string())?;
+
+        let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+        let dev_id = PCWSTR(wide.as_ptr());
+
+        let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        if unknown.query(&IID_IPOLICY_CONFIG, &mut ptr).is_ok() && !ptr.is_null() {
+            let vtbl = *(ptr as *const *const IPolicyConfigVtbl);
+            for role in 0..3u32 {
+                let hr = ((*vtbl).set_default_endpoint)(ptr, dev_id, role);
+                if hr.is_err() {
+                    ((*vtbl).release)(ptr);
+                    return Err(hr.message());
+                }
+            }
+            ((*vtbl).release)(ptr);
+        } else if unknown.query(&IID_IPOLICY_CONFIG_VISTA, &mut ptr).is_ok() && !ptr.is_null() {
+            let vtbl = *(ptr as *const *const IPolicyConfigVistaVtbl);
+            for role in 0..3u32 {
+                let hr = ((*vtbl).set_default_endpoint)(ptr, dev_id, role);
+                if hr.is_err() {
+                    ((*vtbl).release)(ptr);
+                    return Err(hr.message());
+                }
+            }
+            ((*vtbl).release)(ptr);
+        } else {
+            return Err("IPolicyConfig tidak tersedia".into());
+        }
+
+        Ok(endpoint().and_then(|ep| read_volume(&ep)))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    if let Some(state) = new_vol {
+        let _ = app.emit("volume-changed", state);
+    }
+    Ok(())
 }

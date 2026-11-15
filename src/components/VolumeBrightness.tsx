@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import Icon from "./Icon";
 
 type Vol = { volume: number; muted: boolean };
+type AudioOutput = { id: string; name: string; active: boolean };
 
 /** Volume and brightness sliders (notch dashboard and quick settings). */
 export default function VolumeBrightness({
@@ -16,12 +17,17 @@ export default function VolumeBrightness({
 }) {
   const [vol, setVol] = useState<Vol | null>(null);
   const [bright, setBright] = useState<number | null>(null);
+  const [outputsOpen, setOutputsOpen] = useState(false);
+  const [outputs, setOutputs] = useState<AudioOutput[]>([]);
   const lastVol = useRef(-1);
   const lastBright = useRef(-1);
   const dragging = useRef(false);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      setOutputsOpen(false);
+      return;
+    }
     invoke<Vol | null>("get_volume")
       .then((v) => v && setVol(v))
       .catch(() => {});
@@ -57,6 +63,24 @@ export default function VolumeBrightness({
     }
   };
 
+  const toggleOutputs = () => {
+    if (outputsOpen) {
+      setOutputsOpen(false);
+      return;
+    }
+    setOutputsOpen(true);
+    invoke<AudioOutput[]>("list_audio_outputs")
+      .then((list) => setOutputs(list))
+      .catch(() => setOutputs([]));
+  };
+
+  const selectOutput = (id: string) => {
+    setOutputs((prev) => prev.map((d) => ({ ...d, active: d.id === id })));
+    invoke("set_audio_output", { id })
+      .then(() => invoke<Vol | null>("get_volume").then((v) => v && setVol(v)))
+      .catch(() => {});
+  };
+
   const volIcon = !vol || vol.muted || vol.volume === 0 ? "volume_off" : vol.volume < 40 ? "volume_down" : "volume_up";
   const slider = (value: number, onChange: (v: number) => void) => (
     <input
@@ -84,7 +108,38 @@ export default function VolumeBrightness({
         </button>
         {slider(vol?.volume ?? 0, onVolume)}
         <span className="vb__val">{vol ? Math.round(vol.volume) : "—"}</span>
+        {!vertical && (
+          <button
+            className={`vb__pick ${outputsOpen ? "vb__pick--open" : ""}`}
+            title="Pilih perangkat output audio"
+            onClick={toggleOutputs}
+          >
+            <Icon name="expand_more" size={20} />
+          </button>
+        )}
       </div>
+      {!vertical && outputsOpen && (
+        <div className="vb__devices">
+          {outputs.length === 0 ? (
+            <div className="vb__na">Tidak ada perangkat output ditemukan</div>
+          ) : (
+            outputs.map((d) => (
+              <button
+                key={d.id}
+                className={`vb__dev ${d.active ? "vb__dev--active" : ""}`}
+                onClick={() => selectOutput(d.id)}
+              >
+                <Icon
+                  name={/headphone|headset|earphone|earbud|airpods|buds/i.test(d.name) ? "headphones" : "speaker"}
+                  size={18}
+                />
+                <span className="vb__devname">{d.name}</span>
+                {d.active && <Icon name="check" size={18} />}
+              </button>
+            ))
+          )}
+        </div>
+      )}
       <div className="vb__row">
         <span className="vb__icon vb__icon--static">
           <Icon name="brightness_medium" size={22} />

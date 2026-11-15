@@ -47,7 +47,7 @@ const PANELS: [PanelSpec; 6] = [
     PanelSpec {
         label: "notch",
         edge: Edge::Top,
-        size: (820.0, 380.0),
+        size: (820.0, 460.0),
         trigger_len: Some(240.0),
         hover: true,
         focus: false,
@@ -166,6 +166,7 @@ pub fn run() {
             wifi::open_settings_page,
             quick::quick_get,
             quick::quick_set,
+            quick::cycle_power_mode,
             battery::get_battery,
             theme::wallpaper_stamp,
             theme::wallpaper_pixels,
@@ -188,6 +189,8 @@ pub fn run() {
             overlay::get_volume,
             overlay::set_volume,
             overlay::toggle_mute,
+            overlay::list_audio_outputs,
+            overlay::set_audio_output,
             brightness::get_brightness,
             brightness::set_brightness
         ])

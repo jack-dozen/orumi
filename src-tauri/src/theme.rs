@@ -74,6 +74,8 @@ pub fn set_theme(json: String, app: AppHandle) {
         *t = Some(json.clone());
     }
     let _ = app.emit("theme-changed", json);
+    let sync_app = app.clone();
+    std::thread::spawn(move || crate::quick::sync_windows_theme_from_wallpaper(&sync_app));
 }
 
 #[tauri::command]

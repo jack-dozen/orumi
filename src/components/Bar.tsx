@@ -1,16 +1,29 @@
-import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { useBattery, type BatteryStatus } from "../useBattery";
 import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useNow } from "../useNow";
+import type { PowerMode, QuickState } from "../useQuick";
 import { useWifi } from "../useWifi";
 import { useWindows, windowIconTarget, type AppGroup } from "../useWindows";
 import AppIcon from "./AppIcon";
 import Icon from "./Icon";
 
 const pad = (n: number) => String(n).padStart(2, "0");
+
+const POWER_LABEL: Record<PowerMode, string> = {
+  saver: "Hemat daya",
+  balanced: "Seimbang",
+  performance: "Performa tinggi",
+};
+
+const POWER_BADGE: Record<PowerMode, string> = {
+  saver: "ECO",
+  balanced: "BAL",
+  performance: "PERF",
+};
 
 /** Click an app to switch to it; if already focused, minimize it or switch windows. */
 function onAppClick(g: AppGroup) {
@@ -52,15 +65,41 @@ export default function Bar() {
   const notchOpen = useEdgeVisible("notch");
   const activeNotchTab = useRef<string>("dashboard");
   const hoverTimer = useRef<number | undefined>(undefined);
+  const [powerMode, setPowerMode] = useState<PowerMode>("balanced");
+  const [powerBadge, setPowerBadge] = useState<string | null>(null);
+  const badgeTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    const unlisten = listen<string>("notch-tab-active", (e) => {
+    const unlistenTab = listen<string>("notch-tab-active", (e) => {
       activeNotchTab.current = e.payload;
     });
+    const unlistenQuick = listen<QuickState>("quick-changed", (e) => {
+      setPowerMode(e.payload.power_mode);
+    });
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenTab.then((fn) => fn());
+      unlistenQuick.then((fn) => fn());
+      window.clearTimeout(badgeTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    invoke<QuickState>("quick_get")
+      .then((s) => setPowerMode(s.power_mode))
+      .catch(() => {});
+  }, [visible]);
+
+  const cyclePower = () => {
+    invoke<QuickState>("cycle_power_mode")
+      .then((s) => {
+        setPowerMode(s.power_mode);
+        setPowerBadge(POWER_BADGE[s.power_mode]);
+        window.clearTimeout(badgeTimer.current);
+        badgeTimer.current = window.setTimeout(() => setPowerBadge(null), 1500);
+      })
+      .catch(() => {});
+  };
 
   /** Close notch if already open on `tab`; otherwise switch to `tab` and keep/open it. */
   async function handleNotchTab(tab: string) {
@@ -201,13 +240,24 @@ export default function Bar() {
           </div>
           {battery && (
             <div
-              className="bar__item bar__battery"
+              className={`bar__item bar__battery ${
+                powerMode === "performance"
+                  ? "bar__battery--perf"
+                  : powerMode === "saver"
+                    ? "bar__battery--saver"
+                    : ""
+              }`}
               title={`${battery.percent}%${
                 battery.charging ? " · mengisi" : battery.plugged ? " · tersambung ke listrik" : ""
-              }`}
+              } · Mode daya: ${POWER_LABEL[powerMode]} (klik: ganti)`}
+              onClick={cyclePower}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                handleNotchTab("settings");
+              }}
             >
               <Icon name={batteryIcon(battery)} size={20} />
-              <span className="bar__pct">{battery.percent}</span>
+              <span className="bar__pct">{powerBadge ?? battery.percent}</span>
             </div>
           )}
         </div>

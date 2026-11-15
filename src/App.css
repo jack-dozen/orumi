@@ -169,6 +169,19 @@ button {
   gap: 0;
 }
 
+.bar__battery--perf {
+  color: var(--primary);
+}
+
+.bar__battery--perf .bar__pct {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.bar__battery--saver {
+  color: var(--on-surface-variant);
+}
+
 .bar__pct {
   font-size: 10px;
   color: var(--on-surface-variant);
@@ -233,6 +246,13 @@ button {
 
 .notch--visible {
   transform: translateY(0);
+}
+
+.notch--instant {
+  opacity: 0 !important;
+  transform: translateY(-100%) !important;
+  transition: none !important;
+  pointer-events: none !important;
 }
 
 .notch__inner {
@@ -1801,16 +1821,16 @@ button {
 
 .qtile {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 16px;
   background: var(--surface-container-high);
   color: var(--on-surface);
   text-align: left;
-  transition: background 120ms;
+  transition: background 120ms, opacity 120ms;
 }
 
 .qtile:hover:not(:disabled) {
@@ -1827,18 +1847,39 @@ button {
   opacity: 0.45;
 }
 
+.qtile--locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.qtile__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
 .qtile__title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .qtile__sub {
   max-width: 100%;
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.75;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.quick__hint {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  text-align: right;
 }
 
 /* Volume and brightness card: horizontal in quick settings, two vertical sliders on the dashboard. */
@@ -1882,6 +1923,68 @@ button.vb__icon:hover {
   flex: 1;
   font-size: 12px;
   color: var(--on-surface-variant);
+}
+
+.vb__pick {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  color: var(--on-surface-variant);
+  transition: background 150ms, color 150ms, transform 180ms;
+}
+
+.vb__pick:hover {
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+}
+
+.vb__pick--open {
+  transform: rotate(180deg);
+  color: var(--primary);
+}
+
+.vb__devices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 96px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 2px 0 2px 42px;
+}
+
+.vb__dev {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--on-surface-variant);
+  text-align: left;
+  transition: background 120ms, color 120ms;
+}
+
+.vb__dev:hover {
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+}
+
+.vb__dev--active {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  font-weight: 600;
+}
+
+.vb__devname {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .vbslider {

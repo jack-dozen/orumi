@@ -265,6 +265,7 @@ pub fn set_wallpaper(path: String, app: AppHandle) -> Result<(), String> {
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(1200));
         let _ = app.emit("theme-refresh", ());
+        crate::quick::sync_windows_theme_from_wallpaper(&app);
     });
     Ok(())
 }

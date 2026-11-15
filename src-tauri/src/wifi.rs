@@ -177,14 +177,23 @@ pub fn start_notifications(app: AppHandle) {
 
 // ---------- Windows Settings pages ----------
 
-/// page: "wifi" or "location".
+/// Open a Windows Settings page or system URI (right-click on quick tiles, etc.).
 #[tauri::command]
 pub fn open_settings_page(page: String) -> Result<(), String> {
     use windows::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
 
     let uri = match page.as_str() {
         "wifi" => "ms-settings:network-wifi",
+        "bluetooth" => "ms-settings:bluetooth",
+        "airplane" => "ms-settings:network-airplanemode",
+        "hotspot" => "ms-settings:network-mobilehotspot",
+        "dnd" | "notifications" => "ms-settings:notifications",
+        "sound" | "mic" => "ms-settings:sound",
+        "power" => "ms-settings:powersleep",
+        "colors" | "theme" => "ms-settings:colors",
+        "display" => "ms-settings:display",
         "location" => "ms-settings:privacy-location",
+        "snip" => "ms-screenclip:",
         _ => return Err(format!("halaman tidak dikenal: {page}")),
     };
     unsafe {

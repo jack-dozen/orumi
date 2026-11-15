@@ -1,17 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
+export type PowerMode = "saver" | "balanced" | "performance";
 
 export type QuickState = {
-  /** null = this PC has no such radio. */
+  /** null = this PC has no such radio or device. */
   wifi: boolean | null;
   bluetooth: boolean | null;
   airplane: boolean;
   dnd: boolean;
+  hotspot: boolean | null;
+  mic: boolean | null;
+  caffeine: boolean;
+  dark_mode: boolean;
+  power_mode: PowerMode;
 };
 
-export type QuickKey = "wifi" | "bluetooth" | "airplane" | "dnd";
+export type QuickKey =
+  | "wifi"
+  | "bluetooth"
+  | "airplane"
+  | "dnd"
+  | "hotspot"
+  | "mic"
+  | "caffeine"
+  | "dark_mode"
+  | "power_mode";
 
-/** Quick-settings state: refreshed every 3 s while active, and right after a toggle. */
+/** Quick-settings state: refreshed every 3 s while active, on events, and right after a toggle. */
 export function useQuick(active: boolean) {
   const [state, setState] = useState<QuickState | null>(null);
   const [busy, setBusy] = useState<QuickKey | null>(null);
@@ -25,9 +42,13 @@ export function useQuick(active: boolean) {
         .catch(() => {});
     refresh();
     const id = setInterval(refresh, 3000);
+    const unlisten = listen<QuickState>("quick-changed", (e) => {
+      if (!cancelled) setState(e.payload);
+    });
     return () => {
       cancelled = true;
       clearInterval(id);
+      unlisten.then((fn) => fn());
     };
   }, [active]);
 
@@ -44,4 +65,3 @@ export function useQuick(active: boolean) {
 
   return { state, busy, toggle };
 }
-

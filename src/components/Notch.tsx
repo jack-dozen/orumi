@@ -13,8 +13,8 @@ import Gauge from "./Gauge";
 import Icon from "./Icon";
 import { MediaTab, MiniPlayer } from "./Media";
 import WeatherCard from "./Weather";
-import { useConfig } from "../useConfig";
-import { useQuick, type QuickKey } from "../useQuick";
+import { useConfig, type Config } from "../useConfig";
+import { useQuick, type PowerMode, type QuickKey, type QuickState } from "../useQuick";
 import VolumeBrightness from "./VolumeBrightness";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -180,69 +180,240 @@ function SystemTab({
   );
 }
 
-type QuickTile = {
-  key: QuickKey;
-  title: string;
-  icon: string;
-  iconOff: string;
-  sub: (on: boolean, wifi: WifiStatus | null) => string;
+type QuickTileDef =
+  | {
+      kind: "toggle";
+      key: QuickKey;
+      title: string;
+      icon: (state: QuickState) => string;
+      active: (state: QuickState) => boolean;
+      sub: (state: QuickState, wifi: WifiStatus | null, autoTheme: boolean) => string;
+      settings: string;
+      locked?: (autoTheme: boolean) => boolean;
+    }
+  | {
+      kind: "action";
+      key: string;
+      title: string;
+      icon: string;
+      sub: string;
+      settings?: string;
+      run: (onInstantHide: () => void) => void;
+    };
+
+const POWER_SUB: Record<PowerMode, string> = {
+  saver: "Hemat daya",
+  balanced: "Seimbang",
+  performance: "Performa tinggi",
 };
 
-const QUICK_TILES: QuickTile[] = [
+const QUICK_TILES: QuickTileDef[] = [
   {
+    kind: "toggle",
     key: "wifi",
     title: "Wi-Fi",
-    icon: "wifi",
-    iconOff: "wifi_off",
-    sub: (on, wifi) => (on ? wifiLabel(wifi) : "Mati"),
+    icon: (s) => (s.wifi ? "wifi" : "wifi_off"),
+    active: (s) => s.wifi === true,
+    sub: (s, wifi) => (s.wifi ? wifiLabel(wifi) : "Mati"),
+    settings: "wifi",
   },
   {
+    kind: "toggle",
     key: "bluetooth",
     title: "Bluetooth",
-    icon: "bluetooth",
-    iconOff: "bluetooth_disabled",
-    sub: (on) => (on ? "Nyala" : "Mati"),
+    icon: (s) => (s.bluetooth ? "bluetooth" : "bluetooth_disabled"),
+    active: (s) => s.bluetooth === true,
+    sub: (s) => (s.bluetooth ? "Nyala" : "Mati"),
+    settings: "bluetooth",
   },
   {
+    kind: "toggle",
     key: "airplane",
     title: "Mode pesawat",
-    icon: "airplanemode_active",
-    iconOff: "airplanemode_active",
-    sub: (on) => (on ? "Nyala" : "Mati"),
+    icon: () => "airplanemode_active",
+    active: (s) => s.airplane,
+    sub: (s) => (s.airplane ? "Nyala" : "Mati"),
+    settings: "airplane",
   },
   {
+    kind: "toggle",
+    key: "hotspot",
+    title: "Hotspot",
+    icon: () => "wifi_tethering",
+    active: (s) => s.hotspot === true,
+    sub: (s) => (s.hotspot ? "Nyala" : "Mati"),
+    settings: "hotspot",
+  },
+  {
+    kind: "toggle",
     key: "dnd",
     title: "Jangan ganggu",
-    icon: "do_not_disturb_on",
-    iconOff: "do_not_disturb_on",
-    sub: (on) => (on ? "Notifikasi dibisukan" : "Mati"),
+    icon: () => "do_not_disturb_on",
+    active: (s) => s.dnd,
+    sub: (s) => (s.dnd ? "Dibisukan" : "Mati"),
+    settings: "dnd",
+  },
+  {
+    kind: "toggle",
+    key: "mic",
+    title: "Mikrofon",
+    icon: (s) => (s.mic ? "mic" : "mic_off"),
+    active: (s) => s.mic === true,
+    sub: (s) => (s.mic ? "Aktif" : "Dibisukan"),
+    settings: "sound",
+  },
+  {
+    kind: "toggle",
+    key: "caffeine",
+    title: "Tetap nyala",
+    icon: () => "coffee",
+    active: (s) => s.caffeine,
+    sub: (s) => (s.caffeine ? "Cegah sleep" : "Mati"),
+    settings: "power",
+  },
+  {
+    kind: "toggle",
+    key: "power_mode",
+    title: "Mode daya",
+    icon: (s) =>
+      s.power_mode === "saver" ? "eco" : s.power_mode === "performance" ? "bolt" : "battery_full",
+    active: (s) => s.power_mode !== "balanced",
+    sub: (s) => POWER_SUB[s.power_mode] ?? "Seimbang",
+    settings: "power",
+  },
+  {
+    kind: "toggle",
+    key: "dark_mode",
+    title: "Tema Windows",
+    icon: (s) => (s.dark_mode ? "dark_mode" : "light_mode"),
+    active: (s) => s.dark_mode,
+    sub: (s, _w, autoTheme) => {
+      const label = s.dark_mode ? "Gelap" : "Terang";
+      return autoTheme ? `Ikut wallpaper · ${label}` : label;
+    },
+    settings: "colors",
+    locked: (autoTheme) => autoTheme,
+  },
+  {
+    kind: "action",
+    key: "snip",
+    title: "Cuplikan layar",
+    icon: "content_cut",
+    sub: "Win+Shift+S",
+    settings: "display",
+    run: (onInstantHide) => {
+      onInstantHide();
+      invoke("set_panel", { label: "notch", open: false }).catch(() => {});
+      window.setTimeout(() => {
+        invoke("open_settings_page", { page: "snip" }).catch(() => {});
+      }, 120);
+    },
+  },
+  {
+    kind: "action",
+    key: "display_off",
+    title: "Matikan layar",
+    icon: "bedtime",
+    sub: "Layar mati",
+    settings: "power",
+    run: () => {
+      invoke("set_panel", { label: "notch", open: false }).catch(() => {});
+      invoke("run_action", { id: "display_off" }).catch(() => {});
+    },
+  },
+  {
+    kind: "action",
+    key: "lock",
+    title: "Kunci layar",
+    icon: "lock",
+    sub: "Kunci PC",
+    run: () => {
+      invoke("set_panel", { label: "notch", open: false }).catch(() => {});
+      invoke("run_action", { id: "lock" }).catch(() => {});
+    },
   },
 ];
 
 /** Notch "settings" tab = Windows quick settings. ORUMI's own settings live in the launcher (>settings). */
-function QuickSettings({ wifi, visible }: { wifi: WifiStatus | null; visible: boolean }) {
+function QuickSettings({
+  wifi,
+  visible,
+  cfg,
+  onInstantHide,
+}: {
+  wifi: WifiStatus | null;
+  visible: boolean;
+  cfg: Config | null;
+  onInstantHide: () => void;
+}) {
   const { state, busy, toggle } = useQuick(visible);
-  const openPage = (page: string) => invoke("open_settings_page", { page });
+  const autoTheme = cfg?.windows_theme_mode === "auto";
+  const openPage = (page: string) => invoke("open_settings_page", { page }).catch(() => {});
 
   return (
     <div className="quick">
       <div className="quick__tiles">
         {QUICK_TILES.map((t) => {
-          const value = state ? state[t.key] : null;
-          const missing = state !== null && value === null; // no such radio on this PC
-          const on = value === true;
+          if (t.kind === "action") {
+            return (
+              <button
+                key={t.key}
+                className="qtile"
+                onClick={() => t.run(onInstantHide)}
+                onContextMenu={
+                  t.settings
+                    ? (e) => {
+                        e.preventDefault();
+                        openPage(t.settings!);
+                      }
+                    : undefined
+                }
+              >
+                <Icon name={t.icon} size={24} />
+                <div className="qtile__text">
+                  <span className="qtile__title">{t.title}</span>
+                  <span className="qtile__sub">{t.sub}</span>
+                </div>
+              </button>
+            );
+          }
+
+          const raw = state ? state[t.key] : null;
+          const missing = state !== null && raw === null;
+          const on = state ? t.active(state) : false;
+          const locked = t.locked?.(autoTheme) ?? false;
+          const nextValue = t.key === "power_mode" ? true : !(raw === true);
           return (
             <button
               key={t.key}
-              className={`qtile ${on ? "qtile--on" : ""} ${missing ? "qtile--missing" : ""}`}
-              disabled={!state || missing || busy !== null}
-              onClick={() => toggle(t.key, !on)}
+              className={`qtile ${on ? "qtile--on" : ""} ${missing ? "qtile--missing" : ""} ${
+                locked ? "qtile--locked" : ""
+              }`}
+              disabled={!state || missing || locked || busy !== null}
+              title={
+                locked
+                  ? "Mode tema Windows otomatis mengikuti wallpaper (ubah di >settings)"
+                  : "Klik kanan untuk membuka pengaturan Windows"
+              }
+              onClick={() => toggle(t.key, nextValue)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                openPage(t.settings);
+              }}
             >
-              <Icon name={on ? t.icon : t.iconOff} size={26} fill={on} />
-              <span className="qtile__title">{t.title}</span>
-              <span className="qtile__sub">
-                {!state ? "memuat…" : missing ? "tidak ada" : busy === t.key ? "…" : t.sub(on, wifi)}
-              </span>
+              <Icon name={state ? t.icon(state) : t.icon({} as QuickState)} size={24} fill={on} />
+              <div className="qtile__text">
+                <span className="qtile__title">{t.title}</span>
+                <span className="qtile__sub">
+                  {!state
+                    ? "memuat…"
+                    : missing
+                      ? "tidak ada"
+                      : busy === t.key
+                        ? "…"
+                        : t.sub(state, wifi, autoTheme)}
+                </span>
+              </div>
             </button>
           );
         })}
@@ -258,6 +429,8 @@ function QuickSettings({ wifi, visible }: { wifi: WifiStatus | null; visible: bo
         </div>
       )}
 
+      <div className="quick__hint">Klik kanan tile untuk membuka pengaturan Windows</div>
+
       <VolumeBrightness active={visible} />
     </div>
   );
@@ -266,6 +439,7 @@ function QuickSettings({ wifi, visible }: { wifi: WifiStatus | null; visible: bo
 export default function Notch() {
   const visible = useEdgeVisible("notch");
   const [tab, setTab] = useState<TabId>("dashboard");
+  const [instantHide, setInstantHide] = useState(false);
 
   // Fetch data only while the notch is visible and its tab uses it.
   const stats = useStats(visible && (tab === "dashboard" || tab === "system"));
@@ -295,6 +469,7 @@ export default function Notch() {
 
   // Notch closed: return to "does not take focus" mode (if it was used for typing).
   useEffect(() => {
+    setInstantHide(false);
     if (!visible) invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
   }, [visible]);
 
@@ -328,7 +503,9 @@ export default function Notch() {
 
   return (
     <div
-      className={`notch ${visible ? "notch--visible" : ""}`}
+      className={`notch ${visible && !instantHide ? "notch--visible" : ""} ${
+        instantHide ? "notch--instant" : ""
+      }`}
       style={{ height: height ?? undefined }}
     >
       <div className="notch__inner" ref={innerRef}>
@@ -351,7 +528,14 @@ export default function Notch() {
           )}
           {tab === "media" && <MediaTab media={media} />}
           {tab === "system" && <SystemTab stats={stats} procs={procs} gpu={gpu} wifi={wifi} />}
-          {tab === "settings" && <QuickSettings wifi={wifi} visible={visible} />}
+          {tab === "settings" && (
+            <QuickSettings
+              wifi={wifi}
+              visible={visible}
+              cfg={cfg}
+              onInstantHide={() => setInstantHide(true)}
+            />
+          )}
         </div>
       </div>
     </div>

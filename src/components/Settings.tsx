@@ -314,6 +314,22 @@ export default function AppSettings() {
             </button>
           </div>
         </Row>
+        <Row label="Tema Windows">
+          <div className="segmented segmented--small">
+            <button
+              className={(cfg.windows_theme_mode ?? "manual") !== "auto" ? "segmented__on" : ""}
+              onClick={() => save({ windows_theme_mode: "manual" })}
+            >
+              Manual
+            </button>
+            <button
+              className={cfg.windows_theme_mode === "auto" ? "segmented__on" : ""}
+              onClick={() => save({ windows_theme_mode: "auto" })}
+            >
+              Ikut wallpaper
+            </button>
+          </div>
+        </Row>
         <div className="appset__title">Wallpaper</div>
         <WallpaperSettings />
       </div>

@@ -106,6 +106,8 @@ fn flag_has(list: &Mutex<Vec<&'static str>>, label: &str) -> bool {
 static TRANSIENT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 /// Panel currently used for typing: do not close automatically.
 static HELD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+/// Hover panel explicitly dismissed via `set_panel(..., false)`: hides even while cursor is inside.
+static DISMISSED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
 /// Temporary window size that replaces PanelSpec.size (e.g. the launcher while the wallpaper picker is open).
 static SIZE_OVERRIDE: Mutex<Vec<(&'static str, (f64, f64))>> = Mutex::new(Vec::new());
@@ -200,6 +202,7 @@ impl Panels {
         if let Some((key, flag)) = self.0.get_key_value(label) {
             flag_set(&TRANSIENT, key, false);
             flag_set(&HELD, key, false);
+            flag_set(&DISMISSED, key, false);
             flag.fetch_xor(true, Ordering::Relaxed);
             wake();
         }
@@ -210,6 +213,9 @@ impl Panels {
             if !open {
                 flag_set(&TRANSIENT, key, false);
                 flag_set(&HELD, key, false);
+                flag_set(&DISMISSED, key, true);
+            } else {
+                flag_set(&DISMISSED, key, false);
             }
             let was_open = flag.swap(open, Ordering::Relaxed);
             if !open && was_open {
@@ -238,6 +244,7 @@ impl Panels {
     pub fn set_transient(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
             flag_set(&TRANSIENT, key, true);
+            flag_set(&DISMISSED, key, false);
             flag.store(true, Ordering::Relaxed);
             wake();
         }
@@ -330,14 +337,7 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
         }
         Edge::Top => {
             let w = size.0 * u;
-            let mut h = size.1 * u;
-            if spec.label == "notch" {
-                if let Ok(nh) = NOTCH_HEIGHT.lock() {
-                    if let Some(ch) = *nh {
-                        h = (ch * u).min(h);
-                    }
-                }
-            }
+            let h = size.1 * u;
             let win = Rect { x: mx + (mw - w) / 2.0, y: my, w, h };
             let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
             let trig = Rect {
@@ -531,6 +531,20 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
     });
 }
 
+fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
+    if let Some((x, y, w, h)) = hit_rect(label) {
+        return Rect { x, y, w, h };
+    }
+    if label == "notch" {
+        if let Ok(nh) = NOTCH_HEIGHT.lock() {
+            if let Some(ch) = *nh {
+                win.h = (ch * scale * ui_scale()).min(win.h);
+            }
+        }
+    }
+    win
+}
+
 struct Runtime {
     window: WebviewWindow,
     spec: PanelSpec,
@@ -674,10 +688,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     }
                     if flag_has(&TRANSIENT, p.spec.label) && !flag_has(&HELD, p.spec.label) {
                         let (win_rect, _) = layout(&p.spec, m);
-                        // A free window may have a smaller logical hit area than the window itself.
-                        let hit = hit_rect(p.spec.label)
-                            .map(|(x, y, w, h)| Rect { x, y, w, h })
-                            .unwrap_or(win_rect);
+                        let hit = panel_hit_rect(p.spec.label, win_rect, m.4);
                         if hit.contains(cursor.x, cursor.y) {
                             p.pin_entered = true;
                             p.outside_since = None;
@@ -696,15 +707,30 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     continue;
                 }
 
+                if flag_has(&DISMISSED, p.spec.label) {
+                    flag_set(&DISMISSED, p.spec.label, false);
+                    p.armed = false;
+                    p.inside_since = None;
+                    p.outside_since = None;
+                    if p.visible {
+                        p.visible = false;
+                        set_visible(&app, &p.window, &p.event, false, &p.spec);
+                    }
+                    continue;
+                }
+
                 let (win_rect, trigger_rect) = layout(&p.spec, m);
-                // A free window may be larger than what it shows: keep it open only while the
-                // cursor is over its logical hit area, not over the whole (transparent) window.
-                let win_rect = hit_rect(p.spec.label)
-                    .map(|(x, y, w, h)| Rect { x, y, w, h })
-                    .unwrap_or(win_rect);
+                let win_rect = panel_hit_rect(p.spec.label, win_rect, m.4);
 
                 if !p.visible {
-                    if trigger_rect.contains(cursor.x, cursor.y) {
+                    if !p.armed {
+                        if !win_rect.contains(cursor.x, cursor.y)
+                            && !trigger_rect.contains(cursor.x, cursor.y)
+                        {
+                            p.armed = true;
+                        }
+                        p.inside_since = None;
+                    } else if trigger_rect.contains(cursor.x, cursor.y) {
                         let since = *p.inside_since.get_or_insert_with(Instant::now);
                         if since.elapsed() >= EDGE_DWELL {
                             p.visible = true;

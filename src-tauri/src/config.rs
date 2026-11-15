@@ -93,6 +93,8 @@ pub struct Config {
     pub bar_app_style: String,
     /// Custom search bar placeholder for Launcher & Activities. Empty = built-in default.
     pub search_placeholder: String,
+    /// "manual" or "auto" (follows wallpaper luminance for Windows dark/light mode).
+    pub windows_theme_mode: String,
     pub hotkeys: Hotkeys,
 }
 
@@ -112,6 +114,7 @@ impl Default for Config {
             taskbar_hidden: false,
             bar_app_style: "icons".into(),
             search_placeholder: String::new(),
+            windows_theme_mode: "manual".into(),
             hotkeys: Hotkeys::default(),
         }
     }
@@ -165,6 +168,9 @@ fn sanitize(mut c: Config) -> Config {
         c.bar_app_style = "icons".into();
     }
     c.search_placeholder = c.search_placeholder.trim().to_string();
+    if c.windows_theme_mode != "auto" {
+        c.windows_theme_mode = "manual".into();
+    }
     c.wallpaper_dir = c.wallpaper_dir.trim().trim_matches('"').to_string();
     c.wallpaper_command = c.wallpaper_command.trim().to_string();
     if c.wallpaper_switcher != "external" {
@@ -396,6 +402,11 @@ pub fn set_config(
     if (new.ui_scale - old.ui_scale).abs() > f64::EPSILON {
         crate::edge::set_ui_scale(new.ui_scale);
         crate::apply_layout(&app);
+    }
+
+    if new.windows_theme_mode == "auto" && new.windows_theme_mode != old.windows_theme_mode {
+        let sync_app = app.clone();
+        std::thread::spawn(move || crate::quick::sync_windows_theme_from_wallpaper(&sync_app));
     }
 
     let _ = app.emit("config-changed", &new);
