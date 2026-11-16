@@ -211,18 +211,18 @@ fn find_vscroll_exe() -> Option<PathBuf> {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("vscroll-wm.exe"));
             for anc in dir.ancestors().take(6) {
-                candidates.push(anc.join(r"ref\vscroll-wm\target\release\vscroll-wm.exe"));
-                candidates.push(anc.join(r"ref\vscroll-wm\target\debug\vscroll-wm.exe"));
+                candidates.push(anc.join(r"vscroll-wm\target\release\vscroll-wm.exe"));
+                candidates.push(anc.join(r"vscroll-wm\target\debug\vscroll-wm.exe"));
             }
         }
     }
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("vscroll-wm.exe"));
-        candidates.push(cwd.join(r"ref\vscroll-wm\target\release\vscroll-wm.exe"));
-        candidates.push(cwd.join(r"ref\vscroll-wm\target\debug\vscroll-wm.exe"));
+        candidates.push(cwd.join(r"vscroll-wm\target\release\vscroll-wm.exe"));
+        candidates.push(cwd.join(r"vscroll-wm\target\debug\vscroll-wm.exe"));
         if let Some(parent) = cwd.parent() {
-            candidates.push(parent.join(r"ref\vscroll-wm\target\release\vscroll-wm.exe"));
-            candidates.push(parent.join(r"ref\vscroll-wm\target\debug\vscroll-wm.exe"));
+            candidates.push(parent.join(r"vscroll-wm\target\release\vscroll-wm.exe"));
+            candidates.push(parent.join(r"vscroll-wm\target\debug\vscroll-wm.exe"));
         }
     }
     candidates.into_iter().find(|p| p.is_file())

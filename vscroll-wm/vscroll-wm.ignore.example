@@ -1,0 +1,12 @@
+# Aturan window yang TIDAK boleh ditata (dibiarkan mengambang).
+# Salin jadi "vscroll-wm.ignore" di folder tempat app dijalankan,
+# atau tunjuk dengan env VSCROLL_IGNORE. Satu aturan per baris:
+#
+#   class:NamaKelas     persis, tidak peduli huruf besar/kecil
+#   exe:nama.exe        nama file program
+#   title:potongan      judul window mengandung teks ini
+#
+# Contoh:
+# exe:vlc.exe
+# title:Picture in Picture
+# class:CabinetWClass

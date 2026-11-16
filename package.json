@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "prepare:wm": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-wm.ps1",
+    "build:all": "npm run prepare:wm && npm run build",
     "tauri": "tauri"
   },
   "dependencies": {
