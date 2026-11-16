@@ -237,11 +237,18 @@ fn write_hkcu_dword(subkey: windows::core::PCWSTR, value_name: windows::core::PC
 }
 
 fn dnd_enabled() -> bool {
+    if crate::notifications::suppression_active() {
+        return crate::notifications::is_dnd();
+    }
     // Missing value = Windows default (banners on).
     read_hkcu_dword(PUSH_KEY, w!("ToastEnabled")) == Some(0)
 }
 
-fn set_dnd(on: bool) {
+fn set_dnd(app: &AppHandle, on: bool) {
+    if crate::notifications::suppression_active() {
+        crate::notifications::set_dnd(app, on);
+        return;
+    }
     let value: u32 = if on { 0 } else { 1 }; // inverted: the value means "toasts enabled"
     write_hkcu_dword(PUSH_KEY, w!("ToastEnabled"), value);
 }
@@ -518,6 +525,7 @@ pub async fn quick_get() -> QuickState {
 #[tauri::command]
 pub async fn quick_set(which: String, on: bool, app: AppHandle) -> Result<QuickState, String> {
     let auto_theme = crate::config::current(&app).windows_theme_mode == "auto";
+    let dnd_app = app.clone();
     let state = tauri::async_runtime::spawn_blocking(move || -> Result<QuickState, String> {
         match which.as_str() {
             "wifi" | "bluetooth" => {
@@ -527,7 +535,7 @@ pub async fn quick_set(which: String, on: bool, app: AppHandle) -> Result<QuickS
                 }
             }
             "airplane" => set_airplane(on)?,
-            "dnd" => set_dnd(on),
+            "dnd" => set_dnd(&dnd_app, on),
             "hotspot" => set_hotspot(on)?,
             "mic" => set_mic(on),
             "caffeine" => set_caffeine(on),

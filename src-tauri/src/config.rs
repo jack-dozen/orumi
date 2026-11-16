@@ -97,6 +97,12 @@ pub struct Config {
     pub windows_theme_mode: String,
     /// Launch ORUMI automatically when signing in to Windows (HKCU\...\Run).
     pub autostart: bool,
+    /// Enable custom notification reader & Notch notification tab.
+    pub notifications_enabled: bool,
+    /// Show incoming notifications as a top-notch popup when Notch is closed.
+    pub notifications_popup: bool,
+    /// Suppress Windows' native bottom-right toast banners while ORUMI runs (restored on exit/crash).
+    pub notifications_suppress_native: bool,
     pub hotkeys: Hotkeys,
 }
 
@@ -118,6 +124,9 @@ impl Default for Config {
             search_placeholder: String::new(),
             windows_theme_mode: "manual".into(),
             autostart: false,
+            notifications_enabled: true,
+            notifications_popup: true,
+            notifications_suppress_native: true,
             hotkeys: Hotkeys::default(),
         }
     }
@@ -460,6 +469,18 @@ pub fn set_config(
     if new.windows_theme_mode == "auto" && new.windows_theme_mode != old.windows_theme_mode {
         let sync_app = app.clone();
         std::thread::spawn(move || crate::quick::sync_windows_theme_from_wallpaper(&sync_app));
+    }
+
+    if new.notifications_enabled != old.notifications_enabled
+        || new.notifications_popup != old.notifications_popup
+        || new.notifications_suppress_native != old.notifications_suppress_native
+    {
+        crate::notifications::apply_config(
+            &app,
+            new.notifications_enabled,
+            new.notifications_popup,
+            new.notifications_suppress_native,
+        );
     }
 
     let _ = app.emit("config-changed", &new);

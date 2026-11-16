@@ -6,6 +6,7 @@ mod config;
 mod edge;
 mod gpu;
 mod media;
+mod notifications;
 mod osd;
 mod overlay;
 mod stats;
@@ -136,6 +137,7 @@ pub fn run() {
                     app.manage(stats::ProcState::new());
                     app.manage(gpu::GpuState::new());
                     app.manage(apps::AppsState::new());
+                    app.manage(notifications::NotifState::new());
                     let flags: HashMap<_, _> = PANELS
                         .iter()
                         .map(|s| (s.label, Arc::new(AtomicBool::new(false))))
@@ -151,6 +153,11 @@ pub fn run() {
             edge::panel_activation,
             edge::launcher_view,
             edge::notch_set_height,
+            edge::notch_set_toast_rect,
+            notifications::notif_list,
+            notifications::notif_mark_read,
+            notifications::notif_clear_all,
+            notifications::notif_open,
             activities::activities_toggle,
             activities::activities_close,
             activities::ws_list,
@@ -247,6 +254,7 @@ pub fn run() {
             overlay::start_volume_watcher(app.handle().clone());
             brightness::start_watcher(app.handle().clone());
             osd::start();
+            notifications::start(app.handle().clone());
             visualizer::start(app.handle().clone());
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
@@ -342,6 +350,7 @@ pub fn run() {
             // Restore tiled windows (if spawned by ORUMI), Windows flyout, and taskbar on normal exit.
             if let tauri::RunEvent::Exit = event {
                 wm_ipc::shutdown();
+                notifications::restore(app);
                 osd::restore();
                 taskbar::restore(app);
             }

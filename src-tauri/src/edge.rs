@@ -212,6 +212,17 @@ pub fn notch_set_height(height: f64, width: Option<f64>) {
     wake();
 }
 
+/// Active top-notch toast popup size (width, height) in design units while the notch is closed.
+static TOAST_RECT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+#[tauri::command]
+pub fn notch_set_toast_rect(width: f64, height: f64) {
+    if let Ok(mut r) = TOAST_RECT.lock() {
+        *r = (width > 0.0 && height > 0.0).then_some((width, height));
+    }
+    wake();
+}
+
 /// Timestamp of the last close per panel, so a bar button click that causes focus loss (closing
 /// the panel on mouse-down) does not immediately re-open it on mouse-up.
 static LAST_CLOSE: Mutex<Vec<(&'static str, Instant)>> = Mutex::new(Vec::new());
@@ -585,6 +596,28 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
     win
 }
 
+fn toast_hit_rect(m: Metrics) -> Option<Rect> {
+    let (w_dip, h_dip) = TOAST_RECT.lock().ok().and_then(|r| *r)?;
+    let (mx, my, mw, _, scale) = m;
+    let u = scale * ui_scale();
+    let w = w_dip * u;
+    let trig_h = EDGE_TRIGGER_DIP * scale;
+    let h = (h_dip * u - trig_h).max(0.0);
+    Some(Rect {
+        x: mx + (mw - w) / 2.0,
+        y: my + trig_h,
+        w,
+        h,
+    })
+}
+
+fn set_toast_passthrough(app: &AppHandle, window: &WebviewWindow, ignore: bool) {
+    let window = window.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = window.set_ignore_cursor_events(ignore);
+    });
+}
+
 struct Runtime {
     window: WebviewWindow,
     spec: PanelSpec,
@@ -598,6 +631,8 @@ struct Runtime {
     /// Hover-opened flag-only panels (launcher, overlay): the cursor must leave the trigger zone
     /// after a close before the panel can open again.
     armed: bool,
+    /// Notch only: true while cursor is over the closed-notch notification popup.
+    toast_hit: bool,
 }
 
 /// One thread for all panels.
@@ -617,6 +652,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 inside_since: None,
                 pin_entered: false,
                 armed: true,
+                toast_hit: false,
             })
             .collect();
         if panels.is_empty() {
@@ -646,9 +682,11 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 || cursor.x > m.0 + m.2 - margin
                 || cursor.y < m.1 + margin
                 || cursor.y > m.1 + m.3 - margin;
-            let busy = panels
-                .iter()
-                .any(|p| p.visible || p.pinned.load(Ordering::Relaxed));
+            let toast_rect = toast_hit_rect(m);
+            let busy = toast_rect.is_some()
+                || panels
+                    .iter()
+                    .any(|p| p.visible || p.pinned.load(Ordering::Relaxed));
             interval = if near_edge || busy { POLL_FAST } else { POLL_IDLE };
 
             // A thumbnail preview extends the bar: keep the bar open while the cursor is over it.
@@ -739,6 +777,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 if pinned {
                     if !p.visible {
                         p.visible = true;
+                        p.toast_hit = false;
                         p.pin_entered = false;
                         p.outside_since = None;
                         set_visible(&app, &p.window, &p.event, true, &p.spec);
@@ -780,6 +819,15 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 let win_rect = panel_hit_rect(p.spec.label, win_rect, m.4);
 
                 if !p.visible {
+                    if p.spec.label == "notch" {
+                        let over_toast = toast_rect
+                            .as_ref()
+                            .is_some_and(|r| r.contains(cursor.x, cursor.y));
+                        if over_toast != p.toast_hit {
+                            p.toast_hit = over_toast;
+                            set_toast_passthrough(&app, &p.window, !over_toast);
+                        }
+                    }
                     if !p.armed {
                         if !win_rect.contains(cursor.x, cursor.y)
                             && !trigger_rect.contains(cursor.x, cursor.y)
@@ -791,6 +839,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         let since = *p.inside_since.get_or_insert_with(Instant::now);
                         if since.elapsed() >= EDGE_DWELL {
                             p.visible = true;
+                            p.toast_hit = false;
                             p.inside_since = None;
                             p.outside_since = None;
                             set_visible(&app, &p.window, &p.event, true, &p.spec);

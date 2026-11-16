@@ -425,6 +425,9 @@ pub fn run_guard(args: &[String]) {
 
     crate::osd::restore();
     if let Some(m) = marker {
+        if let Some(dir) = m.parent() {
+            crate::notifications::restore_from_guard(dir);
+        }
         restore_from(&m);
     }
 }

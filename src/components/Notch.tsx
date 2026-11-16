@@ -1,15 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useGpu } from "../useGpu";
 import { useMedia, type MediaState } from "../useMedia";
+import { useNotifications, type NotifEntry } from "../useNotifications";
 import { useVisualizerSource } from "../useVisualizer";
 import { useNow } from "../useNow";
 import { useProcesses, type ProcEntry } from "../useProcesses";
 import { useStats, type Stats } from "../useStats";
 import { useWeather, type Weather } from "../useWeather";
 import { useWifi, type WifiStatus } from "../useWifi";
+import AppIcon from "./AppIcon";
 import Gauge from "./Gauge";
 import Icon from "./Icon";
 import { MediaTab, MiniPlayer } from "./Media";
@@ -23,6 +25,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const TABS = [
   { id: "dashboard", label: "dashboard", icon: "dashboard" },
   { id: "media", label: "media", icon: "radio" },
+  { id: "notification", label: "notification", icon: "notifications" },
   { id: "system", label: "system", icon: "monitoring" },
   { id: "settings", label: "settings", icon: "settings" },
 ] as const;
@@ -680,6 +683,196 @@ function QuickSettings({
   );
 }
 
+function formatNotifTime(arrivedMs: number): string {
+  if (!arrivedMs) return "";
+  const diffSec = Math.max(0, Math.floor((Date.now() - arrivedMs) / 1000));
+  if (diffSec < 60) return "now";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
+  const d = new Date(arrivedMs);
+  if (diffSec < 86400) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function NotifAvatar({ item, size }: { item: NotifEntry; size: number }) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [item.id, item.image]);
+
+  if (item.image && !imgFailed) {
+    return (
+      <img
+        className="notif__img"
+        src={convertFileSrc(item.image)}
+        alt=""
+        draggable={false}
+        style={{ width: size, height: size }}
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+  const fallback = (item.app || item.title || "?").trim().charAt(0).toUpperCase() || "?";
+  return <AppIcon target={item.icon_target} fallback={fallback} size={size} />;
+}
+
+function NotificationPopup({
+  item,
+  open,
+  onHover,
+  onOpen,
+  onDismiss,
+}: {
+  item: NotifEntry;
+  open: boolean;
+  onHover: (hovered: boolean) => void;
+  onOpen: (id: number) => void;
+  onDismiss: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !open) {
+      invoke("notch_set_toast_rect", { width: 0, height: 0 }).catch(() => {});
+      return;
+    }
+    const update = () => {
+      invoke("notch_set_toast_rect", {
+        width: el.offsetWidth,
+        height: el.offsetHeight,
+      }).catch(() => {});
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      invoke("notch_set_toast_rect", { width: 0, height: 0 }).catch(() => {});
+    };
+  }, [open, item.id]);
+
+  return (
+    <div
+      ref={ref}
+      className={`notifosd ${open ? "notifosd--visible" : ""}`}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      onClick={() => onOpen(item.id)}
+      role="status"
+    >
+      <div className="notifosd__avatar">
+        <NotifAvatar item={item} size={34} />
+      </div>
+      <div className="notifosd__content">
+        <div className="notifosd__meta">
+          <span className="notifosd__app">{item.app || "Notification"}</span>
+          <span className="notifosd__time">{formatNotifTime(item.arrived_ms)}</span>
+        </div>
+        <div className="notifosd__title">{item.title}</div>
+        {item.body && <div className="notifosd__body">{item.body}</div>}
+      </div>
+      <button
+        type="button"
+        className="notifosd__close"
+        title="Mark as read"
+        aria-label="Mark as read"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDismiss();
+        }}
+      >
+        <Icon name="close" size={16} />
+      </button>
+    </div>
+  );
+}
+
+function NotificationsTab({
+  items,
+  enabled,
+  onOpen,
+  onMarkRead,
+  onClearAll,
+}: {
+  items: NotifEntry[];
+  enabled: boolean;
+  onOpen: (id: number) => void;
+  onMarkRead: (id: number) => void;
+  onClearAll: () => void;
+}) {
+  return (
+    <div className="card notifs">
+      <div className="notifs__head">
+        <div className="notifs__title-wrap">
+          <span className="notifs__title">Unread notifications</span>
+          {items.length > 0 && <span className="notifs__count">{items.length}</span>}
+        </div>
+        {items.length > 0 && (
+          <button type="button" className="notifs__clear" onClick={onClearAll}>
+            <Icon name="done_all" size={16} />
+            Clear all
+          </button>
+        )}
+      </div>
+
+      {!enabled ? (
+        <div className="notifs__empty">
+          <Icon name="notifications_off" size={28} />
+          <span>Notifications are disabled in ORUMI settings</span>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="notifs__empty">
+          <Icon name="notifications" size={28} />
+          <span>No unread notifications</span>
+        </div>
+      ) : (
+        <div className="notifs__list">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className="notifcard"
+              onClick={() => onOpen(item.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpen(item.id);
+                }
+              }}
+            >
+              <div className="notifcard__avatar">
+                <NotifAvatar item={item} size={32} />
+              </div>
+              <div className="notifcard__content">
+                <div className="notifcard__meta">
+                  <span className="notifcard__app">{item.app || "Notification"}</span>
+                  <span className="notifcard__time">{formatNotifTime(item.arrived_ms)}</span>
+                </div>
+                <div className="notifcard__title">{item.title}</div>
+                {item.body && <div className="notifcard__body">{item.body}</div>}
+              </div>
+              <button
+                type="button"
+                className="notifcard__close"
+                title="Mark as read"
+                aria-label="Mark as read"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMarkRead(item.id);
+                }}
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type WsOsd = { active: number; total: number };
 
 export default function Notch() {
@@ -699,6 +892,9 @@ export default function Notch() {
   const wifi = useWifi(visible && tab === "settings");
   const cfg = useConfig();
   const weather = useWeather(cfg?.weather_city ?? "Bandung");
+  const notifsEnabled = cfg?.notifications_enabled ?? true;
+  const notifsPopup = cfg?.notifications_popup ?? true;
+  const notifs = useNotifications(notifsEnabled, notifsPopup, visible);
 
   const [sysHist, setSysHist] = useState<SysHistory>(emptyHistory);
   const gpuRef = useRef<number | null>(gpu);
@@ -738,9 +934,11 @@ export default function Notch() {
         : 550
       : tab === "media"
         ? 740
-        : tab === "system"
-          ? 760
-          : 820;
+        : tab === "notification"
+          ? 700
+          : tab === "system"
+            ? 760
+            : 820;
 
   // Follow content size dynamically (keeps compact tabs slim and centered).
   const innerRef = useRef<HTMLDivElement>(null);
@@ -834,6 +1032,15 @@ export default function Notch() {
           </span>
         </div>
       )}
+      {notifs.activeToast && !osdOpen && (
+        <NotificationPopup
+          item={notifs.activeToast}
+          open={notifs.toastOpen && !visible}
+          onHover={notifs.setToastHovered}
+          onOpen={notifs.openNotif}
+          onDismiss={() => notifs.dismissToast(true)}
+        />
+      )}
       <div
         className={`notch ${visible && !instantHide ? "notch--visible" : ""} ${
           instantHide ? "notch--instant" : ""
@@ -848,7 +1055,14 @@ export default function Notch() {
               className={`tabs__item ${tab === t.id ? "tabs__item--active" : ""}`}
               onClick={() => setTab(t.id)}
             >
-              <Icon name={t.icon} size={22} fill={tab === t.id} />
+              <span className="tabs__icon-wrap">
+                <Icon name={t.icon} size={22} fill={tab === t.id} />
+                {t.id === "notification" && notifs.unreadCount > 0 && (
+                  <span className="tabs__badge">
+                    {notifs.unreadCount > 99 ? "99+" : notifs.unreadCount}
+                  </span>
+                )}
+              </span>
               {t.label}
             </button>
           ))}
@@ -859,6 +1073,15 @@ export default function Notch() {
             <Dashboard stats={stats} media={media} gpu={gpu} weather={weather} visible={visible} />
           )}
           {tab === "media" && <MediaTab media={media} active={visible} />}
+          {tab === "notification" && (
+            <NotificationsTab
+              items={notifs.items}
+              enabled={notifsEnabled}
+              onOpen={notifs.openNotif}
+              onMarkRead={notifs.markRead}
+              onClearAll={notifs.clearAll}
+            />
+          )}
           {tab === "system" && (
             <SystemTab stats={stats} procs={procs} gpu={gpu} hist={sysHist} />
           )}

@@ -380,6 +380,56 @@ export default function AppSettings() {
           their own keyboard hooks (e.g. Google Drive, AutoHotkey) are not detected: if another
           app opens when pressing a shortcut, choose a different combination.
         </div>
+
+        <div className="appset__title">Notifications</div>
+        <Row label="Custom notifications">
+          <div className="segmented segmented--small">
+            <button
+              className={(cfg.notifications_enabled ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ notifications_enabled: true })}
+            >
+              On
+            </button>
+            <button
+              className={!(cfg.notifications_enabled ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ notifications_enabled: false })}
+            >
+              Off
+            </button>
+          </div>
+        </Row>
+        <Row label="Notch popup">
+          <div className="segmented segmented--small">
+            <button
+              className={(cfg.notifications_popup ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ notifications_popup: true })}
+            >
+              On
+            </button>
+            <button
+              className={!(cfg.notifications_popup ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ notifications_popup: false })}
+            >
+              Off
+            </button>
+          </div>
+        </Row>
+        <Row label="Windows banners">
+          <div className="segmented segmented--small">
+            <button
+              className={(cfg.notifications_suppress_native ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ notifications_suppress_native: true })}
+            >
+              Suppress
+            </button>
+            <button
+              className={!(cfg.notifications_suppress_native ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ notifications_suppress_native: false })}
+            >
+              Keep
+            </button>
+          </div>
+        </Row>
       </div>
     </div>
   );

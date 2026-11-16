@@ -49,7 +49,7 @@ Hidden means click-through plus content slid out via CSS. All windows load the s
 | Label | Edge | Size (design units) | Notes |
 |---|---|---|---|
 | bar | left | width 64, full height minus 12 inset | hover (200 ms dwell), click, or hotkey; does not take focus |
-| notch | top center | 820 × 380 (trigger zone 240) | tabs: dashboard / media / system / settings (Windows quick settings); no focus except while typing |
+| notch | top center | 820 × 460 (trigger zone 240) | tabs: dashboard / media / notification / system / settings (Windows quick settings); no focus except while typing; also hosts top-notch `.wsosd` and notification popup while closed |
 | launcher | bottom center | 1040 × 540 | needs focus; `>` actions (`>settings` ORUMI settings, `>switch` sticky switcher), wallpaper carousel |
 | overlay | right center | 150 × 440 | power pill, volume/brightness mixer, automatic popups |
 | switcher | bottom center | 1200 × 260 | custom Alt+Tab; no focus |
@@ -80,7 +80,7 @@ high-frequency threads once caused heap corruption (0xc0000374).
 | File | Purpose |
 |---|---|
 | `lib.rs` | `PANELS`, `apply_layout`, `place_panel`, setup, tray menu, `generate_handler!`, `--guard` mode at start of `run()`, plugin `orumi-state` that registers all managed state |
-| `edge.rs` | edge engine (1.4), `launcher_view`, `notch_set_height`, `panel_activation`, `set_activatable` (WS_EX_NOACTIVATE), `Edge::Free` |
+| `edge.rs` | edge engine (1.4), `launcher_view`, `notch_set_height`, `notch_set_toast_rect` (interactive closed-notch toast hit-test), `panel_activation`, `set_activatable` (WS_EX_NOACTIVATE), `Edge::Free` |
 | `config.rs` | `Config` + `config.json`, hotkeys (parse + re-register), `set_config`, `remember_wallpaper`, `toggle_alt_tab`, calls `taskbar::apply` on change |
 | `stats.rs`, `gpu.rs` | CPU/RAM/disk (sysinfo) with top processes; GPU usage via PDH "GPU Engine" |
 | `wifi.rs`, `battery.rs`, `media.rs` | WLAN API + notifications; `GetSystemPowerStatus`; SMTC (title, cover, controls, seek) |
@@ -92,8 +92,9 @@ high-frequency threads once caused heap corruption (0xc0000374).
 | `altswitch.rs` | custom Alt+Tab: `WH_KEYBOARD_LL` hook + worker + watchdog; installs after the Activities hook so it runs first in the hook chain; re-installs after launcher close, rescues a missed Alt+Tab by dismissing the native switcher, and supports sticky launch via `switcher_open` (`>switch`) |
 | `wallpaper.rs`, `theme.rs` | wallpaper list, thumbnail cache (rayon, background `warm`), `set_wallpaper`; theme from wallpaper (`wallpaper_pixels` downsized to 128 px in Rust), persist/broadcast theme |
 | `tray_flyout.rs` | `>` button in the bar opens the Windows hidden-icons flyout via UI Automation (moved next to the bar, best effort) |
-| `quick.rs` | notch quick settings: Wi-Fi / Bluetooth / airplane mode via `Windows.Devices.Radios` (Bloom pattern), Do Not Disturb via `HKCU\...\PushNotifications\ToastEnabled` (Astraeus pattern); commands `quick_get`, `quick_set` |
-| `taskbar.rs` | taskbar auto-hide, full hide (stage 2), tray reveal helpers, `--guard` process (see 2.3) |
+| `quick.rs` | notch quick settings: Wi-Fi / Bluetooth / airplane mode via `Windows.Devices.Radios` (Bloom pattern), Do Not Disturb via `notifications` internal DND when native banner suppression is active else `ToastEnabled` (Astraeus pattern); commands `quick_get`, `quick_set` |
+| `notifications.rs` | custom Windows 11 notifications: reads `%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db` strictly read-only via `winsqlite3.dll`, watches folder changes, parses toast XML, stores ORUMI unread state & DND in `notif-state.json`, optionally suppresses native banners (`ToastEnabled = 0`) with `notif-restore.json` + `--guard` restore; commands `notif_list`, `notif_mark_read`, `notif_clear_all`, `notif_open` |
+| `taskbar.rs` | taskbar auto-hide, full hide (stage 2), tray reveal helpers, `--guard` process (restores taskbar, OSD flyout, and notification `ToastEnabled`) (see 2.3) |
 | `activities/mod.rs` | panel window: `show/hide/dismiss/toggle`, placement via `edge::place`, events `activities-open` / `activities-close`, commands `activities_toggle`, `activities_close`, `ws_list`, `ws_switch`, `ws_move_window` |
 | `activities/winkey.rs` | Win key trigger (poller + hook), Start menu suppression |
 | `activities/thumbs.rs` | window snapshots + thumbnails (`PrintWindow`, rayon, per-hwnd cache) |
@@ -104,7 +105,7 @@ high-frequency threads once caused heap corruption (0xc0000374).
 
 `App.tsx` (routing by label + `useTheme`), `App.css` (color tokens, icon `@font-face`, all styles), `theme.ts`
 (four base colors → CSS tokens), `config.ts`.
-Hooks: `useEdgeVisible`, `useNow`, `useStats`, `useMedia`, `useProcesses`, `useGpu`, `useWifi`, `useBattery`,
+Hooks: `useEdgeVisible`, `useNow`, `useStats`, `useMedia`, `useNotifications`, `useProcesses`, `useGpu`, `useWifi`, `useBattery`,
 `useWindows`, `useWeather`, `useConfig`, `useQuick`.
 Components: `Bar`, `Notch`, `Launcher`, `Overlay`, `Switcher`, `Preview`, `Media`, `Weather`, `Gauge`, `Icon`,
 `AppIcon` (real app icon with letter fallback), `Settings` (+ `ColorSettings`), `LauncherSettings`, `VolumeBrightness`,
@@ -116,14 +117,14 @@ Theme: four colors **bg0** (panel), **bg1** (card), **fg** (text), **accent**, e
 
 Rust → UI events: `edge-visible:<label>` (bool), `overlay-mode`, `volume-changed`, `brightness-changed`, `notch-tab`,
 `launcher-view`, `windows-changed`, `wifi-changed`, `theme-changed`, `theme-refresh`, `config-changed`, `switcher-items`,
-`switcher-select`, `preview-data`, `activities-open`, `activities-close`.
+`switcher-select`, `preview-data`, `activities-open`, `activities-close`, `notif-changed`, `notif-toast`.
 `useEdgeVisible` waits two real frames (plus a 500 ms safety) before starting the animation so panels do not "jump".
 
 ### 1.7 Config (`%APPDATA%\com.example.edgeshell\config.json`)
 
 `ui_scale`, `weather_city`, `bg_tint`, `colors{bg0,bg1,fg,accent:{mode:"auto"|"custom",value}}`, `wallpaper_dir`,
 `wallpaper_switcher` ("builtin"|"external"), `wallpaper_command`, `last_wallpaper` (**written by backend only**),
-`alt_tab` (bool), `taskbar_autohide` (bool, default true), `taskbar_hidden` (bool, default false; full hide, takes precedence over autohide), `bar_app_style` ("icons"|"dots"), `hotkeys{bar,notch,launcher}`.
+`alt_tab` (bool), `taskbar_autohide` (bool, default true), `taskbar_hidden` (bool, default false; full hide, takes precedence over autohide), `bar_app_style` ("icons"|"dots"), `notifications_enabled` (bool, default true), `notifications_popup` (bool, default true), `notifications_suppress_native` (bool, default true), `hotkeys{bar,notch,launcher}`.
 Default hotkeys: Ctrl+Alt+B (bar), Ctrl+Alt+N (notch), Ctrl+Alt+J (launcher). Combinations used by hook-based apps
 (e.g. Google Drive) are not detected as conflicts; Windows combinations (Win+…, Ctrl+Alt+Del) cannot be used.
 Tray menu: bar, notch, launcher, Settings, custom Alt+Tab on/off, Quit.
@@ -264,6 +265,11 @@ or the guard mode without a migration plan.
 
 ### 3.2 Implemented but not yet reported as working (do not assume proven)
 
+- **Custom Notch Notifications (2026-11-16, compiled + 5 unit tests passed; awaiting owner runtime test via `npm run tauri dev`)**:
+  - Added `src-tauri/src/notifications.rs` (`NotifState` registered in `orumi-state`): reads `%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db` strictly read-only via dynamic `winsqlite3.dll`, watches folder changes (`FindFirstChangeNotificationW` + 150 ms settle + 3 s poll), parses `<toast>` XML (`ToastGeneric`, CDATA/entities, `launch`, `appLogoOverride` local images), resolves display names via `IShellItem`, and tracks unread state + internal DND in `notif-state.json`.
+  - Added crash-safe native Windows toast banner suppression (`ToastEnabled = 0` backed by `notif-restore.json`, `RunEvent::Exit`, and `taskbar::run_guard`), coordinated with `quick.rs` (`ORUMI_DND` when suppression is active).
+  - Added `TOAST_RECT` hit-testing (`notch_set_toast_rect`) in `edge.rs` so the closed-notch `.notifosd` popup is interactive/hover-pausable without blocking clicks elsewhere or interfering with the 2 px top edge trigger.
+  - Added `src/useNotifications.ts`, top-notch `.notifosd` popup + new `notification` tab between `media` and `system` (with unread badge, app icon/avatar, click-to-open, per-item mark-read, and `Clear all`) in `Notch.tsx`, `Notifications` toggles in `Settings.tsx` (`General`), styles in `App.css`, and 4 new icons (`close`, `done_all`, `notifications`, `notifications_off`) in `scripts/make-icon-font.ps1` (woff2 regenerated: 72 icons, 12.2 KB).
 - Activities: window thumbnails, dragging a window card onto a workspace box, touchpad scroll gesture between views.
 - Impact of the preview and activities windows on memory.
 
@@ -390,7 +396,7 @@ Activities merge checklist (build the combined version and test):
 ### 5.2 Later (not this chat unless stated)
 
 - Remaining quick-settings / notification items: Night Light (skipped for now due to no safe public API in Bloom/Astraeus);
-  Windows notifications restyled to match the shell (owner asked whether this is possible; needs research).
+  custom notch notifications implemented in 3.2 (awaiting runtime verification).
 - Wire `set_win_key_enabled` to config; optional extra Activities triggers (bar button, hot corner); arrow-key
   navigation in the normal app list.
 - Tray stage 2 (own tray icon panel via `NotifyIconSettings` registry + `Shell_NotifyIconGetRect` + UIA): fragile,
@@ -423,11 +429,15 @@ Activities merge checklist (build the combined version and test):
 | No Windows virtual desktops | API is undocumented and changes between builds; WM owns workspaces |
 | Connect vscroll-wm via Named Pipe IPC (`wm_ipc.rs` ↔ `ipc.rs`) | Keeps `vscroll-wm`'s `WH_KEYBOARD_LL` hook isolated from ORUMI's `altswitch`/`winkey` hooks (avoids `Win+Tab`/`Alt+Tab` conflicts seen with in-process merging) while still sharing live `WM_SNAPSHOT` |
 | Filter `winlist::collect_windows()` to active workspace (`collect_all_windows()` for Activities) | Keeps Bar & Alt+Tab focused on active workspace while Activities shows & drags across all workspaces |
+| Read `wpndatabase.db` read-only via `winsqlite3.dll` + track unread in `notif-state.json` | WinRT `UserNotificationListener` fails on unpackaged Tauri apps (`0x80070490`); read-only SQLite + ORUMI-owned read state never risks corrupting Windows' DB |
+| Top-notch notification popup inside `notch` window with `TOAST_RECT` hit-testing | Reuses the existing `notch` WebView2 window (zero extra renderer memory) while letting hover/click work inside the small toast rect |
+| Suppress native banners via `ToastEnabled = 0` + `notif-restore.json` + `--guard`, with separate `ORUMI_DND` | Avoids undocumented `WNF_SHEL_QUIETHOURS_*` blobs, recovers cleanly on crash/kill, and prevents `quick.rs` DND tile from leaking native banners |
 
 ---
 
 ## 7. Session log
 
+- 2026-11-16 (custom notifications): evaluated feasibility/safety and implemented custom Windows 11 notifications (`src-tauri/src/notifications.rs` read-only `wpndatabase.db` reader via `winsqlite3.dll`, folder watcher, toast XML parser, safe URI launcher, `notif-state.json` unread tracking, crash-safe `ToastEnabled = 0` suppression via `notif-restore.json` + `--guard`, `quick.rs` DND coordination, `edge.rs` `TOAST_RECT` closed-notch hit-testing, `src/useNotifications.ts`, top-notch `.notifosd` popup + `notification` tab between `media` and `system` in `Notch.tsx`, `Settings.tsx` toggles, `App.css`, and regenerated `make-icon-font.ps1` with 4 new icons); verified `npm run build`, `cargo check`, and 5 `notifications::tests` unit tests pass.
 - 2026-11-11 (chat 3): read both handoffs and the v0.1.3 code; verified Activities touch points (3.3); created this
   `context.md`; agreed the plan in 5.1; agreed the English comments rule (2.1).
 - 2026-11-13 (chat 4): read Bloom's `utils.rs` / `commands.rs` taskbar code; implemented taskbar full hide (`taskbar.rs` rewrite,
