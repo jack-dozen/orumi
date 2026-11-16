@@ -21,6 +21,7 @@ mod taskbar;
 mod icons;
 mod previews;
 mod capture;
+mod wm_ipc;
 
 use std::{
     collections::HashMap,
@@ -229,6 +230,7 @@ pub fn run() {
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
             wallpaper::warm(app.handle().clone());
+            wm_ipc::start(app.handle().clone());
             activities::init(app.handle())?;
             // Install the swallowing Alt+Tab hook last so it is first in the low-level hook chain.
             altswitch::set_enabled(cfg.alt_tab);
@@ -253,10 +255,41 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let wm_pause_item = MenuItem::with_id(
+                app,
+                "wm_toggle_pause",
+                "Pause / resume tiling WM",
+                true,
+                None::<&str>,
+            )?;
+            let wm_reload_item = MenuItem::with_id(
+                app,
+                "wm_reload_config",
+                "Reload WM config",
+                true,
+                None::<&str>,
+            )?;
+            let wm_cheatsheet_item = MenuItem::with_id(
+                app,
+                "wm_cheatsheet",
+                "WM keyboard shortcuts",
+                true,
+                None::<&str>,
+            )?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
-                &[&bar_item, &notch_item, &launcher_item, &settings_item, &alt_item, &quit_item],
+                &[
+                    &bar_item,
+                    &notch_item,
+                    &launcher_item,
+                    &settings_item,
+                    &alt_item,
+                    &wm_pause_item,
+                    &wm_reload_item,
+                    &wm_cheatsheet_item,
+                    &quit_item,
+                ],
             )?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("ikon app tidak ada").clone())
@@ -272,6 +305,9 @@ pub fn run() {
                         app.state::<Panels>().set_transient("launcher");
                     }
                     "toggle_alt_tab" => config::toggle_alt_tab(app),
+                    "wm_toggle_pause" => wm_ipc::toggle_pause(),
+                    "wm_reload_config" => wm_ipc::reload_config(),
+                    "wm_cheatsheet" => wm_ipc::show_cheatsheet(),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -282,8 +318,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // Restore the Windows flyout and taskbar on normal exit (including the tray menu).
+            // Restore tiled windows (if spawned by ORUMI), Windows flyout, and taskbar on normal exit.
             if let tauri::RunEvent::Exit = event {
+                wm_ipc::shutdown();
                 osd::restore();
                 taskbar::restore(app);
             }

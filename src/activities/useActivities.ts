@@ -66,6 +66,9 @@ export function useActivities() {
         requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
       }),
       listen("activities-close", () => setVisible(false)),
+      listen("workspaces-changed", () => {
+        refreshWorkspaces();
+      }),
     ];
     return () => {
       offs.forEach((p) => p.then((off) => off()));

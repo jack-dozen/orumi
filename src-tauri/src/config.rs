@@ -445,6 +445,7 @@ pub fn set_config(
     crate::altswitch::set_enabled(new.alt_tab);
     if new.taskbar_autohide != old.taskbar_autohide || new.taskbar_hidden != old.taskbar_hidden {
         crate::taskbar::apply(&app, new.taskbar_autohide, new.taskbar_hidden);
+        crate::wm_ipc::reapply();
     }
 
     if new.wallpaper_dir != old.wallpaper_dir {

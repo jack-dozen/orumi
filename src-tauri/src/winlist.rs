@@ -30,11 +30,11 @@ use windows::{
             Accessibility::{SetWinEventHook, HWINEVENTHOOK},
             WindowsAndMessaging::{
                 DispatchMessageW, EnumWindows, GetClassNameW, GetForegroundWindow, GetMessageW,
-                GetSystemMetrics, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
-                GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow, IsIconic,
-                IsWindowVisible, IsZoomed, SetForegroundWindow, ShowWindow, SwitchToThisWindow,
-                TranslateMessage, GWL_EXSTYLE, GW_OWNER, MSG, SM_CXSCREEN, SM_CYSCREEN,
-                SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW,
+                GetShellWindow, GetSystemMetrics, GetWindow, GetWindowLongW, GetWindowRect,
+                GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow,
+                IsIconic, IsWindowVisible, IsZoomed, SetForegroundWindow, ShowWindow,
+                SwitchToThisWindow, TranslateMessage, GWL_EXSTYLE, GW_OWNER, MSG, SM_CXSCREEN,
+                SM_CYSCREEN, SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW,
                 WS_EX_TOOLWINDOW,
             },
         },
@@ -325,8 +325,17 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     true.into()
 }
 
-/// Open windows, ordered from front to back. Synchronous; also used by Alt+Tab.
+/// Open windows in the active workspace, ordered from front to back.
 pub fn collect_windows() -> Vec<WindowEntry> {
+    collect_windows_inner(false)
+}
+
+/// Open windows across all workspaces (used by Activities snapshots).
+pub fn collect_all_windows() -> Vec<WindowEntry> {
+    collect_windows_inner(true)
+}
+
+fn collect_windows_inner(include_other_workspaces: bool) -> Vec<WindowEntry> {
     let mut fallback = MetaCache::default();
     let mut guard = meta_cache().lock().ok();
     let cache = guard.as_deref_mut().unwrap_or(&mut fallback);
@@ -355,23 +364,36 @@ pub fn collect_windows() -> Vec<WindowEntry> {
     cache.wins.retain(|k, _| seen_hwnds.contains(k));
     cache.procs.retain(|k, _| seen_pids.contains(k));
 
-    if let Some(first_focused) = list.iter().find(|w| w.focused) {
+    if !include_other_workspaces {
+        list.retain(|w| !crate::wm_ipc::is_in_other_workspace(w.hwnd));
+    }
+
+    if let Some(first_focused) = list
+        .iter()
+        .find(|w| w.focused && !crate::wm_ipc::is_in_other_workspace(w.hwnd))
+    {
         LAST_EXTERNAL_FG.store(first_focused.hwnd as isize, Ordering::Relaxed);
     } else if fg_pid == my_pid && !list.is_empty() {
         // An ORUMI panel (e.g. launcher or notch) currently holds foreground focus: treat the
-        // previously active external window (or topmost non-minimized window) as focused so
-        // Alt+Tab switches away from it to the next window.
+        // previously active external window in the active workspace (or topmost non-minimized
+        // window) as focused so Alt+Tab switches away from it to the next window.
         let last_ext = LAST_EXTERNAL_FG.load(Ordering::Relaxed) as i64;
-        if let Some(w) = list.iter_mut().find(|w| w.hwnd == last_ext && !w.minimized) {
+        if let Some(w) = list.iter_mut().find(|w| {
+            w.hwnd == last_ext && !w.minimized && !crate::wm_ipc::is_in_other_workspace(w.hwnd)
+        }) {
             w.focused = true;
-        } else if let Some(w) = list.iter_mut().find(|w| !w.minimized) {
+        } else if let Some(w) = list
+            .iter_mut()
+            .find(|w| !w.minimized && !crate::wm_ipc::is_in_other_workspace(w.hwnd))
+        {
             w.focused = true;
         }
     }
     list
 }
 
-/// If an ORUMI window currently holds foreground focus, return focus to the last active external window.
+/// If an ORUMI window currently holds foreground focus, return focus to the last active external
+/// window in the active workspace (or the desktop shell if the active workspace is empty).
 pub fn restore_external_foreground_if_ours() {
     unsafe {
         let fg = GetForegroundWindow();
@@ -384,7 +406,7 @@ pub fn restore_external_foreground_if_ours() {
             return;
         }
         let target = LAST_EXTERNAL_FG.load(Ordering::Relaxed);
-        if target != 0 {
+        if target != 0 && !crate::wm_ipc::is_in_other_workspace(target as i64) {
             let h = HWND(target as *mut c_void);
             if IsWindowVisible(h).as_bool() && !IsIconic(h).as_bool() {
                 SwitchToThisWindow(h, true);
@@ -393,6 +415,13 @@ pub fn restore_external_foreground_if_ours() {
         }
         if let Some(first) = collect_windows().into_iter().find(|w| !w.minimized) {
             SwitchToThisWindow(to_hwnd(first.hwnd), true);
+            return;
+        }
+        // Active workspace has no visible non-minimized windows: yield focus to the desktop
+        // instead of pulling focus back to a parked window in another workspace.
+        let shell = GetShellWindow();
+        if !shell.0.is_null() {
+            SwitchToThisWindow(shell, true);
         }
     }
 }
@@ -408,7 +437,7 @@ pub fn is_foreground_maximized() -> bool {
         }
         if hwnd.0.is_null() || pid == 0 || pid == my_pid {
             let last = LAST_EXTERNAL_FG.load(Ordering::Relaxed);
-            if last == 0 {
+            if last == 0 || crate::wm_ipc::is_in_other_workspace(last as i64) {
                 return false;
             }
             hwnd = HWND(last as *mut c_void);
@@ -455,6 +484,7 @@ pub async fn list_windows() -> Result<Vec<WindowEntry>, String> {
 /// Windows itself uses SwitchToThisWindow for Alt+Tab, and it is not blocked by focus rules
 /// (SetForegroundWindow is rejected if our process is not active).
 pub fn activate_window(hwnd: i64) {
+    crate::wm_ipc::ensure_window_active(hwnd);
     unsafe {
         let h = to_hwnd(hwnd);
         if IsIconic(h).as_bool() {
@@ -470,13 +500,14 @@ fn to_hwnd(hwnd: i64) -> HWND {
 
 #[tauri::command]
 pub fn focus_window(hwnd: i64) -> Result<(), String> {
+    crate::wm_ipc::ensure_window_active(hwnd);
     unsafe {
         let h = to_hwnd(hwnd);
         if IsIconic(h).as_bool() {
             let _ = ShowWindow(h, SW_RESTORE);
         }
         if !SetForegroundWindow(h).as_bool() {
-            return Err("Windows menolak memindahkan fokus".into());
+            SwitchToThisWindow(h, true);
         }
     }
     Ok(())

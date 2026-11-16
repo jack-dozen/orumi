@@ -4,7 +4,7 @@ This file is the single source of context for ORUMI. It replaces the older `edge
 `HANDOFF-activities.md`. It is written mainly for Claude in a fresh chat, but it doubles as the project blueprint
 and roadmap for the owner.
 
-- Last updated: 2026-11-13
+- Last updated: 2026-11-16
 - Code snapshot this file was checked against: `orumi-v0_1_3` archive (the code is the source of truth; if this file and the code disagree, trust the code and fix this file)
 - Chat language with the owner: **Indonesian**. This file, code comments, and commit messages: **English** (see section 2).
 
@@ -24,9 +24,7 @@ the rename to ORUMI is not finished in the code (see section 4). License: GPL-3.
 Owner environment: Windows 11 laptop, AMD GPU, Rust (MSVC toolchain), Node, VS Code, PowerShell.
 Code lives on the owner's machine; Claude only sees what is uploaded.
 
-A separate project, **vscroll-wm** (Rust, vertical scrolling tiling window manager for Windows), runs side by side
-with ORUMI. Its repo stays standalone. Merging it into ORUMI (idea: git submodule) is planned for the **very end**,
-not now.
+**vscroll-wm** (Rust, vertical scrolling tiling window manager for Windows, in `ref/vscroll-wm`) runs as a separate process paired with ORUMI over Windows Named Pipe IPC (`\\.\pipe\vscroll-wm` commands and `\\.\pipe\vscroll-wm-events` snapshot stream), auto-launched by ORUMI (`--no-tray`) when not already running. Keeping it out-of-process isolates its `WH_KEYBOARD_LL` hook from ORUMI's `altswitch` and `winkey` hooks.
 
 ### 1.2 Stack
 
@@ -99,7 +97,8 @@ high-frequency threads once caused heap corruption (0xc0000374).
 | `activities/mod.rs` | panel window: `show/hide/dismiss/toggle`, placement via `edge::place`, events `activities-open` / `activities-close`, commands `activities_toggle`, `activities_close`, `ws_list`, `ws_switch`, `ws_move_window` |
 | `activities/winkey.rs` | Win key trigger (poller + hook), Start menu suppression |
 | `activities/thumbs.rs` | window snapshots + thumbnails (`PrintWindow`, rayon, per-hwnd cache) |
-| `activities/workspaces.rs` | `WorkspaceProvider` trait + fake `StaticProvider` (4 in-memory workspaces) |
+| `activities/workspaces.rs` | `WorkspaceProvider` trait + `VScrollIpcProvider` backed by `wm_ipc` |
+| `wm_ipc.rs` | Named Pipe IPC client (`\\.\pipe\vscroll-wm` / `\\.\pipe\vscroll-wm-events`), auto-launch/shutdown of `vscroll-wm.exe --no-tray`, and live `WM_SNAPSHOT` mirror for `winlist` and `activities` |
 
 ### 1.6 Frontend (`src`)
 
@@ -268,6 +267,13 @@ or the guard mode without a migration plan.
 - Activities: window thumbnails, dragging a window card onto a workspace box, touchpad scroll gesture between views.
 - Impact of the preview and activities windows on memory.
 
+- **vscroll-wm Named Pipe IPC integration (2026-11-16, awaiting owner build/runtime test)**:
+  - Switched from in-process embedding to out-of-process Named Pipe IPC (`src-tauri/src/wm_ipc.rs` ↔ `ref/vscroll-wm/crates/app/src/ipc.rs`) after in-process merging triggered `Win+Tab` / `Alt+Tab` hook conflicts.
+  - `wm_ipc::start` connects to `\\.\pipe\vscroll-wm-events` (or auto-launches `vscroll-wm.exe --no-tray`) and mirrors workspace state into `WM_SNAPSHOT`, emitting `windows-changed` and `workspaces-changed`.
+  - `activities/workspaces.rs` now uses `VScrollIpcProvider`; `activities::show()` uses `winlist::collect_all_windows()` while `winlist::collect_windows()` (Bar & Alt+Tab) filters to the active workspace.
+  - Launcher/workspace-focus fix: `ref/vscroll-wm/crates/app/src/app/workspace.rs` uses `SwitchToThisWindow` fallback + records actual `GetForegroundWindow()` in `last_fg` so switching to an empty workspace cannot snap back, and `winlist::restore_external_foreground_if_ours()` skips windows in inactive workspaces and yields focus to `GetShellWindow()` when the active workspace is empty.
+  - Bar `Workspaces` button (`Bar.tsx`) toggles Activities; ORUMI tray menu controls Pause/resume tiling WM, Reload WM config, and WM keyboard shortcuts over IPC; `RunEvent::Exit` sends `quit` if ORUMI spawned `vscroll-wm.exe`.
+  - Needs `npm run tauri dev` verification by the owner.
 - Taskbar full hide (`taskbar_hidden`, Settings -> Taskbar Windows -> "Sembunyi"), written 2026-11-13, not compiled by Claude
   (`cargo check` in the agent sandbox only fails on the unrelated `OUT_DIR` / build-script error). Test checklist:
   hide appears instantly with no work-area gap; switching Sembunyi / Auto-hide / Biarkan restores the taskbar at the right place;
@@ -386,15 +392,10 @@ Activities merge checklist (build the combined version and test):
 - Carousel extras (dominant-color filter, other layouts): owner said "not now".
 - Decide on pure-Rust UI (Slint) after the memory measurement.
 
-### 5.3 vscroll-wm integration (end of the project)
+### 5.3 vscroll-wm follow-ups
 
-- Merge into the ORUMI repo (git submodule idea) while the WM repo stays standalone; both are still early and run as
-  separate programs for now.
-- Replace `StaticProvider` with an IPC provider; the IPC format (list, switch, move_window, change events) must be
-  specified first. The WM repo is not available to Claude unless uploaded.
-- After merging, the WM overview should follow the shell style (appears from the bottom). The overview shows only the
-  current workspace, and workspace-switching UI lives only in Activities. The standalone WM must still be able to
-  switch workspaces from its own overview. **Undecided:** whether Activities and the WM overview become one view or two.
+- `vscroll-wm` (`ref/vscroll-wm`) is integrated over Named Pipe IPC (`src-tauri/src/wm_ipc.rs`) with `VScrollIpcProvider` in Activities (awaiting owner runtime test via `npm run tauri dev`).
+- Next phase (when ready): replace the native Win32 `overview.rs`, `osd.rs`, and `cheatsheet.rs` windows with ORUMI shell UI (bottom overview / shell-styled workspace OSD / settings UI for `vscroll-wm.conf`), and decide whether Activities and the WM overview become one view or two.
 
 ---
 
@@ -413,7 +414,9 @@ Activities merge checklist (build the combined version and test):
 | Taskbar full hide = auto-hide + SW_HIDE + park off-screen; tray reveals it invisibly | Bloom's proven approach; replaces the earlier "never SW_HIDE" rule, tray button kept working via `reveal_for_tray` |
 | Notch `settings` tab = Windows quick settings; ORUMI settings moved to launcher (`>settings`) | separates OS quick controls from shell configuration without adding another tab or window |
 | Do Not Disturb via `HKCU\...\PushNotifications\ToastEnabled` | Astraeus pattern; avoids undocumented `WNF_SHEL_QUIETHOURS_*` binary blobs that can wedge Windows quick settings; Night Light skipped for the same reason |
-| No Windows virtual desktops | API is undocumented and changes between builds; WM will own workspaces |
+| No Windows virtual desktops | API is undocumented and changes between builds; WM owns workspaces |
+| Connect vscroll-wm via Named Pipe IPC (`wm_ipc.rs` ↔ `ipc.rs`) | Keeps `vscroll-wm`'s `WH_KEYBOARD_LL` hook isolated from ORUMI's `altswitch`/`winkey` hooks (avoids `Win+Tab`/`Alt+Tab` conflicts seen with in-process merging) while still sharing live `WM_SNAPSHOT` |
+| Filter `winlist::collect_windows()` to active workspace (`collect_all_windows()` for Activities) | Keeps Bar & Alt+Tab focused on active workspace while Activities shows & drags across all workspaces |
 
 ---
 
@@ -428,6 +431,7 @@ Activities merge checklist (build the combined version and test):
   automatic OSD popups for own UI slider/mute changes, added dynamic height/width & tighter card spacing for notch and
   launcher settings, and replaced launcher `@` window mode with `>switch` / `>switch window` sticky switcher (`switcher_open` in
   `altswitch.rs`); updated 1.3, 1.5, 1.6, 1.7, 1.9, 2.3, 3.1, 3.2, 5.1, 5.2, 6.
+- 2026-11-16: switched `vscroll-wm` integration from in-process embedding to out-of-process Named Pipe IPC (`src-tauri/src/wm_ipc.rs` ↔ `ref/vscroll-wm/crates/app/src/ipc.rs`) to avoid `Win+Tab`/`Alt+Tab` hook conflicts; added `--no-tray` auto-launch/shutdown, `VScrollIpcProvider`, Launcher/empty-workspace focus snap-back fix in `ref/vscroll-wm` (`workspace.rs`) and `winlist.rs`, active-workspace filtering for Bar & Alt+Tab while keeping all workspaces visible in Activities, Bar `Workspaces` button, and tray WM controls.
 - 2026-11-13 (chat 5): fixed Bar launcher and WiFi/Clock toggle behavior — added `LAST_CLOSE` 350 ms guard in `edge.rs` (`Panels::set` + `toggle_panel`) so launcher focus-loss on mouse-down does not re-open on mouse-up, and updated `Bar.tsx` + `Notch.tsx` (`notch-tab-active` event + `handleNotchTab`) so clicking WiFi or Clock switches tabs if the notch is on another tab and closes it when already open on that same tab.
 - Earlier: edgeshell built from bar/notch/launcher up to custom Alt+Tab, taskbar auto-hide, tray flyout, previews;
   Activities developed in a separate chat and merged into the main repo; code renamed to ORUMI v0.1.x (rename incomplete).

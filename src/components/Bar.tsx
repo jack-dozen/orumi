@@ -169,7 +169,11 @@ export default function Bar() {
             <rect x="12.5" y="12.5" width="9.5" height="9.5" rx="1" />
           </svg>
         </div>
-        <div className="bar__item" title="Workspaces (coming soon)">
+        <div
+          className="bar__item"
+          title="Workspaces"
+          onClick={() => invoke("activities_toggle").catch(() => {})}
+        >
           <Icon name="more_vert" size={22} />
         </div>
       </div>

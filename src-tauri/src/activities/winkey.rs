@@ -31,18 +31,24 @@ use std::{
 };
 
 use tauri::AppHandle;
-use windows::Win32::{
-    Foundation::{LPARAM, LRESULT, WPARAM},
-    System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST},
-    UI::{
+use windows::{
+    core::w,
+    Win32::{
+        Foundation::{HANDLE, LPARAM, LRESULT, WAIT_OBJECT_0, WPARAM},
+        System::Threading::{
+            CreateEventW, GetCurrentThread, ResetEvent, SetThreadPriority, WaitForSingleObject,
+            THREAD_PRIORITY_HIGHEST,
+        },
+        UI::{
         Input::KeyboardAndMouse::{
             GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
             KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,
         },
-        WindowsAndMessaging::{
-            CallNextHookEx, DispatchMessageW, GetClassNameW, GetForegroundWindow, GetMessageW,
-            GetWindowTextW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
-            KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
+            WindowsAndMessaging::{
+                CallNextHookEx, DispatchMessageW, GetClassNameW, GetForegroundWindow, GetMessageW,
+                GetWindowTextW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+                KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
+            },
         },
     },
 };
@@ -56,6 +62,8 @@ const VK_LWIN: u32 = 0x5B;
 const VK_RWIN: u32 = 0x5C;
 /// Neutral key for masking (unused by Windows; same as in altswitch.rs).
 const VK_NEUTRAL: u32 = 0xE8;
+/// Matches `VSCROLL_COMBO_TAG` in `vscroll-wm`: signals that a WM shortcut swallowed a Win combo.
+const VSCROLL_COMBO_TAG: usize = 0x5653_4352;
 /// Polling interval.
 const POLL_MS: u64 = 8;
 /// Coalesce masking from the hook and poller for the same Win-down.
@@ -117,8 +125,13 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) {
     if !(down || up) || !ENABLED.load(Ordering::Relaxed) {
         return;
     }
-    // Ignore injected events (including our own and those from altswitch).
+    // Ignore injected events, except `vscroll-wm`'s tagged combo marker so WM shortcuts that
+    // swallow the second key still count as a Win combination and never toggle Activities.
     if kb.flags.0 & LLKHF_INJECTED != 0 {
+        if kb.dwExtraInfo == VSCROLL_COMBO_TAG && down && (async_down(VK_LWIN) || async_down(VK_RWIN))
+        {
+            COMBO.store(true, Ordering::Relaxed);
+        }
         return;
     }
 
@@ -151,6 +164,14 @@ fn poller() {
         // Must keep running even when the CPU is busy (e.g. while Activities captures thumbnails).
         let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     }
+    let combo_ev: Option<HANDLE> =
+        unsafe { CreateEventW(None, true, false, w!("Local\\vscroll-wm-combo")).ok() };
+    if let Some(ev) = combo_ev {
+        unsafe {
+            let _ = ResetEvent(ev);
+        }
+    }
+
     let mut was = false;
     let mut dismissed = false;
     let mut polled_combo = false;
@@ -160,6 +181,11 @@ fn poller() {
         thread::sleep(Duration::from_millis(POLL_MS));
         if !ENABLED.load(Ordering::Relaxed) {
             was = false;
+            if let Some(ev) = combo_ev {
+                unsafe {
+                    let _ = ResetEvent(ev);
+                }
+            }
             continue;
         }
         let win = unsafe { async_down(VK_LWIN) || async_down(VK_RWIN) };
@@ -193,7 +219,12 @@ fn poller() {
                 }
             }
         } else if !win && was {
-            let combo = COMBO.swap(false, Ordering::Relaxed) || polled_combo;
+            let wm_combo = combo_ev.is_some_and(|ev| unsafe {
+                let hit = WaitForSingleObject(ev, 0) == WAIT_OBJECT_0;
+                let _ = ResetEvent(ev);
+                hit
+            });
+            let combo = COMBO.swap(false, Ordering::Relaxed) || polled_combo || wm_combo;
             let tap = !combo && !dismissed;
             log(format!(
                 "pemantau: win-up, kombinasi={combo}, ditutup_saat_down={dismissed} -> {}",
@@ -201,6 +232,14 @@ fn poller() {
             ));
             if tap {
                 send(Msg::Tap);
+            }
+        } else if !win {
+            // Clear any leftover event from a sub-8ms Win+key tap while idle so it cannot eat
+            // the next standalone Win tap.
+            if let Some(ev) = combo_ev {
+                unsafe {
+                    let _ = ResetEvent(ev);
+                }
             }
         }
         was = win;
