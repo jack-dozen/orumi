@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { MediaState } from "../useMedia";
+import { useLyrics, type LyricsState } from "../useLyrics";
+import { useVisualizerBars } from "../useVisualizer";
 import Icon from "./Icon";
 
 type Vol = { volume: number; muted: boolean };
@@ -10,51 +12,8 @@ type AudioOutput = { id: string; name: string; active: boolean };
 const volIconFor = (v: Vol | null) =>
   !v || v.muted || v.volume === 0 ? "volume_off" : v.volume < 40 ? "volume_down" : "volume_up";
 
-const VIZ_BARS = [
-  { dur: 520, delay: -80 },
-  { dur: 640, delay: -240 },
-  { dur: 460, delay: -120 },
-  { dur: 700, delay: -410 },
-  { dur: 490, delay: -290 },
-  { dur: 610, delay: -60 },
-  { dur: 430, delay: -350 },
-  { dur: 680, delay: -180 },
-  { dur: 550, delay: -440 },
-  { dur: 470, delay: -150 },
-  { dur: 660, delay: -310 },
-  { dur: 510, delay: -90 },
-  { dur: 630, delay: -390 },
-  { dur: 450, delay: -210 },
-  { dur: 590, delay: -470 },
-  { dur: 530, delay: -140 },
-];
-
-const BG_VIZ_BARS = [
-  { dur: 760, delay: -110, h: 52 },
-  { dur: 610, delay: -340, h: 74 },
-  { dur: 840, delay: -220, h: 63 },
-  { dur: 560, delay: -480, h: 88 },
-  { dur: 710, delay: -90, h: 68 },
-  { dur: 650, delay: -390, h: 92 },
-  { dur: 790, delay: -170, h: 58 },
-  { dur: 590, delay: -430, h: 82 },
-  { dur: 730, delay: -260, h: 94 },
-  { dur: 620, delay: -60, h: 70 },
-  { dur: 820, delay: -310, h: 86 },
-  { dur: 570, delay: -450, h: 64 },
-  { dur: 690, delay: -140, h: 90 },
-  { dur: 770, delay: -370, h: 76 },
-  { dur: 600, delay: -200, h: 56 },
-  { dur: 850, delay: -490, h: 84 },
-  { dur: 640, delay: -120, h: 72 },
-  { dur: 740, delay: -280, h: 92 },
-  { dur: 580, delay: -410, h: 66 },
-  { dur: 700, delay: -70, h: 80 },
-  { dur: 800, delay: -330, h: 60 },
-  { dur: 630, delay: -190, h: 86 },
-  { dur: 720, delay: -440, h: 70 },
-  { dur: 670, delay: -150, h: 50 },
-];
+const MINI_BAR_COUNT = 16;
+const BG_BAR_COUNT = 24;
 
 const fmt = (ms: number) => {
   const s = Math.floor(ms / 1000);
@@ -116,18 +75,44 @@ function Progress({ media }: { media: MediaState }) {
   );
 }
 
+function LyricsIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 6h11" />
+      <path d="M4 10h11" />
+      <path d="M4 14h7" />
+      <path d="M18 17V9l3-1" />
+      <circle cx="16" cy="17" r="2" />
+    </svg>
+  );
+}
+
 function Controls({
   media,
   extended = false,
   audioOpen = false,
+  lyricsOpen = false,
   volIcon = "volume_up",
   onToggleAudio,
+  onToggleLyrics,
 }: {
   media: MediaState;
   extended?: boolean;
   audioOpen?: boolean;
+  lyricsOpen?: boolean;
   volIcon?: string;
   onToggleAudio?: () => void;
+  onToggleLyrics?: () => void;
 }) {
   const { info, control } = media;
   const repeat = info?.repeat ?? "off";
@@ -168,6 +153,14 @@ function Controls({
             }
           >
             <Icon name={repeat === "track" ? "repeat_one" : "repeat"} size={20} />
+          </button>
+          <button
+            type="button"
+            className={`mcontrols__opt ${lyricsOpen ? "mcontrols__opt--on" : ""}`}
+            onClick={onToggleLyrics}
+            title="Live lyrics"
+          >
+            <LyricsIcon />
           </button>
           <button
             type="button"
@@ -213,6 +206,11 @@ export function MiniPlayer({
   const autoTimer = useRef<number | undefined>(undefined);
   const lastVol = useRef(-1);
   const dragging = useRef(false);
+  const { barRefs: miniBarRefs } = useVisualizerBars(
+    active && !volOpen && Boolean(info),
+    MINI_BAR_COUNT,
+    { minScale: 0.18, beatLift: 0.08 },
+  );
 
   const armAutoClose = useCallback(() => {
     window.clearTimeout(autoTimer.current);
@@ -333,14 +331,13 @@ export function MiniPlayer({
             onClick={() => setVolOpen(true)}
             title="Adjust volume"
           >
-            {VIZ_BARS.map((b, i) => (
+            {Array.from({ length: MINI_BAR_COUNT }, (_, i) => (
               <span
                 key={i}
-                className="mini__bar"
-                style={{
-                  animationDuration: `${b.dur}ms`,
-                  animationDelay: `${b.delay}ms`,
+                ref={(el) => {
+                  miniBarRefs.current[i] = el;
                 }}
+                className="mini__bar"
               />
             ))}
           </button>
@@ -348,6 +345,122 @@ export function MiniPlayer({
       </div>
       <Progress media={media} />
       <Controls media={media} />
+    </div>
+  );
+}
+
+function LyricsPanel({
+  lyrics,
+  onSeek,
+}: {
+  lyrics: LyricsState;
+  onSeek: (ms: number) => void;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const lineRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const manualUntilRef = useRef(0);
+
+  useEffect(() => {
+    manualUntilRef.current = 0;
+    lineRefs.current = [];
+    if (boxRef.current) boxRef.current.scrollTop = 0;
+  }, [lyrics.data]);
+
+  useEffect(() => {
+    if (lyrics.activeIndex < 0) return;
+    if (performance.now() < manualUntilRef.current) return;
+    const box = boxRef.current;
+    const el = lineRefs.current[lyrics.activeIndex];
+    if (!box || !el) return;
+    const target = el.offsetTop - box.clientHeight / 2 + el.clientHeight / 2;
+    box.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+  }, [lyrics.activeIndex, lyrics.data]);
+
+  if (lyrics.status === "loading" || lyrics.status === "idle") {
+    return (
+      <div className="mtab__lyrics mtab__lyrics--msg">
+        <span>Loading lyrics…</span>
+      </div>
+    );
+  }
+
+  if (lyrics.status === "error") {
+    return (
+      <div className="mtab__lyrics mtab__lyrics--msg">
+        <span>Couldn't load lyrics</span>
+        <button type="button" className="mtab__lyrics-retry" onClick={lyrics.retry}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!lyrics.data || lyrics.data.kind === "none") {
+    return (
+      <div className="mtab__lyrics mtab__lyrics--msg">
+        <span>No lyrics found</span>
+      </div>
+    );
+  }
+
+  if (lyrics.data.kind === "instrumental") {
+    return (
+      <div className="mtab__lyrics mtab__lyrics--msg">
+        <span>♪ Instrumental ♪</span>
+      </div>
+    );
+  }
+
+  if (lyrics.data.kind === "plain") {
+    return (
+      <div ref={boxRef} className="mtab__lyrics mtab__lyrics--scroll">
+        <div className="mtab__lyrics-list mtab__lyrics-list--plain">
+          {lyrics.data.lines.map((line, i) => (
+            <div key={i} className={`mtab__lyric ${line ? "mtab__lyric--plain" : "mtab__lyric--gap"}`}>
+              {line}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={boxRef}
+      className="mtab__lyrics mtab__lyrics--scroll"
+      onWheel={() => {
+        manualUntilRef.current = performance.now() + 3000;
+      }}
+      onPointerDown={() => {
+        manualUntilRef.current = performance.now() + 3000;
+      }}
+    >
+      <div className="mtab__lyrics-list">
+        {lyrics.data.lines.map((line, i) => {
+          const isActive = i === lyrics.activeIndex;
+          const isPast = lyrics.activeIndex >= 0 && i < lyrics.activeIndex;
+          return (
+            <button
+              key={`${line.timeMs}-${i}`}
+              ref={(el) => {
+                lineRefs.current[i] = el;
+              }}
+              type="button"
+              className={`mtab__lyric mtab__lyric--sync ${
+                isActive ? "mtab__lyric--active" : isPast ? "mtab__lyric--past" : ""
+              }`}
+              onClick={() => {
+                manualUntilRef.current = 0;
+                onSeek(line.timeMs);
+              }}
+              title="Jump to line"
+            >
+              {line.text}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -362,10 +475,22 @@ export function MediaTab({
 }) {
   const { info, art } = media;
   const [audioOpen, setAudioOpen] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
   const [vol, setVol] = useState<Vol | null>(null);
   const [outputs, setOutputs] = useState<AudioOutput[]>([]);
   const dragging = useRef(false);
   const lastVol = useRef(-1);
+  const lyrics = useLyrics(info, active && lyricsOpen);
+  const { barRefs: bgBarRefs, containerRef: bgVizRef } = useVisualizerBars(
+    active && Boolean(info),
+    BG_BAR_COUNT,
+    {
+      minScale: 0.1,
+      baseOpacity: info?.playing ? 0.36 : 0.24,
+      beatOpacityBoost: info?.playing ? 0.3 : 0.16,
+      beatLift: 0.12,
+    },
+  );
 
   useEffect(() => {
     if (!active) {
@@ -428,93 +553,128 @@ export function MediaTab({
   return (
     <div className="card mtab">
       <div
+        ref={bgVizRef}
         className={`mtab__bgviz ${info.playing ? "mtab__bgviz--playing" : ""}`}
         aria-hidden="true"
       >
-        {BG_VIZ_BARS.map((b, i) => (
+        {Array.from({ length: BG_BAR_COUNT }, (_, i) => (
           <span
             key={i}
-            className="mtab__bgbar"
-            style={{
-              height: `${b.h}%`,
-              animationDuration: `${b.dur}ms`,
-              animationDelay: `${b.delay}ms`,
+            ref={(el) => {
+              bgBarRefs.current[i] = el;
             }}
+            className="mtab__bgbar"
           />
         ))}
       </div>
-      <div className="mtab__main">
-        <Cover art={art} className="mtab__cover" />
-        <div className="mtab__info">
-          <div className="mtab__source">{info.source}</div>
-          <MarqueeTitle text={info.title || "—"} className="mtab__title" />
-          <div className="mtab__artist">
-            {[info.artist, info.album].filter(Boolean).join(" · ")}
-          </div>
-          <Progress media={media} />
-          <div className="mtab__times">
-            <span>{fmt(info.position_ms)}</span>
-            <span>{info.duration_ms > 0 ? fmt(info.duration_ms) : "--:--"}</span>
-          </div>
-          <Controls
-            media={media}
-            extended
-            audioOpen={audioOpen}
-            volIcon={volIcon}
-            onToggleAudio={() => setAudioOpen((v) => !v)}
-          />
-        </div>
-      </div>
-      {audioOpen && (
-        <div className="mtab__audio">
-          <div className="vb__row">
+      {lyricsOpen ? (
+        <div className="mtab__lyrics-view">
+          <div className="mtab__lyrics-head">
+            <div className="mtab__lyrics-track">
+              {art ? (
+                <img className="mtab__lyrics-art" src={art} alt="" />
+              ) : (
+                <span className="mtab__lyrics-art mtab__lyrics-art--empty">
+                  <Icon name="music_note" size={14} />
+                </span>
+              )}
+              <span className="mtab__lyrics-meta">
+                {[info.title, info.artist].filter(Boolean).join(" · ") || "—"}
+              </span>
+            </div>
             <button
               type="button"
-              className="vb__icon"
-              title="Mute"
-              onClick={() => invoke("toggle_mute").catch(() => {})}
+              className="mtab__lyrics-back"
+              onClick={() => setLyricsOpen(false)}
+              title="Back to player"
             >
-              <Icon name={volIcon} size={22} />
+              <LyricsIcon />
+              <span>Player</span>
             </button>
-            <input
-              className="vbslider"
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(volVal)}
-              style={{ ["--fill" as string]: `${volVal}%` }}
-              onPointerDown={() => (dragging.current = true)}
-              onPointerUp={() => (dragging.current = false)}
-              onChange={(e) => onVolume(Number(e.target.value))}
-            />
-            <span className="vb__val">{vol ? Math.round(volVal) : "—"}</span>
           </div>
-          <div className="vb__devices">
-            {outputs.length === 0 ? (
-              <div className="vb__na">No output devices found</div>
-            ) : (
-              outputs.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  className={`vb__dev ${d.active ? "vb__dev--active" : ""}`}
-                  onClick={() => selectOutput(d.id)}
-                >
-                  <Icon
-                    name={
-                      /headphone|headset|earphone|earbud|airpods|buds/i.test(d.name)
-                        ? "headphones"
-                        : "speaker"
-                    }
-                    size={18}
-                  />
-                  <span className="vb__devname">{d.name}</span>
-                  {d.active && <Icon name="check" size={18} />}
-                </button>
-              ))
-            )}
-          </div>
+          <LyricsPanel lyrics={lyrics} onSeek={media.seek} />
         </div>
+      ) : (
+        <>
+          <div className="mtab__main">
+            <Cover art={art} className="mtab__cover" />
+            <div className="mtab__info">
+              <div className="mtab__source">{info.source}</div>
+              <MarqueeTitle text={info.title || "—"} className="mtab__title" />
+              <div className="mtab__artist">
+                {[info.artist, info.album].filter(Boolean).join(" · ")}
+              </div>
+              <Progress media={media} />
+              <div className="mtab__times">
+                <span>{fmt(info.position_ms)}</span>
+                <span>{info.duration_ms > 0 ? fmt(info.duration_ms) : "--:--"}</span>
+              </div>
+              <Controls
+                media={media}
+                extended
+                audioOpen={audioOpen}
+                lyricsOpen={lyricsOpen}
+                volIcon={volIcon}
+                onToggleAudio={() => setAudioOpen((v) => !v)}
+                onToggleLyrics={() => {
+                  setAudioOpen(false);
+                  setLyricsOpen(true);
+                }}
+              />
+            </div>
+          </div>
+          {audioOpen && (
+            <div className="mtab__audio">
+              <div className="vb__row">
+                <button
+                  type="button"
+                  className="vb__icon"
+                  title="Mute"
+                  onClick={() => invoke("toggle_mute").catch(() => {})}
+                >
+                  <Icon name={volIcon} size={22} />
+                </button>
+                <input
+                  className="vbslider"
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(volVal)}
+                  style={{ ["--fill" as string]: `${volVal}%` }}
+                  onPointerDown={() => (dragging.current = true)}
+                  onPointerUp={() => (dragging.current = false)}
+                  onChange={(e) => onVolume(Number(e.target.value))}
+                />
+                <span className="vb__val">{vol ? Math.round(volVal) : "—"}</span>
+              </div>
+              <div className="vb__devices">
+                {outputs.length === 0 ? (
+                  <div className="vb__na">No output devices found</div>
+                ) : (
+                  outputs.map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      className={`vb__dev ${d.active ? "vb__dev--active" : ""}`}
+                      onClick={() => selectOutput(d.id)}
+                    >
+                      <Icon
+                        name={
+                          /headphone|headset|earphone|earbud|airpods|buds/i.test(d.name)
+                            ? "headphones"
+                            : "speaker"
+                        }
+                        size={18}
+                      />
+                      <span className="vb__devname">{d.name}</span>
+                      {d.active && <Icon name="check" size={18} />}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

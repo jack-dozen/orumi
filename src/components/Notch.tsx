@@ -4,6 +4,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useGpu } from "../useGpu";
 import { useMedia, type MediaState } from "../useMedia";
+import { useVisualizerSource } from "../useVisualizer";
 import { useNow } from "../useNow";
 import { useProcesses, type ProcEntry } from "../useProcesses";
 import { useStats, type Stats } from "../useStats";
@@ -692,6 +693,7 @@ export default function Notch() {
   // Fetch data only while the notch is visible and its tab uses it.
   const stats = useStats(visible && (tab === "dashboard" || tab === "system"));
   const media = useMedia(visible && (tab === "dashboard" || tab === "media"));
+  useVisualizerSource(visible && (tab === "dashboard" || tab === "media") && Boolean(media.info));
   const procs = useProcesses(visible && tab === "system");
   const gpu = useGpu(visible && (tab === "dashboard" || tab === "system"));
   const wifi = useWifi(visible && tab === "settings");

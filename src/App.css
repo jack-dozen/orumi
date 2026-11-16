@@ -676,24 +676,12 @@ button {
   transform: scaleY(0.18);
   transform-origin: center;
   opacity: 0.7;
-  transition: transform 200ms, opacity 200ms;
+  transition: opacity 200ms;
+  will-change: transform;
 }
 
 .mini__viz--playing .mini__bar {
-  animation: mini-viz 560ms ease-in-out infinite alternate;
   opacity: 0.95;
-}
-
-@keyframes mini-viz {
-  0% {
-    transform: scaleY(0.18);
-  }
-  50% {
-    transform: scaleY(0.55);
-  }
-  100% {
-    transform: scaleY(1);
-  }
 }
 
 .mini__osd {
@@ -763,6 +751,7 @@ button {
 
 .mtab__bgbar {
   flex: 1;
+  height: 92%;
   border-radius: 999px 999px 0 0;
   background: linear-gradient(
     to top,
@@ -770,25 +759,8 @@ button {
     color-mix(in srgb, var(--tertiary, var(--primary)) 40%, transparent)
   );
   transform-origin: bottom;
-  transform: scaleY(0.12);
-  transition: transform 280ms ease;
+  transform: scaleY(0.1);
   will-change: transform;
-}
-
-.mtab__bgviz--playing .mtab__bgbar {
-  animation: mtab-viz 650ms ease-in-out infinite alternate;
-}
-
-@keyframes mtab-viz {
-  0% {
-    transform: scaleY(0.18);
-  }
-  50% {
-    transform: scaleY(0.58);
-  }
-  100% {
-    transform: scaleY(1);
-  }
 }
 
 .mtab__main {
@@ -853,6 +825,181 @@ button {
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent);
+}
+
+.mtab__lyrics-view {
+  position: relative;
+  z-index: 1;
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mtab__lyrics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.mtab__lyrics-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mtab__lyrics-art {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.mtab__lyrics-art--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-container-highest);
+  color: var(--on-surface-variant);
+}
+
+.mtab__lyrics-meta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mtab__lyrics-back {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--surface-container-highest) 65%, transparent);
+  color: var(--primary);
+  transition: background 140ms, color 140ms;
+}
+
+.mtab__lyrics-back:hover {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.mtab__lyrics {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+}
+
+.mtab__lyrics--msg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+}
+
+.mtab__lyrics-retry {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--surface-container-highest) 75%, transparent);
+  color: var(--primary);
+}
+
+.mtab__lyrics-retry:hover {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.mtab__lyrics--scroll {
+  overflow-y: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 18%,
+    black 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 18%,
+    black 82%,
+    transparent 100%
+  );
+}
+
+.mtab__lyrics--scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.mtab__lyrics-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 50px 18px;
+}
+
+.mtab__lyrics-list--plain {
+  padding: 18px;
+}
+
+.mtab__lyric {
+  width: 100%;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.32;
+  color: var(--on-surface);
+  transform-origin: center;
+  transition: opacity 220ms ease, color 220ms ease, transform 220ms ease;
+}
+
+.mtab__lyric--sync {
+  padding: 4px 28px;
+  border-radius: 10px;
+  opacity: 0.58;
+  cursor: pointer;
+}
+
+.mtab__lyric--sync:hover {
+  opacity: 0.92;
+  background: color-mix(in srgb, var(--surface-container-highest) 40%, transparent);
+}
+
+.mtab__lyric--past {
+  opacity: 0.36;
+}
+
+.mtab__lyric--active {
+  opacity: 1;
+  font-weight: 700;
+  color: var(--primary);
+  transform: scale(1.1);
+}
+
+.mtab__lyric--plain {
+  opacity: 0.85;
+}
+
+.mtab__lyric--gap {
+  height: 8px;
 }
 
 /* ---------- System ---------- */

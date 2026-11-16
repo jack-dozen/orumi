@@ -21,6 +21,7 @@ mod taskbar;
 mod icons;
 mod previews;
 mod capture;
+mod visualizer;
 mod wm_ipc;
 
 use std::{
@@ -187,6 +188,7 @@ pub fn run() {
             media::get_media,
             media::media_control,
             media::media_seek,
+            visualizer::set_visualizer_active,
             apps::list_apps,
             apps::launch_app,
             actions::run_action,
@@ -245,6 +247,7 @@ pub fn run() {
             overlay::start_volume_watcher(app.handle().clone());
             brightness::start_watcher(app.handle().clone());
             osd::start();
+            visualizer::start(app.handle().clone());
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
             wallpaper::warm(app.handle().clone());
