@@ -7,6 +7,7 @@ import Icon from "./Icon";
 import WallpaperPicker from "./WallpaperPicker";
 import LauncherSettings from "./LauncherSettings";
 import AppIcon from "./AppIcon";
+import WmCheatsheet from "./WmCheatsheet";
 
 type AppEntry = { name: string; id: string };
 
@@ -35,6 +36,7 @@ type ActionDef = {
 const ACTIONS: ActionDef[] = [
   { id: "wallpaper", name: "Wallpaper", hint: "Change desktop wallpaper", glyph: "wallpaper" },
   { id: "switch_window", name: "Switch window", hint: "Switch open windows (Alt+Tab)", glyph: "apps" },
+  { id: "cheatsheet", name: "WM shortcuts", hint: "Window manager keyboard shortcuts (Win + /)", glyph: "keyboard" },
   { id: "settings", name: "Settings", hint: "ORUMI settings", glyph: "tune" },
   { id: "lock", name: "Lock", hint: "Lock the screen", glyph: "lock" },
   { id: "sleep", name: "Sleep", hint: "Put PC to sleep", glyph: "bedtime" },
@@ -76,9 +78,10 @@ export default function Launcher() {
   const [compact, setCompact] = useState(false);
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
-  const [view, setView] = useState<"list" | "wallpaper" | "settings">("list");
-  /** A view requested from outside (tray menu) before the launcher finished opening. */
-  const pendingView = useRef<"settings" | null>(null);
+  const [view, setView] = useState<"list" | "wallpaper" | "settings" | "cheatsheet">("list");
+  /** A view requested from outside (tray menu / hotkey) before the launcher finished opening. */
+  const pendingView = useRef<"settings" | "cheatsheet" | null>(null);
+  const [csFromLauncher, setCsFromLauncher] = useState(false);
   const visibleRef = useRef(false);
   visibleRef.current = visible;
   const [pickerWidth, setPickerWidth] = useState<number | null>(null);
@@ -113,18 +116,27 @@ export default function Launcher() {
     setQuery("");
     setMode("apps");
     setIndex(0);
-    setView(pendingView.current ?? "list");
+    const nextView = pendingView.current ?? "list";
     pendingView.current = null;
+    if (nextView === "cheatsheet") setCsFromLauncher(false);
+    setView(nextView);
     const id = setTimeout(() => inputRef.current?.focus(), 60);
     return () => clearTimeout(id);
   }, [visible]);
 
-  // The tray menu asks for the settings view; it may arrive before or after the panel is shown.
+  // Keep Rust's launcher window size override synced with the active view while visible.
+  useEffect(() => {
+    if (!visible) return;
+    invoke("launcher_view", { view }).catch(() => {});
+  }, [visible, view]);
+
+  // Tray menu / WM hotkey can request settings or cheatsheet before or after the panel opens.
   useEffect(() => {
     const unlisten = listen<string>("launcher-view", (e) => {
-      if (e.payload !== "settings") return;
-      if (!visibleRef.current) pendingView.current = "settings"; // applied when it opens
-      setView("settings");
+      if (e.payload !== "settings" && e.payload !== "cheatsheet") return;
+      if (!visibleRef.current) pendingView.current = e.payload;
+      if (e.payload === "cheatsheet") setCsFromLauncher(false);
+      setView(e.payload);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -232,9 +244,14 @@ export default function Launcher() {
       }
       return;
     }
-    // Settings: ORUMI's own settings open inside the launcher.
+    // Settings & WM shortcuts: open inside the launcher.
     if (mode === "actions" && item.key === "settings") {
       setView("settings");
+      return;
+    }
+    if (mode === "actions" && item.key === "cheatsheet") {
+      setCsFromLauncher(true);
+      setView("cheatsheet");
       return;
     }
     close();
@@ -279,7 +296,9 @@ export default function Launcher() {
       ? pickerWidth
       : view === "settings"
         ? (settingsWidth ?? 780)
-        : LIST_WIDTH;
+        : view === "cheatsheet"
+          ? 1040
+          : LIST_WIDTH;
 
   return (
     <div
@@ -296,6 +315,13 @@ export default function Launcher() {
         <div className="lpanel__inner" ref={innerRef}>
           {view === "settings" ? (
             <LauncherSettings onBack={() => setView("list")} onWidth={setSettingsWidth} />
+          ) : view === "cheatsheet" ? (
+            <WmCheatsheet
+              visible={visible}
+              fromLauncher={csFromLauncher}
+              onBack={() => setView("list")}
+              onClose={close}
+            />
           ) : view === "wallpaper" ? (
             <WallpaperPicker
               onBack={() => setView("list")}

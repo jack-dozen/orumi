@@ -679,10 +679,15 @@ function QuickSettings({
   );
 }
 
+type WsOsd = { active: number; total: number };
+
 export default function Notch() {
   const visible = useEdgeVisible("notch");
   const [tab, setTab] = useState<TabId>("dashboard");
   const [instantHide, setInstantHide] = useState(false);
+  const [wsOsd, setWsOsd] = useState<WsOsd | null>(null);
+  const [osdOpen, setOsdOpen] = useState(false);
+  const osdTimer = useRef<number | undefined>(undefined);
 
   // Fetch data only while the notch is visible and its tab uses it.
   const stats = useStats(visible && (tab === "dashboard" || tab === "system"));
@@ -787,13 +792,52 @@ export default function Notch() {
     emit("notch-tab-active", tab).catch(() => {});
   }, [tab]);
 
+  // Top-notch workspace OSD when switching workspaces while the full notch is closed.
+  useEffect(() => {
+    const unlisten = listen<WsOsd>("workspace-osd", (e) => {
+      setWsOsd(e.payload);
+      setOsdOpen(true);
+      window.clearTimeout(osdTimer.current);
+      osdTimer.current = window.setTimeout(() => setOsdOpen(false), 1100);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+      window.clearTimeout(osdTimer.current);
+    };
+  }, []);
+
+  // Hide the workspace OSD immediately if the user hovers/opens the full notch.
+  useEffect(() => {
+    if (visible) {
+      window.clearTimeout(osdTimer.current);
+      setOsdOpen(false);
+    }
+  }, [visible]);
+
   return (
-    <div
-      className={`notch ${visible && !instantHide ? "notch--visible" : ""} ${
-        instantHide ? "notch--instant" : ""
-      }`}
-      style={{ width, height: height ?? undefined }}
-    >
+    <>
+      {wsOsd && (
+        <div
+          className={`wsosd ${osdOpen && !visible ? "wsosd--visible" : ""}`}
+          aria-hidden="true"
+        >
+          <span className="wsosd__label">Workspace {wsOsd.active + 1}</span>
+          <span className="wsosd__dots">
+            {Array.from({ length: wsOsd.total }, (_, i) => (
+              <span
+                key={i}
+                className={`wsosd__dot ${i === wsOsd.active ? "wsosd__dot--active" : ""}`}
+              />
+            ))}
+          </span>
+        </div>
+      )}
+      <div
+        className={`notch ${visible && !instantHide ? "notch--visible" : ""} ${
+          instantHide ? "notch--instant" : ""
+        }`}
+        style={{ width, height: height ?? undefined }}
+      >
       <div className="notch__inner" ref={innerRef}>
         <div className="tabs">
           {TABS.map((t) => (
@@ -826,6 +870,7 @@ export default function Notch() {
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

@@ -5,6 +5,7 @@ import Notch from "./components/Notch";
 import Overlay from "./components/Overlay";
 import Switcher from "./components/Switcher";
 import Preview from "./components/Preview";
+import WmOverview from "./components/WmOverview";
 import { useTheme } from "./theme";
 import "./App.css";
 import Activities from "./activities/Activities";
@@ -20,6 +21,7 @@ export default function App() {
   if (label === "overlay") return <Overlay />;
   if (label === "switcher") return <Switcher />;
   if (label === "preview") return <Preview />;
+  if (label === "overview") return <WmOverview />;
   if (label === "activities") return <Activities />;
   return <Bar />;
 }

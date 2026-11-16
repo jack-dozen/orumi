@@ -2524,3 +2524,629 @@ button.vb__icon:hover {
   color: var(--on-surface-variant);
   text-align: center;
 }
+
+/* --- Bar workspace indicator --- */
+.bar__ws {
+  width: 44px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 11px 0;
+  border-radius: 22px;
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  cursor: pointer;
+  user-select: none;
+  transition: background 150ms;
+}
+
+.bar__ws:hover {
+  background: var(--surface-container-highest);
+}
+
+.bar__ws-dots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.bar__ws-dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--on-surface-variant);
+  opacity: 0.45;
+  cursor: pointer;
+  transition:
+    height 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 150ms ease,
+    background 180ms,
+    opacity 180ms;
+}
+
+.bar__ws-dot:hover {
+  opacity: 0.85;
+  transform: scale(1.15);
+}
+
+.bar__ws-dot--active {
+  height: 22px;
+  background: var(--primary);
+  opacity: 1;
+}
+
+.bar__ws-dot--active:hover {
+  opacity: 1;
+  transform: none;
+}
+
+/* --- Top-notch workspace OSD --- */
+.wsosd {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 24px 14px;
+  background: var(--surface);
+  color: var(--on-surface);
+  border-radius: 0 0 22px 22px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -100%);
+  transition:
+    transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 180ms ease;
+}
+
+.wsosd--visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.wsosd__label {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.wsosd__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wsosd__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--on-surface-variant);
+  opacity: 0.42;
+  transition:
+    width 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 180ms,
+    opacity 180ms;
+}
+
+.wsosd__dot--active {
+  width: 24px;
+  background: var(--primary);
+  opacity: 1;
+}
+
+/* --- WM keyboard shortcuts cheatsheet inside bottom launcher panel --- */
+.wmcs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wmcs__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px;
+}
+
+.wmcs__title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--on-surface);
+}
+
+.wmcs__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.wmcs__hint {
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.wmcs__empty {
+  padding: 28px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+}
+
+.wmcs__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  max-height: 490px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.wmcs__group {
+  background: var(--surface-container);
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wmcs__group-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--primary);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--surface-container-highest);
+}
+
+.wmcs__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wmcs__row {
+  display: grid;
+  grid-template-columns: minmax(145px, auto) 1fr;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.wmcs__keys {
+  display: inline-block;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wmcs__desc {
+  color: var(--on-surface-variant);
+  line-height: 1.35;
+}
+
+/* --- Left-edge Workspace Overview drawer --- */
+.wmov {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  background: var(--surface);
+  color: var(--on-surface);
+  border-radius: 0 28px 28px 0;
+  overflow: hidden;
+  user-select: none;
+  opacity: 0;
+  transform: translateX(-100%);
+  transition:
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    clip-path 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+.wmov--from-bar {
+  transform: translateX(0);
+  clip-path: inset(0 calc(100% - 64px) 0 0 round 0 28px 28px 0);
+}
+
+.wmov--visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.wmov--from-bar.wmov--visible {
+  clip-path: inset(0 0 0 0 round 0 28px 28px 0);
+}
+
+.wmov__rail {
+  width: 48px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0;
+  border-right: 1px solid var(--surface-container-high);
+}
+
+.wmov__dots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.wmov__dot-hit {
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.wmov__dot-hit:hover {
+  background: var(--surface-container-high);
+}
+
+.wmov__dot-hit--drop {
+  background: color-mix(in srgb, var(--primary) 24%, transparent);
+  transform: scale(1.12);
+}
+
+.wmov__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--on-surface-variant);
+  opacity: 0.45;
+  transition:
+    height 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 180ms,
+    opacity 180ms,
+    box-shadow 180ms;
+}
+
+.wmov__dot--empty {
+  background: transparent;
+  border: 2px solid var(--on-surface-variant);
+  box-sizing: border-box;
+  opacity: 0.4;
+}
+
+.wmov__dot--active-os {
+  opacity: 0.95;
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.wmov__dot--viewed {
+  height: 22px;
+  border: none;
+  background: var(--primary);
+  opacity: 1;
+}
+
+.wmov__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 16px 12px 14px;
+  gap: 10px;
+}
+
+.wmov__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wmov__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wmov__title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.wmov__badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+  color: var(--primary);
+}
+
+.wmov__count {
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.wmov__canvas {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 4px 0;
+}
+
+.wmov__stage {
+  position: relative;
+  width: 100%;
+  border-radius: 16px;
+  background: var(--surface-container-low);
+  overflow: hidden;
+}
+
+.wmov__stage--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wmov__empty {
+  position: absolute;
+  inset: 8px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--surface-container-highest);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+  transition: border-color 160ms, background 160ms, color 160ms;
+}
+
+.wmov__empty--drop {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.wmov__viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--primary) 35%, transparent);
+  border-bottom: 1px dashed color-mix(in srgb, var(--primary) 35%, transparent);
+  pointer-events: none;
+}
+
+.wmov__tile {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: var(--surface-container);
+  border: 2px solid transparent;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  cursor: grab;
+  transition:
+    border-color 140ms ease,
+    opacity 140ms ease,
+    box-shadow 140ms ease,
+    transform 120ms ease;
+}
+
+.wmov__tile:hover {
+  border-color: var(--surface-container-highest);
+}
+
+.wmov__tile--selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+.wmov__tile--dragging {
+  opacity: 0.32;
+  cursor: grabbing;
+}
+
+.wmov__tile-thumb {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-container-low);
+  overflow: hidden;
+}
+
+.wmov__tile-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.wmov__tile-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--surface-container-high);
+}
+
+.wmov__tile-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wmov__dropmark {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 2px solid var(--primary);
+  background: color-mix(in srgb, var(--primary) 24%, transparent);
+  pointer-events: none;
+  transition:
+    left 80ms ease,
+    top 80ms ease,
+    width 80ms ease,
+    height 80ms ease;
+}
+
+.wmov__dropmark--bar {
+  border-radius: 999px;
+  border: none;
+  background: var(--primary);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--primary) 65%, transparent);
+}
+
+.wmov__footer {
+  font-size: 11.5px;
+  color: var(--on-surface-variant);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wmov__ghost {
+  position: fixed;
+  transform: translate(12px, 12px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+  font-size: 12.5px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.wmov__ghost span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- WM settings tab inside LauncherSettings --- */
+.wmset__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wmset__badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.wmset__badge--ok {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  color: var(--primary);
+}
+
+.wmset__badge--paused {
+  background: color-mix(in srgb, #f6b93b 20%, transparent);
+  color: #f6b93b;
+}
+
+.wmset__badge--off {
+  background: var(--surface-container-highest);
+  color: var(--on-surface-variant);
+}
+
+.wmset__actions,
+.wmset__borderctl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.wmset__btn {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 10px;
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms;
+}
+
+.wmset__btn:hover {
+  background: color-mix(in srgb, var(--primary) 22%, var(--surface-container-highest));
+}
+
+.wmset__binds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 185px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 2px 0;
+}
+
+.wmset__bind-row {
+  display: grid;
+  grid-template-columns: 1fr 140px;
+  align-items: center;
+  gap: 8px;
+}
+
+.wmset__bind-label {
+  font-size: 12px;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wmset__bind-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  padding: 4px 8px;
+}
+
+.wmset__ignore {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 62px;
+}

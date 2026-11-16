@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import AppSettings, { ColorSettings } from "./Settings";
+import WmSettings from "./WmSettings";
 
-type Section = "app" | "color";
+type Section = "app" | "color" | "wm";
 
 const SECTIONS: [Section, string][] = [
   ["app", "General"],
   ["color", "Colors"],
+  ["wm", "Window Manager"],
 ];
 
 /** ORUMI's own settings, shown inside the launcher (`>setting`). Esc goes back to the list. */
@@ -19,7 +21,7 @@ export default function LauncherSettings({
   const [section, setSection] = useState<Section>("app");
 
   useEffect(() => {
-    onWidth?.(section === "color" ? 720 : 780);
+    onWidth?.(section === "color" ? 720 : section === "wm" ? 860 : 780);
   }, [section, onWidth]);
   useEffect(() => () => onWidth?.(null), [onWidth]);
 
@@ -53,6 +55,7 @@ export default function LauncherSettings({
       <div className="lsettings__body">
         {section === "app" && <AppSettings />}
         {section === "color" && <ColorSettings />}
+        {section === "wm" && <WmSettings />}
       </div>
       <div className="lsettings__hint">Esc to go back</div>
     </div>

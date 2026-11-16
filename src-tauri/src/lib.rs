@@ -36,7 +36,7 @@ use tauri::{
 };
 
 /// List of all panels.
-const PANELS: [PanelSpec; 6] = [
+const PANELS: [PanelSpec; 7] = [
     PanelSpec {
         label: "bar",
         edge: Edge::Left,
@@ -44,6 +44,14 @@ const PANELS: [PanelSpec; 6] = [
         trigger_len: None,
         hover: true,
         focus: false,
+    },
+    PanelSpec {
+        label: "overview",
+        edge: Edge::Left,
+        size: (480.0, 0.0),
+        trigger_len: None,
+        hover: false,
+        focus: true,
     },
     PanelSpec {
         label: "notch",
@@ -193,7 +201,17 @@ pub fn run() {
             overlay::list_audio_outputs,
             overlay::set_audio_output,
             brightness::get_brightness,
-            brightness::set_brightness
+            brightness::set_brightness,
+            wm_ipc::wm_cheatsheet_toggle,
+            wm_ipc::wm_cheatsheet_groups,
+            wm_ipc::wm_overview_toggle,
+            wm_ipc::wm_overview_state,
+            wm_ipc::wm_overview_drop,
+            wm_ipc::wm_overview_pick,
+            wm_ipc::wm_config_get,
+            wm_ipc::wm_config_save,
+            wm_ipc::wm_toggle_pause_cmd,
+            wm_ipc::wm_reapply_cmd
         ])
         .setup(|app| {
             let cfg = config::load(app.handle());
@@ -307,7 +325,7 @@ pub fn run() {
                     "toggle_alt_tab" => config::toggle_alt_tab(app),
                     "wm_toggle_pause" => wm_ipc::toggle_pause(),
                     "wm_reload_config" => wm_ipc::reload_config(),
-                    "wm_cheatsheet" => wm_ipc::show_cheatsheet(),
+                    "wm_cheatsheet" => wm_ipc::toggle_cheatsheet_ui(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })

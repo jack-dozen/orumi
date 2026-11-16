@@ -75,12 +75,22 @@ pub fn set_theme(json: String, app: AppHandle) {
     }
     let _ = app.emit("theme-changed", json);
     let sync_app = app.clone();
-    std::thread::spawn(move || crate::quick::sync_windows_theme_from_wallpaper(&sync_app));
+    std::thread::spawn(move || {
+        crate::quick::sync_windows_theme_from_wallpaper(&sync_app);
+        crate::wm_ipc::sync_theme_focus_border(&sync_app);
+    });
 }
 
 #[tauri::command]
 pub fn get_theme() -> Option<String> {
     THEME.lock().ok().and_then(|t| t.clone())
+}
+
+/// Extract the computed `--primary` hex color (`#rrggbb`) from the latest theme tokens.
+pub fn current_primary() -> Option<String> {
+    let json = get_theme()?;
+    let map: std::collections::HashMap<String, String> = serde_json::from_str(&json).ok()?;
+    map.get("--primary").cloned()
 }
 
 /// Small sample of active wallpaper pixels (RGBA, base64) for extracting dominant colors.

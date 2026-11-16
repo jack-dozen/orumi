@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import type { Workspace } from "../activities/useActivities";
 import { useBattery, type BatteryStatus } from "../useBattery";
 import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
@@ -145,6 +152,73 @@ export default function Bar() {
     invoke("preview_close_soon").catch(() => {});
   };
 
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const wsWheel = useRef({ acc: 0, lastAt: 0, locked: false, lockedAt: 0, inFlight: false });
+
+  useEffect(() => {
+    const loadWs = () => {
+      invoke<Workspace[]>("ws_list")
+        .then(setWorkspaces)
+        .catch(() => {});
+    };
+    loadWs();
+    const unlistenWs = listen("workspaces-changed", loadWs);
+    return () => {
+      unlistenWs.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    invoke<Workspace[]>("ws_list")
+      .then(setWorkspaces)
+      .catch(() => {});
+  }, [visible]);
+
+  const activeWsIdx = Math.max(0, workspaces.findIndex((w) => w.active));
+  const wsDotsCount = Math.max(workspaces.length, activeWsIdx + 1, 1);
+
+  const onWsWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (workspaces.length <= 1) return;
+    const now = performance.now();
+    const s = wsWheel.current;
+    const gap = now - s.lastAt;
+    s.lastAt = now;
+
+    // Require a brief pause between gestures so touchpad inertia steps at most one workspace per flick.
+    if (s.locked) {
+      if (gap > 110 && now >= s.lockedAt + 180) {
+        s.locked = false;
+        s.acc = 0;
+      } else {
+        return;
+      }
+    }
+
+    if (gap > 110) s.acc = 0;
+    const dy = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    s.acc += dy;
+    if (Math.abs(s.acc) < 40) return;
+
+    const dir = s.acc > 0 ? 1 : -1;
+    s.acc = 0;
+    s.locked = true;
+    s.lockedAt = now;
+
+    const targetIdx = Math.max(0, Math.min(workspaces.length - 1, activeWsIdx + dir));
+    if (targetIdx === activeWsIdx || s.inFlight) return;
+    const target = workspaces[targetIdx];
+    if (!target) return;
+
+    s.inFlight = true;
+    invoke("ws_switch", { id: target.id })
+      .catch(() => {})
+      .finally(() => {
+        s.inFlight = false;
+      });
+  };
+
   const wifiOn = !!wifi?.adapter && wifi.connected;
   const wifiTitle = !wifi
     ? "WiFi"
@@ -170,11 +244,31 @@ export default function Bar() {
           </svg>
         </div>
         <div
-          className="bar__item"
-          title="Workspaces"
-          onClick={() => invoke("activities_toggle").catch(() => {})}
+          className="bar__ws"
+          title="Workspaces · Click dot to switch · Click area for overview"
+          onClick={() => invoke("wm_overview_toggle", { source: "bar" }).catch(() => {})}
+          onWheel={onWsWheel}
         >
-          <Icon name="more_vert" size={22} />
+          <span className="bar__ws-dots">
+            {Array.from({ length: wsDotsCount }, (_, i) => {
+              const target = workspaces[i];
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  className={`bar__ws-dot ${i === activeWsIdx ? "bar__ws-dot--active" : ""}`}
+                  title={`Workspace ${i + 1}`}
+                  aria-label={`Workspace ${i + 1}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (target && i !== activeWsIdx) {
+                      invoke("ws_switch", { id: target.id }).catch(() => {});
+                    }
+                  }}
+                />
+              );
+            })}
+          </span>
         </div>
       </div>
 

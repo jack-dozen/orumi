@@ -29,6 +29,23 @@
       },
       {
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
+        "label": "overview",
+        "title": "edgeshell-overview",
+        "width": 480,
+        "height": 800,
+        "x": 0,
+        "y": 0,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false,
+        "dragDropEnabled": false
+      },
+      {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
         "label": "notch",
         "title": "edgeshell-notch",
         "width": 820,

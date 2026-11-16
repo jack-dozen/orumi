@@ -114,6 +114,20 @@ static SIZE_OVERRIDE: Mutex<Vec<(&'static str, (f64, f64))>> = Mutex::new(Vec::n
 
 /// Launcher size (design units) while showing the wallpaper picker: wide and short.
 const WALLPAPER_VIEW_SIZE: (f64, f64) = (1040.0, 300.0);
+/// Launcher size (design units) while showing the WM keyboard shortcuts cheatsheet.
+const CHEATSHEET_VIEW_SIZE: (f64, f64) = (1120.0, 620.0);
+static LAUNCHER_CHEATSHEET: AtomicBool = AtomicBool::new(false);
+
+pub fn launcher_is_cheatsheet() -> bool {
+    LAUNCHER_CHEATSHEET.load(Ordering::Relaxed)
+}
+
+fn reset_launcher_override(label: &str) {
+    if label == "launcher" {
+        LAUNCHER_CHEATSHEET.store(false, Ordering::Relaxed);
+        set_size_override("launcher", None);
+    }
+}
 
 fn size_override(label: &str) -> Option<(f64, f64)> {
     SIZE_OVERRIDE
@@ -170,10 +184,16 @@ pub fn set_hit_rect(label: &'static str, rect: Option<(f64, f64, f64, f64)>) {
     }
 }
 
-/// Launcher view changed: "wallpaper" expands it; otherwise, restore its usual size.
+/// Launcher view changed: "wallpaper" or "cheatsheet" overrides panel size; otherwise restore default size.
 #[tauri::command]
 pub fn launcher_view(view: String, app: AppHandle) {
-    set_size_override("launcher", (view == "wallpaper").then_some(WALLPAPER_VIEW_SIZE));
+    LAUNCHER_CHEATSHEET.store(view == "cheatsheet", Ordering::Relaxed);
+    let next = match view.as_str() {
+        "wallpaper" => Some(WALLPAPER_VIEW_SIZE),
+        "cheatsheet" => Some(CHEATSHEET_VIEW_SIZE),
+        _ => None,
+    };
+    set_size_override("launcher", next);
     let a = app.clone();
     let _ = app.run_on_main_thread(move || crate::place_panel(&a, "launcher"));
 }
@@ -206,7 +226,10 @@ impl Panels {
             flag_set(&TRANSIENT, key, false);
             flag_set(&HELD, key, false);
             flag_set(&DISMISSED, key, false);
-            flag.fetch_xor(true, Ordering::Relaxed);
+            let was_open = flag.fetch_xor(true, Ordering::Relaxed);
+            if was_open {
+                reset_launcher_override(key);
+            }
             wake();
         }
     }
@@ -217,6 +240,7 @@ impl Panels {
                 flag_set(&TRANSIENT, key, false);
                 flag_set(&HELD, key, false);
                 flag_set(&DISMISSED, key, true);
+                reset_launcher_override(key);
             } else {
                 flag_set(&DISMISSED, key, false);
             }
@@ -352,8 +376,8 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
             (win, trig)
         }
         Edge::Bottom => {
-            let w = size.0 * u;
-            let h = size.1 * u;
+            let w = (size.0 * u).min(mw);
+            let h = (size.1 * u).min(mh);
             let win = Rect { x: mx + (mw - w) / 2.0, y: my + mh - h, w, h };
             let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
             let trig = Rect {
@@ -510,18 +534,23 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
                 let panels = app_handle.state::<Panels>();
                 if !panels.is_open("launcher")
                     && !panels.is_open("overlay")
+                    && !panels.is_open("overview")
                     && !crate::activities::is_open()
                 {
                     crate::winlist::restore_external_foreground_if_ours();
                 }
             }
             crate::altswitch::ensure_hook(if show { "panel opened" } else { "panel closed" });
-            if show && spec.label == "launcher" {
-                // Launcher.tsx focuses its <input> after 60 ms; refresh the hook once more afterward.
-                thread::spawn(|| {
-                    thread::sleep(Duration::from_millis(80));
-                    crate::altswitch::ensure_hook("launcher input focused");
-                });
+            if spec.focus {
+                crate::wm_ipc::ensure_hook();
+                if show {
+                    // WebView2 focus settles slightly asynchronously after `set_focus()`.
+                    thread::spawn(|| {
+                        thread::sleep(Duration::from_millis(80));
+                        crate::altswitch::ensure_hook("panel focus settled");
+                        crate::wm_ipc::ensure_hook();
+                    });
+                }
             }
         }
         if DEBUG_SHOW && show && spec.label == "switcher" {
@@ -631,7 +660,24 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     .map(|(x, y, w, h)| Rect { x, y, w, h }.contains(cursor.x, cursor.y))
                     .unwrap_or(false);
 
+            let overview_open = panels
+                .iter()
+                .any(|q| q.spec.label == "overview" && (q.visible || q.pinned.load(Ordering::Relaxed)));
+
             for p in panels.iter_mut() {
+                if p.spec.label == "bar" && overview_open {
+                    p.pinned.store(false, Ordering::Relaxed);
+                    flag_set(&TRANSIENT, "bar", false);
+                    flag_set(&HELD, "bar", false);
+                    p.armed = false;
+                    p.inside_since = None;
+                    p.outside_since = None;
+                    if p.visible {
+                        p.visible = false;
+                        set_visible(&app, &p.window, &p.event, false, &p.spec);
+                    }
+                    continue;
+                }
                 let pinned = p.pinned.load(Ordering::Relaxed);
 
                 // Panel without hover: follow the flag only. The launcher and overlay may also be
