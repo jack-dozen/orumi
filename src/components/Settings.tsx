@@ -346,6 +346,22 @@ export default function AppSettings() {
             </button>
           </div>
         </Row>
+        <Row label="Startup animation">
+          <div className="segmented segmented--small">
+            <button
+              className={(cfg.startup_animation ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ startup_animation: true })}
+            >
+              On
+            </button>
+            <button
+              className={!(cfg.startup_animation ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ startup_animation: false })}
+            >
+              Off
+            </button>
+          </div>
+        </Row>
         <div className="appset__title">Wallpaper</div>
         <WallpaperSettings />
       </div>

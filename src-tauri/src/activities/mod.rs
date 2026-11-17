@@ -12,6 +12,7 @@ mod winkey;
 mod workspaces;
 
 use std::{
+    ffi::c_void,
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::Duration,
@@ -36,6 +37,10 @@ const PANEL_FRACTION: (f64, f64) = (0.92, 0.84);
 
 /// true = Activities is open (or preparing a snapshot to open).
 static OPEN: AtomicBool = AtomicBool::new(false);
+/// true = the borrowed startup splash is currently playing on the Activities window.
+static STARTUP_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Ensures the startup splash runs at most once per app launch.
+static STARTUP_DONE: AtomicBool = AtomicBool::new(false);
 
 /// Called once from `setup` in lib.rs.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
@@ -79,6 +84,9 @@ pub fn show(app: &AppHandle) {
     if OPEN.swap(true, Ordering::SeqCst) {
         return;
     }
+    if STARTUP_ACTIVE.swap(false, Ordering::SeqCst) {
+        let _ = app.emit_to(LABEL, "activities-startup-abort", ());
+    }
     let app = app.clone();
     thread::spawn(move || {
         let windows = thumbs::snapshot(&app, winlist::collect_all_windows());
@@ -94,6 +102,8 @@ pub fn show(app: &AppHandle) {
                 OPEN.store(false, Ordering::SeqCst);
                 return;
             };
+            let _ = window.set_ignore_cursor_events(false);
+            crate::edge::set_activatable(&window, true);
             place_panel(&window);
             let _ = window.show();
             let _ = window.set_always_on_top(true);
@@ -155,7 +165,85 @@ fn place_panel(window: &WebviewWindow) {
     let _ = crate::edge::place(window, &spec);
 }
 
+/// Temporarily expand the Activities window across the primary monitor in one Win32 call
+/// so the startup splash can animate from the screen center to all four edges.
+fn place_fullscreen(window: &WebviewWindow) {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER},
+    };
+
+    let _ = window.set_zoom(crate::edge::ui_scale());
+    let Ok(Some(m)) = window.primary_monitor() else {
+        return;
+    };
+    let Ok(raw) = window.hwnd() else {
+        return;
+    };
+    let hwnd = HWND(raw.0 as isize as *mut c_void);
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            m.position().x,
+            m.position().y,
+            m.size().width as i32,
+            m.size().height as i32,
+            SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
 // ---------- Commands for React ----------
+
+#[tauri::command]
+pub fn activities_startup_begin(app: AppHandle) -> bool {
+    if !crate::config::current(&app).startup_animation {
+        STARTUP_DONE.store(true, Ordering::SeqCst);
+        return false;
+    }
+    if OPEN.load(Ordering::SeqCst) || STARTUP_DONE.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    STARTUP_ACTIVE.store(true, Ordering::SeqCst);
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if OPEN.load(Ordering::SeqCst) || !STARTUP_ACTIVE.load(Ordering::SeqCst) {
+            STARTUP_ACTIVE.store(false, Ordering::SeqCst);
+            return;
+        }
+        let Some(window) = a.get_webview_window(LABEL) else {
+            STARTUP_ACTIVE.store(false, Ordering::SeqCst);
+            return;
+        };
+        place_fullscreen(&window);
+        crate::edge::set_activatable(&window, false);
+        let _ = window.set_ignore_cursor_events(true);
+        let _ = window.set_always_on_top(true);
+        let _ = window.show();
+        let _ = a.emit_to(LABEL, "activities-startup-go", ());
+    });
+    true
+}
+
+#[tauri::command]
+pub fn activities_startup_end(app: AppHandle) {
+    if !STARTUP_ACTIVE.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        // If real Activities opened right as the splash finished, leave the window visible.
+        if OPEN.load(Ordering::SeqCst) {
+            return;
+        }
+        if let Some(window) = a.get_webview_window(LABEL) {
+            let _ = window.hide();
+            let _ = window.set_ignore_cursor_events(false);
+            crate::edge::set_activatable(&window, true);
+        }
+    });
+}
 
 #[tauri::command]
 pub fn activities_toggle(app: AppHandle) {

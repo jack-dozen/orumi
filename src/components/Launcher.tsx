@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useConfig } from "../useConfig";
@@ -88,6 +88,14 @@ export default function Launcher() {
   const [settingsWidth, setSettingsWidth] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const openedAt = useRef(0);
+  const activatedAt = useRef(0);
+  const focusOnOpen = useRef(true);
+
+  const activateLauncher = useCallback(() => {
+    activatedAt.current = Date.now();
+    invoke("panel_activation", { label: "launcher", enable: true }).catch(() => {});
+    window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 20);
+  }, []);
 
   // The panel fits its contents: height is measured from content; width is set by the view.
   const innerRef = useRef<HTMLDivElement>(null);
@@ -109,25 +117,64 @@ export default function Launcher() {
       .catch(() => {});
   }, []);
 
-  // Reset and focus the search box each time the launcher opens.
+  // Track whether this open should immediately focus the search box (hotkey/tray) or wait for click (hover).
   useEffect(() => {
-    if (!visible) return;
-    openedAt.current = Date.now();
-    setQuery("");
-    setMode("apps");
-    setIndex(0);
-    const nextView = pendingView.current ?? "list";
-    pendingView.current = null;
-    if (nextView === "cheatsheet") setCsFromLauncher(false);
-    setView(nextView);
-    const id = setTimeout(() => inputRef.current?.focus(), 60);
-    return () => clearTimeout(id);
+    const unlisten = listen<boolean>("launcher-focus", (e) => {
+      focusOnOpen.current = e.payload;
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Prepare clean initial state as soon as Rust requests open (2 frames before `visible` flips)
+  // so height/compact layout settles off-screen before the CSS slide-up begins.
+  useEffect(() => {
+    const unlisten = listen<boolean>("edge-visible:launcher", (e) => {
+      if (!e.payload) return;
+      openedAt.current = Date.now();
+      setQuery("");
+      setMode("apps");
+      setIndex(0);
+      const nextView = pendingView.current ?? "list";
+      pendingView.current = null;
+      if (nextView === "cheatsheet") setCsFromLauncher(false);
+      setView(nextView);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Focus the search input as soon as the panel becomes visible (if opened with focus),
+  // and reset back to the default view after the close slide finishes.
+  useEffect(() => {
+    if (!visible) {
+      const id = window.setTimeout(() => {
+        setView("list");
+        setPickerWidth(null);
+        setSettingsWidth(null);
+      }, 320);
+      return () => window.clearTimeout(id);
+    }
+    if (!focusOnOpen.current) {
+      inputRef.current?.blur();
+      return;
+    }
+    inputRef.current?.focus({ preventScroll: true });
   }, [visible]);
 
-  // Keep Rust's launcher window size override synced with the active view while visible.
+  // Keep Rust's launcher window size override synced when switching to expanded views.
+  const prevView = useRef(view);
   useEffect(() => {
-    if (!visible) return;
-    invoke("launcher_view", { view }).catch(() => {});
+    if (!visible) {
+      prevView.current = view;
+      return;
+    }
+    if (view !== "list" || prevView.current !== "list") {
+      invoke("launcher_view", { view }).catch(() => {});
+    }
+    prevView.current = view;
   }, [visible, view]);
 
   // Tray menu / WM hotkey can request settings or cheatsheet before or after the panel opens.
@@ -151,24 +198,26 @@ export default function Launcher() {
     };
   }, []);
 
-  // Returning from the wallpaper carousel remounts the search box, so focus it again.
+  // Returning from the wallpaper carousel remounts the search box, so focus it again if active.
   useEffect(() => {
-    if (view !== "list") return;
-    const id = setTimeout(() => inputRef.current?.focus(), 30);
+    if (!visible || view !== "list" || !document.hasFocus()) return;
+    const id = setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 30);
     return () => clearTimeout(id);
-  }, [view]);
+  }, [visible, view]);
 
   // Outside click on the launcher (window loses focus) = close.
   useEffect(() => {
+    if (!visible) return;
     const onBlur = () => {
       // The native color dialog makes the window lose focus; keep the launcher open during it.
       const el = document.activeElement as HTMLInputElement | null;
       if (el?.tagName === "INPUT" && el.type === "color") return;
-      if (Date.now() - openedAt.current > 400) close();
+      const since = Date.now() - Math.max(openedAt.current, activatedAt.current);
+      if (since > 250) close();
     };
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
-  }, []);
+  }, [visible]);
 
   // Cancel confirmation if the selection, mode, or text changes.
   useEffect(() => {
@@ -300,6 +349,11 @@ export default function Launcher() {
           ? 1040
           : LIST_WIDTH;
 
+  useLayoutEffect(() => {
+    if (height === null) return;
+    invoke("launcher_set_size", { width, height }).catch(() => {});
+  }, [width, height]);
+
   return (
     <div
       className="lroot"
@@ -364,7 +418,7 @@ export default function Launcher() {
                 </div>
               )}
 
-              <div className="lsearchbar">
+              <div className="lsearchbar" onPointerDown={activateLauncher}>
                 <button
                   type="button"
                   className={`lsearch__mode ${mode === "actions" ? "lsearch__mode--actions" : ""}`}

@@ -97,6 +97,8 @@ pub struct Config {
     pub windows_theme_mode: String,
     /// Launch ORUMI automatically when signing in to Windows (HKCU\...\Run).
     pub autostart: bool,
+    /// Play the fullscreen water-drop welcome animation once at app startup.
+    pub startup_animation: bool,
     /// Enable custom notification reader & Notch notification tab.
     pub notifications_enabled: bool,
     /// Show incoming notifications as a top-notch popup when Notch is closed.
@@ -124,6 +126,7 @@ impl Default for Config {
             search_placeholder: String::new(),
             windows_theme_mode: "manual".into(),
             autostart: false,
+            startup_animation: true,
             notifications_enabled: true,
             notifications_popup: true,
             notifications_suppress_native: true,

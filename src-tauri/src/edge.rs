@@ -117,6 +117,8 @@ const WALLPAPER_VIEW_SIZE: (f64, f64) = (1040.0, 300.0);
 /// Launcher size (design units) while showing the WM keyboard shortcuts cheatsheet.
 const CHEATSHEET_VIEW_SIZE: (f64, f64) = (1120.0, 620.0);
 static LAUNCHER_CHEATSHEET: AtomicBool = AtomicBool::new(false);
+/// true = the launcher was opened by bottom-edge hover (no initial focus, auto-closes on leave).
+static LAUNCHER_HOVER: AtomicBool = AtomicBool::new(false);
 
 pub fn launcher_is_cheatsheet() -> bool {
     LAUNCHER_CHEATSHEET.load(Ordering::Relaxed)
@@ -198,6 +200,17 @@ pub fn launcher_view(view: String, app: AppHandle) {
     let _ = app.run_on_main_thread(move || crate::place_panel(&a, "launcher"));
 }
 
+/// Active launcher card size (width, height) in design units (used for hover auto-close hit-test).
+static LAUNCHER_SIZE: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+#[tauri::command]
+pub fn launcher_set_size(width: f64, height: f64) {
+    if let Ok(mut s) = LAUNCHER_SIZE.lock() {
+        *s = (width > 0.0 && height > 0.0).then_some((width, height));
+    }
+    wake();
+}
+
 /// Active notch content size (width, height) in design units (used to size its hover hit area).
 static NOTCH_SIZE: Mutex<Option<(Option<f64>, Option<f64>)>> = Mutex::new(None);
 
@@ -234,6 +247,9 @@ impl Panels {
     /// Hotkey and tray: stays open until closed again.
     pub fn toggle(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
+            if *key == "launcher" {
+                LAUNCHER_HOVER.store(false, Ordering::Relaxed);
+            }
             flag_set(&TRANSIENT, key, false);
             flag_set(&HELD, key, false);
             flag_set(&DISMISSED, key, false);
@@ -247,6 +263,9 @@ impl Panels {
 
     pub fn set(&self, label: &str, open: bool) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
+            if *key == "launcher" {
+                LAUNCHER_HOVER.store(false, Ordering::Relaxed);
+            }
             if !open {
                 flag_set(&TRANSIENT, key, false);
                 flag_set(&HELD, key, false);
@@ -302,7 +321,11 @@ pub fn toggle_panel(label: String, panels: State<'_, Panels>) {
     if panels.is_open(&label) {
         panels.set(&label, false);
     } else if !panels.recently_closed(&label, Duration::from_millis(350)) {
-        panels.set_transient(&label);
+        if label == "launcher" {
+            panels.set("launcher", true);
+        } else {
+            panels.set_transient(&label);
+        }
     }
 }
 
@@ -316,7 +339,7 @@ pub fn set_panel(label: String, open: bool, panels: State<'_, Panels>) {
     }
 }
 
-/// Temporarily allow the bar/notch to take keyboard focus (for typing inside it).
+/// Temporarily allow the bar/notch/launcher to take keyboard focus (for typing inside it).
 /// enable = false returns it to "does not take focus" mode.
 #[tauri::command]
 pub fn panel_activation(
@@ -325,7 +348,7 @@ pub fn panel_activation(
     app: AppHandle,
     panels: State<'_, Panels>,
 ) {
-    if label != "bar" && label != "notch" {
+    if label != "bar" && label != "notch" && label != "launcher" {
         return;
     }
     if label == "notch" {
@@ -333,6 +356,10 @@ pub fn panel_activation(
     }
     if let Some((key, _)) = panels.0.get_key_value(label.as_str()) {
         flag_set(&HELD, key, enable);
+        if *key == "launcher" && enable {
+            flag_set(&TRANSIENT, key, false);
+            LAUNCHER_HOVER.store(false, Ordering::Relaxed);
+        }
     }
     if let Some(window) = app.get_webview_window(&label) {
         set_activatable(&window, enable);
@@ -532,8 +559,18 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
                 let _ = window.set_always_on_top(true);
             }
         }
+        let launcher_focus = if spec.label == "launcher" {
+            let take = show && !LAUNCHER_HOVER.load(Ordering::Relaxed);
+            set_activatable(&window, take);
+            if show {
+                let _ = window.emit("launcher-focus", take);
+            }
+            take
+        } else {
+            spec.focus
+        };
         let _ = window.set_ignore_cursor_events(!show);
-        if show && spec.focus {
+        if show && launcher_focus {
             let _ = window.set_focus();
         }
         let _ = window.emit(event.as_str(), show);
@@ -552,7 +589,7 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
                 }
             }
             crate::altswitch::ensure_hook(if show { "panel opened" } else { "panel closed" });
-            if spec.focus {
+            if launcher_focus {
                 crate::wm_ipc::ensure_hook();
                 if show {
                     // WebView2 focus settles slightly asynchronously after `set_focus()`.
@@ -577,6 +614,19 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
 fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
     if let Some((x, y, w, h)) = hit_rect(label) {
         return Rect { x, y, w, h };
+    }
+    if label == "launcher" {
+        if let Ok(ls) = LAUNCHER_SIZE.lock() {
+            if let Some((cw, ch)) = *ls {
+                let u = scale * ui_scale();
+                let actual_w = (cw * u).min(win.w);
+                let actual_h = (ch * u).min(win.h);
+                win.x += (win.w - actual_w) / 2.0;
+                win.y += win.h - actual_h;
+                win.w = actual_w;
+                win.h = actual_h;
+            }
+        }
     }
     if label == "notch" {
         if let Ok(ns) = NOTCH_SIZE.lock() {
@@ -716,7 +766,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     }
                     continue;
                 }
-                let pinned = p.pinned.load(Ordering::Relaxed);
+                let mut pinned = p.pinned.load(Ordering::Relaxed);
 
                 // Panel without hover: follow the flag only. The launcher and overlay may also be
                 // opened by dwelling at their screen edge.
@@ -734,7 +784,13 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                                         if p.spec.label == "overlay" {
                                             crate::overlay::hover_open(&app);
                                         } else {
-                                            app.state::<Panels>().set("launcher", true);
+                                            // Hover-opened launcher starts without focus and auto-closes
+                                            // when the cursor leaves unless the user clicks to type.
+                                            LAUNCHER_HOVER.store(true, Ordering::Relaxed);
+                                            flag_set(&TRANSIENT, "launcher", true);
+                                            flag_set(&DISMISSED, "launcher", false);
+                                            p.pinned.store(true, Ordering::Relaxed);
+                                            pinned = true;
                                         }
                                     }
                                 } else {
@@ -745,12 +801,13 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                                 p.inside_since = None;
                             }
                         }
-                        // Hover-opened overlay hides again once the cursor leaves it.
+                        // Hover-opened overlay/launcher hides again once the cursor leaves it (unless held).
                         if pinned
-                            && p.spec.label == "overlay"
-                            && flag_has(&TRANSIENT, "overlay")
+                            && flag_has(&TRANSIENT, p.spec.label)
+                            && !flag_has(&HELD, p.spec.label)
                         {
-                            if win_rect.contains(cursor.x, cursor.y) {
+                            let hit = panel_hit_rect(p.spec.label, win_rect, m.4);
+                            if hit.contains(cursor.x, cursor.y) {
                                 p.pin_entered = true;
                                 p.outside_since = None;
                             } else {
@@ -758,7 +815,8 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                                 let limit = if p.pin_entered { HIDE_DELAY } else { PIN_GRACE };
                                 if since.elapsed() >= limit {
                                     p.pinned.store(false, Ordering::Relaxed);
-                                    flag_set(&TRANSIENT, "overlay", false);
+                                    flag_set(&TRANSIENT, p.spec.label, false);
+                                    pinned = false;
                                 }
                             }
                         }
@@ -767,6 +825,11 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         p.visible = pinned;
                         if !pinned {
                             p.armed = false;
+                            flag_set(&HELD, p.spec.label, false);
+                            flag_set(&TRANSIENT, p.spec.label, false);
+                            if p.spec.label == "launcher" {
+                                LAUNCHER_HOVER.store(false, Ordering::Relaxed);
+                            }
                         }
                         set_visible(&app, &p.window, &p.event, pinned, &p.spec);
                     }

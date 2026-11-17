@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import Icon from "../components/Icon";
 import AppIcon from "../components/AppIcon";
 import { useConfig } from "../useConfig";
+import StartupSplash from "./StartupSplash";
 import {
   closeActivities,
   iconTarget,
@@ -112,6 +114,7 @@ export default function Activities() {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [cols, setCols] = useState(() => colsFor(window.innerWidth));
   const [activeLetter, setActiveLetter] = useState("#");
+  const [splash, setSplash] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -121,12 +124,60 @@ export default function Activities() {
   // Reset the display each time it opens.
   useEffect(() => {
     if (openCount === 0) return;
+    setSplash(false);
     openedAt.current = Date.now();
     setView("ws");
     setQuery("");
     setSel(0);
     setPickedWs(null);
   }, [openCount]);
+
+  // Trigger the one-shot fullscreen water-drop splash once theme tokens are ready.
+  useEffect(() => {
+    let cancelled = false;
+    let started = false;
+
+    const trigger = () => {
+      if (cancelled || started) return;
+      started = true;
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (!cancelled) invoke("activities_startup_begin").catch(() => {});
+        }),
+      );
+    };
+
+    const unGo = listen("activities-startup-go", () => {
+      if (cancelled) return;
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (!cancelled) setSplash(true);
+        }),
+      );
+    });
+    const unAbort = listen("activities-startup-abort", () => setSplash(false));
+    const unTheme = listen("theme-changed", trigger);
+
+    invoke<string | null>("get_theme")
+      .then((json) => {
+        if (json) trigger();
+      })
+      .catch(() => {});
+
+    const fallback = window.setTimeout(trigger, 650);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallback);
+      unGo.then((fn) => fn());
+      unAbort.then((fn) => fn());
+      unTheme.then((fn) => fn());
+    };
+  }, []);
+
+  const finishSplash = useCallback(() => {
+    setSplash(false);
+    invoke("activities_startup_end").catch(() => {});
+  }, []);
 
   useEffect(() => {
     const onResize = () => setCols(colsFor(window.innerWidth));
@@ -136,12 +187,13 @@ export default function Activities() {
 
   // Outside click / window loses focus = close.
   useEffect(() => {
+    if (!visible) return;
     const onBlur = () => {
       if (Date.now() - openedAt.current > BLUR_GRACE_MS) closeActivities();
     };
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
-  }, []);
+  }, [visible]);
 
   // Focus the search box when entering the app view.
   useEffect(() => {
@@ -350,6 +402,10 @@ export default function Activities() {
     (e.target as HTMLElement).dataset.bg !== undefined;
 
   // ---------- View ----------
+
+  if (splash && !visible) {
+    return <StartupSplash onDone={finishSplash} />;
+  }
 
   return (
     <div

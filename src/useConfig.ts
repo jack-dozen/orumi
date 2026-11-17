@@ -29,6 +29,7 @@ export type Config = {
   search_placeholder: string;
   windows_theme_mode: "manual" | "auto";
   autostart: boolean;
+  startup_animation: boolean;
   notifications_enabled: boolean;
   notifications_popup: boolean;
   notifications_suppress_native: boolean;
