@@ -2488,6 +2488,537 @@ button {
   text-align: right;
 }
 
+/* Split tile for Wi-Fi / Bluetooth (left = toggle, right = open device/network list) */
+.qtile--split {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.qtile--split:hover:not(:disabled) {
+  background: var(--surface-container-high);
+}
+
+.qtile--split.qtile--on:hover:not(:disabled) {
+  background: var(--primary-container);
+}
+
+.qtile__main {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px 10px 12px;
+  color: inherit;
+  text-align: left;
+  transition: background 120ms;
+}
+
+.qtile__main:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.qtile__arrow {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  align-self: stretch;
+  flex: none;
+  color: inherit;
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
+  transition: background 120ms;
+}
+
+.qtile__arrow:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Quick Settings sub-views (Wi-Fi networks / Bluetooth devices) */
+.qsub {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qsub__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 4px;
+}
+
+.qsub__back {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--on-surface);
+  transition: background 120ms;
+}
+
+.qsub__back:hover {
+  background: var(--surface-container-highest);
+}
+
+.qsub__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--on-surface);
+}
+
+.qsub__head-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qsub__iconbtn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--on-surface-variant);
+  transition: background 120ms, color 120ms;
+}
+
+.qsub__iconbtn:hover:not(:disabled) {
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+}
+
+.qsub__iconbtn--spin .icon {
+  animation: qspin 900ms linear infinite;
+}
+
+@keyframes qspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.qswitch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface-container-highest);
+  border: 1px solid var(--outline-variant);
+  padding: 2px;
+  transition: background 150ms, border-color 150ms;
+}
+
+.qswitch--on {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.qswitch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.qswitch__thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--on-surface-variant);
+  transition: transform 150ms, background 150ms;
+}
+
+.qswitch--on .qswitch__thumb {
+  transform: translateX(18px);
+  background: var(--on-primary);
+}
+
+.qsub__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding-right: 2px;
+}
+
+.qsub__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 16px;
+  border-radius: 16px;
+  background: var(--surface-container-high);
+  color: var(--on-surface-variant);
+  font-size: 13px;
+}
+
+.qsub__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+/* Wi-Fi network row */
+.qnet {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: var(--surface-container-high);
+  transition: background 120ms;
+}
+
+.qnet--connected {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.qnet--open:not(.qnet--connected) {
+  background: var(--surface-container-highest);
+}
+
+.qnet__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  color: inherit;
+  text-align: left;
+  border-radius: 14px;
+}
+
+.qnet__row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.qnet__icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+
+.qnet__lock {
+  position: absolute;
+  right: -2px;
+  bottom: -1px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--on-surface);
+}
+
+.qnet__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.qnet__name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qnet__sub {
+  font-size: 11px;
+  opacity: 0.78;
+}
+
+.qnet__pct {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+  flex: none;
+}
+
+.qnet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 12px 12px 50px;
+}
+
+.qnet__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qnet__pw-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.qinput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 34px 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--outline-variant);
+  background: var(--surface);
+  color: var(--on-surface);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.qinput:focus {
+  border-color: var(--primary);
+}
+
+.qnet__eye {
+  position: absolute;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--on-surface-variant);
+}
+
+.qnet__eye:hover {
+  color: var(--on-surface);
+}
+
+.qcheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: inherit;
+  opacity: 0.88;
+  cursor: pointer;
+}
+
+.qcheck input {
+  accent-color: var(--primary);
+}
+
+.qnet__btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qnet__warn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.qnet__err {
+  font-size: 11.5px;
+  color: var(--error);
+}
+
+.qnet__err--banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--error-container);
+  color: var(--on-error-container, var(--error));
+}
+
+.qbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+  transition: background 120ms, opacity 120ms;
+}
+
+.qbtn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.qbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.qbtn--sm {
+  padding: 5px 10px;
+  font-size: 11.5px;
+}
+
+.qbtn--primary {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.qbtn--ghost {
+  background: transparent;
+  color: inherit;
+  opacity: 0.82;
+}
+
+.qbtn--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 1;
+}
+
+/* Bluetooth device rows */
+.qbt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 14px;
+  background: var(--surface-container-high);
+}
+
+.qbt--connected {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.qbt__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  color: inherit;
+}
+
+.qbt__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.qbt__name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qbt__sub {
+  font-size: 11px;
+  opacity: 0.78;
+}
+
+.qbt__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.qbt__del {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: inherit;
+  opacity: 0.65;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
+
+.qbt__del:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--error);
+}
+
+.qbt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.qbt-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--on-surface-variant);
+}
+
+.qbt-section__scan {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.qbt-section__empty {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-container-high);
+  color: var(--on-surface-variant);
+  font-size: 12px;
+}
+
+.qbt-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface-container-highest);
+  border: 1px solid var(--primary);
+}
+
+.qbt-prompt__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.qbt-prompt__pin {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--primary);
+}
+
+.qbt-prompt__form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qbt-prompt__form .qinput {
+  padding-right: 10px;
+}
+
 /* Volume and brightness card: horizontal in quick settings, two vertical sliders on the dashboard. */
 .vb {
   display: flex;

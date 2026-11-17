@@ -1,6 +1,7 @@
 mod actions;
 mod apps;
 mod battery;
+mod bluetooth;
 mod brightness;
 mod config;
 mod edge;
@@ -138,6 +139,7 @@ pub fn run() {
                     app.manage(gpu::GpuState::new());
                     app.manage(apps::AppsState::new());
                     app.manage(notifications::NotifState::new());
+                    app.manage(bluetooth::BtState::new());
                     let flags: HashMap<_, _> = PANELS
                         .iter()
                         .map(|s| (s.label, Arc::new(AtomicBool::new(false))))
@@ -180,7 +182,20 @@ pub fn run() {
             stats::get_top_processes,
             gpu::get_gpu,
             wifi::get_wifi,
+            wifi::wifi_list,
+            wifi::wifi_scan,
+            wifi::wifi_connect,
+            wifi::wifi_disconnect,
+            wifi::wifi_forget,
             wifi::open_settings_page,
+            bluetooth::bt_list,
+            bluetooth::bt_connect,
+            bluetooth::bt_disconnect,
+            bluetooth::bt_unpair,
+            bluetooth::bt_scan_start,
+            bluetooth::bt_scan_stop,
+            bluetooth::bt_pair,
+            bluetooth::bt_pair_respond,
             quick::quick_get,
             quick::quick_set,
             quick::cycle_power_mode,

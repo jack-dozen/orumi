@@ -18,6 +18,8 @@ import { MediaTab, MiniPlayer } from "./Media";
 import WeatherCard from "./Weather";
 import { useConfig, type Config } from "../useConfig";
 import { useQuick, type PowerMode, type QuickKey, type QuickState } from "../useQuick";
+import { useBluetooth } from "../useBluetooth";
+import { BluetoothPanel, WifiPanel } from "./QuickPanels";
 import VolumeBrightness from "./VolumeBrightness";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -581,21 +583,79 @@ const QUICK_TILES: QuickTileDef[] = [
   },
 ];
 
+type QuickSubView = "grid" | "wifi" | "bluetooth";
+
+function bluetoothTileSub(
+  state: QuickState,
+  connectedNames: string[],
+): string {
+  if (!state.bluetooth) return "Off";
+  if (connectedNames.length === 1) return connectedNames[0];
+  if (connectedNames.length > 1) return `${connectedNames.length} connected`;
+  return "On";
+}
+
 /** Notch "settings" tab = Windows quick settings. ORUMI's own settings live in the launcher (>settings). */
 function QuickSettings({
   wifi,
   visible,
   cfg,
+  subView,
+  onSubView,
   onInstantHide,
 }: {
   wifi: WifiStatus | null;
   visible: boolean;
   cfg: Config | null;
+  subView: QuickSubView;
+  onSubView: (v: QuickSubView) => void;
   onInstantHide: () => void;
 }) {
   const { state, busy, toggle } = useQuick(visible);
+  const bt = useBluetooth(visible, subView === "bluetooth");
   const autoTheme = cfg?.windows_theme_mode === "auto";
   const openPage = (page: string) => invoke("open_settings_page", { page }).catch(() => {});
+
+  if (subView === "wifi") {
+    return (
+      <WifiPanel
+        radioOn={state ? state.wifi : null}
+        busyToggle={busy === "wifi"}
+        visible={visible}
+        onToggleRadio={(on) => toggle("wifi", on)}
+        onBack={() => onSubView("grid")}
+        onOpenSettings={openPage}
+      />
+    );
+  }
+
+  if (subView === "bluetooth") {
+    return (
+      <BluetoothPanel
+        radioOn={state ? state.bluetooth : null}
+        busyToggle={busy === "bluetooth"}
+        visible={visible}
+        btData={bt.data}
+        nearby={bt.nearby}
+        scanning={bt.scanning}
+        pairPrompt={bt.pairPrompt}
+        onStartScan={bt.startScan}
+        onStopScan={bt.stopScan}
+        onConnect={bt.connect}
+        onDisconnect={bt.disconnect}
+        onUnpair={bt.unpair}
+        onPair={bt.pair}
+        onRespondPair={bt.respondPair}
+        onToggleRadio={(on) => toggle("bluetooth", on)}
+        onBack={() => onSubView("grid")}
+        onOpenSettings={openPage}
+      />
+    );
+  }
+
+  const btConnectedNames = (bt.data?.devices ?? [])
+    .filter((d) => d.connected)
+    .map((d) => d.name);
 
   return (
     <div className="quick">
@@ -630,6 +690,55 @@ function QuickSettings({
           const on = state ? t.active(state) : false;
           const locked = t.locked?.(autoTheme) ?? false;
           const nextValue = t.key === "power_mode" ? true : !(raw === true);
+          const subText = !state
+            ? "loading…"
+            : missing
+              ? "unavailable"
+              : busy === t.key
+                ? "…"
+                : t.key === "bluetooth"
+                  ? bluetoothTileSub(state, btConnectedNames)
+                  : t.sub(state, wifi, autoTheme);
+
+          if (t.key === "wifi" || t.key === "bluetooth") {
+            const targetView: QuickSubView = t.key;
+            return (
+              <div
+                key={t.key}
+                className={`qtile qtile--split ${on ? "qtile--on" : ""} ${
+                  missing ? "qtile--missing" : ""
+                }`}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  openPage(t.settings);
+                }}
+              >
+                <button
+                  type="button"
+                  className="qtile__main"
+                  disabled={!state || missing || busy !== null}
+                  title={`Toggle ${t.title} · Right-click for Windows Settings`}
+                  onClick={() => toggle(t.key, nextValue)}
+                >
+                  <Icon name={state ? t.icon(state) : t.icon({} as QuickState)} size={24} fill={on} />
+                  <div className="qtile__text">
+                    <span className="qtile__title">{t.title}</span>
+                    <span className="qtile__sub">{subText}</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="qtile__arrow"
+                  title={`Manage ${t.title}`}
+                  aria-label={`Manage ${t.title}`}
+                  onClick={() => onSubView(targetView)}
+                >
+                  <Icon name="chevron_right" size={18} />
+                </button>
+              </div>
+            );
+          }
+
           return (
             <button
               key={t.key}
@@ -651,15 +760,7 @@ function QuickSettings({
               <Icon name={state ? t.icon(state) : t.icon({} as QuickState)} size={24} fill={on} />
               <div className="qtile__text">
                 <span className="qtile__title">{t.title}</span>
-                <span className="qtile__sub">
-                  {!state
-                    ? "loading…"
-                    : missing
-                      ? "unavailable"
-                      : busy === t.key
-                        ? "…"
-                        : t.sub(state, wifi, autoTheme)}
-                </span>
+                <span className="qtile__sub">{subText}</span>
               </div>
             </button>
           );
@@ -676,7 +777,9 @@ function QuickSettings({
         </div>
       )}
 
-      <div className="quick__hint">Right-click a tile to open Windows Settings</div>
+      <div className="quick__hint">
+        Click arrow on Wi-Fi / Bluetooth to connect · Right-click a tile for Windows Settings
+      </div>
 
       <VolumeBrightness active={visible} />
     </div>
@@ -878,6 +981,7 @@ type WsOsd = { active: number; total: number };
 export default function Notch() {
   const visible = useEdgeVisible("notch");
   const [tab, setTab] = useState<TabId>("dashboard");
+  const [quickSubView, setQuickSubView] = useState<QuickSubView>("grid");
   const [instantHide, setInstantHide] = useState(false);
   const [wsOsd, setWsOsd] = useState<WsOsd | null>(null);
   const [osdOpen, setOsdOpen] = useState(false);
@@ -961,8 +1065,18 @@ export default function Notch() {
   // Notch closed: return to "does not take focus" mode (if it was used for typing).
   useEffect(() => {
     setInstantHide(false);
-    if (!visible) invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+    if (!visible) {
+      setQuickSubView("grid");
+      invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+    }
   }, [visible]);
+
+  useEffect(() => {
+    if (tab !== "settings") {
+      setQuickSubView("grid");
+      invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+    }
+  }, [tab]);
 
   // Window lost focus (clicked another app): release the "currently typing" focus hold.
   useEffect(() => {
@@ -979,8 +1093,13 @@ export default function Notch() {
   // The bar can ask the notch to switch to a specific tab (clock or WiFi icon click).
   useEffect(() => {
     const unlisten = listen<string>("notch-tab", (e) => {
-      const [t] = e.payload.split("/");
+      const [t, sub] = e.payload.split("/");
       if (TABS.some((x) => x.id === t)) setTab(t as TabId);
+      if (t === "settings" && (sub === "wifi" || sub === "bluetooth" || sub === "grid")) {
+        setQuickSubView(sub);
+      } else if (t === "settings") {
+        setQuickSubView("grid");
+      }
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -1090,6 +1209,8 @@ export default function Notch() {
               wifi={wifi}
               visible={visible}
               cfg={cfg}
+              subView={quickSubView}
+              onSubView={setQuickSubView}
               onInstantHide={() => setInstantHide(true)}
             />
           )}

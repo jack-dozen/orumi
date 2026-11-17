@@ -14,7 +14,9 @@ $icons = @(
   "volume_down", "volume_off", "volume_up", "wallpaper", "weather_snowy", "wifi", "wifi_off",
   "chevron_right", "bluetooth", "bluetooth_disabled", "airplanemode_active", "do_not_disturb_on",
   "bolt", "check", "close", "coffee", "content_cut", "dark_mode", "done_all", "eco", "expand_more",
-  "headphones", "light_mode", "mic", "mic_off", "notifications", "notifications_off", "speaker", "wifi_tethering"
+  "headphones", "light_mode", "mic", "mic_off", "notifications", "notifications_off", "speaker", "wifi_tethering",
+  "arrow_back", "bluetooth_connected", "bluetooth_searching", "delete", "devices", "gamepad", "mouse",
+  "smartphone", "visibility", "visibility_off", "wifi_1_bar", "wifi_2_bar", "wifi_lock"
 )
 
 # Google requires the names to be sorted alphabetically.

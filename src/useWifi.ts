@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -8,6 +8,26 @@ export type WifiStatus = {
   ssid: string | null;
   signal: number;
   location_denied: boolean;
+};
+
+export type WifiNetwork = {
+  ssid: string;
+  signal: number;
+  connected: boolean;
+  saved: boolean;
+  profile_name: string | null;
+  secured: boolean;
+  auth: string;
+  auth_kind: string;
+  connectable: boolean;
+};
+
+export type WifiListResult = {
+  adapter: boolean;
+  radio_on: boolean;
+  location_denied: boolean;
+  connected_ssid: string | null;
+  networks: WifiNetwork[];
 };
 
 /** WiFi status: updated every 4 seconds and immediately when Windows reports a change. */
@@ -38,4 +58,86 @@ export function useWifi(active: boolean): WifiStatus | null {
   }, [active]);
 
   return wifi;
+}
+
+/** Full WiFi network list, scan, connect (with optional password), disconnect, and forget. */
+export function useWifiList(active: boolean) {
+  const [data, setData] = useState<WifiListResult | null>(null);
+  const [scanning, setScanning] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await invoke<WifiListResult>("wifi_list");
+      setData(res);
+    } catch {
+      /* ignore transient errors */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const res = await invoke<WifiListResult>("wifi_list");
+        if (!cancelled) setData(res);
+      } catch {
+        /* ignore */
+      }
+    };
+    run();
+    const id = setInterval(run, 5000);
+    const unlisten = listen("wifi-changed", run);
+    const unlistenQuick = listen("quick-changed", run);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      unlisten.then((fn) => fn());
+      unlistenQuick.then((fn) => fn());
+    };
+  }, [active]);
+
+  const scan = useCallback(async () => {
+    setScanning(true);
+    try {
+      await invoke("wifi_scan");
+      await new Promise((r) => setTimeout(r, 900));
+      await refresh();
+    } catch {
+      await refresh();
+    } finally {
+      setScanning(false);
+    }
+  }, [refresh]);
+
+  const connect = useCallback(
+    async (
+      ssid: string,
+      opts?: { password?: string; autoConnect?: boolean; authKind?: string },
+    ) => {
+      await invoke("wifi_connect", {
+        ssid,
+        password: opts?.password ?? null,
+        autoConnect: opts?.autoConnect ?? true,
+        authKind: opts?.authKind ?? null,
+      });
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const disconnect = useCallback(async () => {
+    await invoke("wifi_disconnect");
+    await refresh();
+  }, [refresh]);
+
+  const forget = useCallback(
+    async (profileName: string) => {
+      await invoke("wifi_forget", { profileName });
+      await refresh();
+    },
+    [refresh],
+  );
+
+  return { data, scanning, refresh, scan, connect, disconnect, forget };
 }
