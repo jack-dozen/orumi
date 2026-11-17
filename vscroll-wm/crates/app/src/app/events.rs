@@ -51,9 +51,16 @@ impl App {
             }
             _ => false,
         };
+        if event == EVENT_SYSTEM_MOVESIZESTART && known {
+            // drag dimulai: pantau kursor untuk menu snap layouts (snap.rs)
+            self.snap_drag_start(hwnd);
+        }
         if event == EVENT_SYSTEM_MOVESIZEEND && known {
-            // drag / tarik tepi window selesai: tukar posisi atau geser pembagi (mouse.rs)
-            self.on_drag_end(hwnd);
+            // drag / tarik tepi window selesai: pasang preset snap layout kalau dilepas di
+            // zona menu (snap.rs), selain itu tukar posisi atau geser pembagi (mouse.rs)
+            if !self.snap_drag_end(hwnd) {
+                self.on_drag_end(hwnd);
+            }
         }
         if relevant {
             self.schedule_sync(EVENT_DEBOUNCE_MS);
@@ -63,6 +70,9 @@ impl App {
     pub(crate) unsafe fn on_hotkey(&mut self, id: i32) {
         if tray::PAUSED.load(Ordering::Relaxed) {
             return;
+        }
+        if self.snap_assist.is_some() {
+            self.snap_assist_end(true); // pintasan apa pun menutup daftar window snap layouts
         }
         self.sync();
         match id {

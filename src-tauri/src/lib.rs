@@ -242,15 +242,14 @@ pub fn run() {
             wm_ipc::wm_reapply_cmd
         ])
         .setup(|app| {
-            let cfg = config::load(app.handle());
+            let cfg = config::current(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
             capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
             taskbar::apply(app.handle(), cfg.taskbar_autohide, cfg.taskbar_hidden);
-            if cfg.autostart {
+            if !cfg!(dev) && cfg.autostart {
                 let _ = config::apply_autostart(true);
             }
-            app.manage(config::ConfigState::new(cfg.clone()));
 
             // --- All panels ---
             let mut watched = Vec::new();

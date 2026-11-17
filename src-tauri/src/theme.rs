@@ -52,7 +52,7 @@ pub fn set_theme(json: String, app: AppHandle) {
     let sync_app = app.clone();
     std::thread::spawn(move || {
         crate::quick::sync_windows_theme_from_wallpaper(&sync_app);
-        crate::wm_ipc::sync_theme_focus_border(&sync_app);
+        crate::wm_ipc::sync_theme_colors(&sync_app);
     });
 }
 
@@ -61,11 +61,23 @@ pub fn get_theme() -> Option<String> {
     THEME.lock().ok().and_then(|t| t.clone())
 }
 
-/// Extract the computed `--primary` hex color (`#rrggbb`) from the latest theme tokens.
-pub fn current_primary() -> Option<String> {
+/// Extract Material You surface/container/primary hex tokens (`#rrggbb`) from the latest theme map.
+pub fn current_colors() -> Option<(String, String, String)> {
     let json = get_theme()?;
     let map: std::collections::HashMap<String, String> = serde_json::from_str(&json).ok()?;
-    map.get("--primary").cloned()
+    let primary = map.get("--primary")?.clone();
+    let surface = map.get("--surface").cloned().unwrap_or_else(|| "#1c1f26".to_string());
+    let container = map
+        .get("--surface-container-high")
+        .or_else(|| map.get("--surface-container"))
+        .cloned()
+        .unwrap_or_else(|| "#2d323e".to_string());
+    Some((surface, container, primary))
+}
+
+/// Extract the computed `--primary` hex color (`#rrggbb`) from the latest theme tokens.
+pub fn current_primary() -> Option<String> {
+    current_colors().map(|(_, _, p)| p)
 }
 
 /// Small sample of active wallpaper pixels (RGBA, base64) for extracting dominant colors.

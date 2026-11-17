@@ -350,7 +350,15 @@ const RUN_KEY: windows::core::PCWSTR =
 const RUN_VALUE: windows::core::PCWSTR = windows::core::w!("ORUMI");
 
 /// Register or remove the Windows per-user Run entry (`HKCU\...\Run\ORUMI`).
+/// Refuses to register a dev build (`tauri dev`) so it never points startup at `target\debug`.
 pub fn apply_autostart(enable: bool) -> Result<(), String> {
+    if enable && cfg!(dev) {
+        return Err(
+            "Autostart can only be registered from a release/installed build (skipped in dev mode)."
+                .into(),
+        );
+    }
+
     use windows::Win32::{
         Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
         System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ},

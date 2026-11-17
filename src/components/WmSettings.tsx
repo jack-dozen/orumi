@@ -17,6 +17,10 @@ type WmConfigData = {
   height_step: number;
   mouse_drag: boolean;
   remember_layout: boolean;
+  snap_layouts: boolean;
+  snap_assist: boolean;
+  snap_trigger: number;
+  snap_layouts_defaults: boolean;
   binds: Record<string, string>;
   ignore_text: string;
 };
@@ -376,6 +380,80 @@ export default function WmSettings() {
             </button>
           </div>
         </Row>
+
+        <Row label="Snap layouts">
+          <div className="segmented segmented--small">
+            <button
+              type="button"
+              className={cfg.snap_layouts ? "segmented__on" : ""}
+              onClick={() => patch({ snap_layouts: true })}
+            >
+              On
+            </button>
+            <button
+              type="button"
+              className={!cfg.snap_layouts ? "segmented__on" : ""}
+              onClick={() => patch({ snap_layouts: false })}
+            >
+              Off
+            </button>
+          </div>
+        </Row>
+
+        {cfg.snap_layouts && (
+          <>
+            <Row label="Snap assist">
+              <div className="segmented segmented--small">
+                <button
+                  type="button"
+                  className={cfg.snap_assist ? "segmented__on" : ""}
+                  onClick={() => patch({ snap_assist: true })}
+                >
+                  On
+                </button>
+                <button
+                  type="button"
+                  className={!cfg.snap_assist ? "segmented__on" : ""}
+                  onClick={() => patch({ snap_assist: false })}
+                >
+                  Off
+                </button>
+              </div>
+            </Row>
+
+            <Row label={`Snap trigger ${cfg.snap_trigger} px`}>
+              <input
+                type="range"
+                min={8}
+                max={64}
+                step={2}
+                value={Math.max(8, Math.min(64, cfg.snap_trigger))}
+                onChange={(e) => setCfg({ ...cfg, snap_trigger: Number(e.target.value) })}
+                onPointerUp={() => save(cfg)}
+                onKeyUp={() => save(cfg)}
+              />
+            </Row>
+
+            <Row label="Built-in presets">
+              <div className="segmented segmented--small">
+                <button
+                  type="button"
+                  className={cfg.snap_layouts_defaults ? "segmented__on" : ""}
+                  onClick={() => patch({ snap_layouts_defaults: true })}
+                >
+                  On
+                </button>
+                <button
+                  type="button"
+                  className={!cfg.snap_layouts_defaults ? "segmented__on" : ""}
+                  onClick={() => patch({ snap_layouts_defaults: false })}
+                >
+                  Off
+                </button>
+              </div>
+            </Row>
+          </>
+        )}
       </div>
 
       <div className="appset__col">

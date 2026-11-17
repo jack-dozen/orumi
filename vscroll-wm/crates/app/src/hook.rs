@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::bindings::{self, ALT, CTRL, SHIFT, WIN};
 use crate::consts::{
     DIRS, HOTKEY_OVERVIEW, HOTKEY_QUIT, HOTKEY_WS_GO, HOTKEY_WS_NEXT, HOTKEY_WS_PREV, WM_ACTION,
-    WM_CANCEL_START, WM_REINSTALL_HOOK, WM_WINEVENT,
+    WM_CANCEL_START, WM_REINSTALL_HOOK, WM_SNAP_CANCEL, WM_WINEVENT,
 };
 use crate::{overview, tray};
 
@@ -36,6 +36,9 @@ pub(crate) static HELD_VK: AtomicU16 = AtomicU16::new(0);
 
 /// Overview sedang terbuka: tiling dimatikan, Win+tombol hanya mengendalikan overview.
 pub(crate) static OV_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Daftar window snap layouts sedang tampil: Esc membatalkannya (tombolnya ditelan).
+pub(crate) static SNAP_OPEN: AtomicBool = AtomicBool::new(false);
 
 /// Pilihan sudah digeser sejak overview dibuka. Kalau Win dilepas dalam keadaan ini,
 /// overview langsung loncat ke window yang dipilih (gaya Alt+Tab).
@@ -231,6 +234,22 @@ pub(crate) unsafe extern "system" fn kb_hook(code: i32, wparam: WPARAM, lparam: 
             let vk = k.vkCode as u16;
             if !down && HELD_VK.load(Ordering::Relaxed) == vk {
                 HELD_VK.store(0, Ordering::Relaxed);
+            }
+            // Esc tanpa modifier menutup daftar window snap layouts
+            if down
+                && vk == VK_ESCAPE.0
+                && SNAP_OPEN.load(Ordering::Relaxed)
+                && GetAsyncKeyState(VK_LWIN.0 as i32) >= 0
+                && GetAsyncKeyState(VK_RWIN.0 as i32) >= 0
+                && held_mods() == 0
+            {
+                let _ = PostThreadMessageW(
+                    MAIN_THREAD.load(Ordering::Relaxed),
+                    WM_SNAP_CANCEL,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+                return LRESULT(1);
             }
             if vk == VK_LWIN.0 || vk == VK_RWIN.0 {
                 WIN_DOWN.store(down, Ordering::Relaxed);

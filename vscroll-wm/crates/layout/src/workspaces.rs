@@ -8,6 +8,7 @@
 //! Tambah/hapus window dan pindah workspace HARUS lewat method di sini (bukan
 //! `cur_mut().add_window()` dsb.), supaya aturan di atas selalu dirapikan.
 
+use crate::snap::SnapPreset;
 use crate::types::*;
 
 /// Susunan satu workspace yang disimpan: item berurutan (lebar, tinggi, pembagi) dan
@@ -105,8 +106,14 @@ impl Workspaces {
                 .strips
                 .iter()
                 .map(|s| SavedStrip {
-                    items: s.items().to_vec(),
-                    focused: s.focused(),
+                    // slot snap layout hanya sementara: tidak ikut disimpan
+                    items: s
+                        .items()
+                        .iter()
+                        .copied()
+                        .filter(|it| !it.id.is_slot())
+                        .collect(),
+                    focused: s.focused().filter(|f| !f.is_slot()),
                 })
                 .collect(),
         }
@@ -382,6 +389,62 @@ impl Workspaces {
             })
             .min_by_key(|i| ((i.rect.y + i.rect.h / 2 - y).abs(), i.rect.y))
             .map(|i| i.id)
+    }
+
+    /// Pasang preset snap layout di workspace aktif: `id` mengisi zona `zone`, zona lain
+    /// jadi slot kosong (lihat `Strip::apply_snap`). Kosong kalau `id` bukan di workspace
+    /// aktif.
+    pub fn apply_snap(&mut self, id: WindowId, preset: &SnapPreset, zone: usize) -> Vec<WindowId> {
+        if self.workspace_of(id) != Some(self.active) {
+            return Vec::new();
+        }
+        self.cur_mut().apply_snap(id, preset, zone)
+    }
+
+    /// Isi slot di workspace aktif dengan window `id` dari workspace mana pun (ia
+    /// dikeluarkan dulu dari tempat lamanya dan pindah ke workspace aktif). False kalau
+    /// slot tidak ada, `id` tidak dikenal atau sedang tersembunyi; tidak ada yang berubah.
+    pub fn fill_slot(&mut self, slot: WindowId, id: WindowId) -> bool {
+        let a = self.active;
+        if id.is_slot() || self.strips[a].index_of(slot).is_none() {
+            return false;
+        }
+        let Some(from) = self.workspace_of(id) else {
+            return false;
+        };
+        if self.strips[from]
+            .items()
+            .iter()
+            .any(|it| it.id == id && it.span == Span::Hidden)
+        {
+            return false;
+        }
+        self.strips[from].remove_window(id);
+        let ok = self.strips[a].fill_slot(slot, id);
+        if !ok {
+            self.strips[a].add_window(id); // tidak boleh sampai window hilang dari strip
+        }
+        self.normalize();
+        ok
+    }
+
+    /// Buang semua slot kosong di semua workspace. True kalau ada yang dibuang.
+    pub fn clear_slots(&mut self) -> bool {
+        let mut any = false;
+        for s in &mut self.strips {
+            any |= s.clear_slots();
+        }
+        if any {
+            self.normalize();
+        }
+        any
+    }
+
+    /// Ada slot kosong yang menunggu diisi?
+    pub fn has_slots(&self) -> bool {
+        self.strips
+            .iter()
+            .any(|s| s.items().iter().any(|it| it.id.is_slot()))
     }
 
     /// Fokuskan `id` di workspace pemiliknya; kalau bukan yang aktif, pindah ke sana.

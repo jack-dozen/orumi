@@ -147,7 +147,7 @@ pub(crate) fn snapshot_json(app: &App) -> String {
         let is_active = idx == active;
         out.push_str(&format!(r#"{{"index":{idx},"active":{is_active},"windows":["#));
         let ids = app.ws.window_ids(idx);
-        for (wi, wid) in ids.iter().enumerate() {
+        for (wi, wid) in ids.iter().filter(|w| !w.is_slot()).enumerate() {
             if wi > 0 {
                 out.push(',');
             }
@@ -177,7 +177,10 @@ unsafe fn overview_data_json(app: &App) -> String {
             continue;
         };
         let ov = strip.overview();
-        let focused = strip.focused().map_or(0, |f| f.0 as usize as isize as i64);
+        let focused = strip
+            .focused()
+            .filter(|f| !f.is_slot())
+            .map_or(0, |f| f.0 as usize as isize as i64);
         let strip_items = strip.items();
         out.push_str(&format!(
             r#"{{"index":{idx},"active":{is_active},"width":{},"height":{},"view_y":{},"view_h":{},"focused":{focused},"items":["#,
@@ -186,7 +189,7 @@ unsafe fn overview_data_json(app: &App) -> String {
             ov.view_y,
             ov.view_h.max(1)
         ));
-        for (ii, it) in ov.items.iter().enumerate() {
+        for (ii, it) in ov.items.iter().filter(|it| !it.id.is_slot()).enumerate() {
             if ii > 0 {
                 out.push(',');
             }
@@ -447,6 +450,7 @@ pub(crate) unsafe fn handle(app: &mut App, cmd: Cmd) -> bool {
                 return false;
             }
             if index != app.ws.active() {
+                app.snap_reset(true);
                 app.switch_workspace_with_focus(index, focus);
             }
             let _ = reply.send("ok".to_string());
@@ -515,6 +519,7 @@ pub(crate) unsafe fn handle(app: &mut App, cmd: Cmd) -> bool {
             let _ = reply.send("ok".to_string());
         }
         Cmd::OverviewData { reply } => {
+            app.snap_reset(true);
             let _ = reply.send(overview_data_json(app));
         }
         Cmd::SetOverviewUi { enabled, reply } => {

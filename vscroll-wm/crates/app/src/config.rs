@@ -29,6 +29,14 @@
 //!                     ulang selagi window-windownya masih terbuka
 //!   workspace_osd = on        panel kecil sesaat di bagian bawah layar setiap pindah workspace
 //!   overview_wrap = on        panah di overview berputar: dari ujung loncat ke ujung seberang
+//!   snap_layouts = on         menu preset layout muncul saat window diseret ke tepi atas layar;
+//!                     lepas di sebuah zona = window mengisi zona itu
+//!   snap_layouts_defaults = on  sertakan preset bawaan (halves, quarters, ...)
+//!   snap_trigger = 24         lebar pita (piksel) di tepi atas layar yang memunculkan menu
+//!   snap_assist = on          setelah window masuk zona, zona lain menampilkan daftar window
+//!                     yang terbuka untuk diklik
+//!   snap_layout.<nama> = split=67, L, R:1/2, R:1/2   preset sendiri (atau `off` untuk
+//!                     membuang preset bawaan dengan nama itu); lihat vscroll-wm.conf.example
 //!   bind.<aksi> = win+q       ubah pintasan (daftar aksi: bindings.rs / vscroll-wm.conf.example).
 //!                     Beberapa tombol dipisah koma, off = dimatikan. overview_key dan
 //!                     cheatsheet_key tetap berlaku sebagai tombol bawaan bind.overview /
@@ -123,6 +131,14 @@ pub struct Config {
     pub remember_layout: bool,
     /// Drag mouse: tukar posisi, geser pembagi (di layar) dan pindah workspace (di overview).
     pub mouse_drag: bool,
+    /// Menu snap layouts saat window diseret ke tepi atas layar.
+    pub snap_layouts_enabled: bool,
+    /// Tinggi pita pemicu menu di tepi atas area kerja (piksel).
+    pub snap_trigger: i32,
+    /// Daftar window untuk mengisi zona yang masih kosong setelah snap.
+    pub snap_assist: bool,
+    /// Preset yang ditawarkan menu, urut seperti ditampilkan (bawaan, lalu buatan sendiri).
+    pub snap_layouts: Vec<layout::SnapPreset>,
     /// Tombol tiap aksi (bawaan + `bind.*` + overview_key / cheatsheet_key).
     pub bindings: Bindings,
 }
@@ -148,6 +164,10 @@ impl Default for Config {
             workspace_osd: true,
             remember_layout: true,
             mouse_drag: true,
+            snap_layouts_enabled: true,
+            snap_trigger: 24,
+            snap_assist: true,
+            snap_layouts: layout::builtin_presets(),
             bindings: Bindings::defaults(),
         }
     }
@@ -161,6 +181,9 @@ impl Config {
         let mut binds = Bindings::defaults();
         // aksi yang diatur lewat bind.* (urutan file = urutan prioritas saat bentrok)
         let mut explicit: Vec<usize> = Vec::new();
+        // preset snap layout buatan sendiri (None = buang preset bawaan bernama itu)
+        let mut snap_defaults = true;
+        let mut snap_user: Vec<(String, Option<layout::SnapPreset>)> = Vec::new();
         for (n, raw) in text.lines().enumerate() {
             let n = n + 1;
             let line = raw.trim();
@@ -262,6 +285,39 @@ impl Config {
                     Some(b) => cfg.overview_wrap = b,
                     None => warnings.push(format!("line {n}: overview_wrap must be on/off")),
                 },
+                "snap_layouts" => match parse_bool(value) {
+                    Some(b) => cfg.snap_layouts_enabled = b,
+                    None => warnings.push(format!("line {n}: snap_layouts must be on/off")),
+                },
+                "snap_layouts_defaults" => match parse_bool(value) {
+                    Some(b) => snap_defaults = b,
+                    None => warnings.push(format!("line {n}: snap_layouts_defaults must be on/off")),
+                },
+                "snap_assist" => match parse_bool(value) {
+                    Some(b) => cfg.snap_assist = b,
+                    None => warnings.push(format!("line {n}: snap_assist must be on/off")),
+                },
+                "snap_trigger" => match value.parse::<i32>() {
+                    Ok(v) => cfg.snap_trigger = v.clamp(2, 300),
+                    Err(_) => warnings.push(format!("line {n}: snap_trigger must be a whole number")),
+                },
+                k if k.starts_with("snap_layout.") => {
+                    let name = k["snap_layout.".len()..].trim().to_string();
+                    if name.is_empty() {
+                        warnings.push(format!("line {n}: snap_layout needs a name (snap_layout.<name>)"));
+                    } else if value.eq_ignore_ascii_case("off") || value.eq_ignore_ascii_case("none") {
+                        snap_user.retain(|(other, _)| *other != name);
+                        snap_user.push((name, None));
+                    } else {
+                        match layout::SnapPreset::parse(&name, value) {
+                            Ok(p) => {
+                                snap_user.retain(|(other, _)| *other != name);
+                                snap_user.push((name, Some(p)));
+                            }
+                            Err(e) => warnings.push(format!("line {n}: snap_layout.{name}: {e}")),
+                        }
+                    }
+                }
                 k if k.starts_with("bind.") => {
                     let name = k["bind.".len()..].trim();
                     match bindings::find_action(name) {
@@ -313,6 +369,22 @@ impl Config {
         }
         warnings.extend(binds.resolve_conflicts(&explicit));
         cfg.bindings = binds;
+        // preset: bawaan dulu, lalu yang buatan sendiri (nama sama = menimpa di tempatnya)
+        let mut presets = if snap_defaults {
+            layout::builtin_presets()
+        } else {
+            Vec::new()
+        };
+        for (name, preset) in snap_user {
+            match preset {
+                Some(p) => match presets.iter().position(|x| x.name == name) {
+                    Some(i) => presets[i] = p,
+                    None => presets.push(p),
+                },
+                None => presets.retain(|x| x.name != name),
+            }
+        }
+        cfg.snap_layouts = presets;
         (cfg, warnings)
     }
 }
@@ -798,5 +870,74 @@ mod tests {
         let (cfg, _) = Config::parse("overview_key = off\n");
         assert_eq!(cfg.bindings.lookup(WIN | ALT, 0x20), Some(crate::consts::HOTKEY_OVERVIEW));
         assert_eq!(cfg.bindings.overview_cycle_vk(), 0);
+    }
+
+    fn names(cfg: &Config) -> Vec<&str> {
+        cfg.snap_layouts.iter().map(|p| p.name.as_str()).collect()
+    }
+
+    #[test]
+    fn snap_layouts_default_to_on_with_the_builtin_presets() {
+        let cfg = Config::default();
+        assert!(cfg.snap_layouts_enabled && cfg.snap_assist);
+        assert_eq!(cfg.snap_trigger, 24);
+        assert_eq!(cfg.snap_layouts, layout::builtin_presets());
+        assert!(names(&cfg).contains(&"halves") && names(&cfg).contains(&"quarters"));
+        let (cfg, w) = Config::parse("snap_layouts = off\nsnap_assist = off\nsnap_trigger = 40\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert!(!cfg.snap_layouts_enabled && !cfg.snap_assist);
+        assert_eq!(cfg.snap_trigger, 40);
+    }
+
+    #[test]
+    fn custom_snap_layouts_are_appended_after_the_builtin_ones() {
+        let (cfg, w) = Config::parse("snap_layout.Focus = split=70, L, R:1/2, R:1/2\n");
+        assert!(w.is_empty(), "{w:?}");
+        let n = layout::builtin_presets().len();
+        assert_eq!(cfg.snap_layouts.len(), n + 1);
+        let p = cfg.snap_layouts.last().unwrap();
+        assert_eq!(p.name, "focus"); // kunci konfigurasi tidak peka huruf besar
+        assert_eq!(p.split, 700);
+        assert_eq!(p.zones.len(), 3);
+    }
+
+    #[test]
+    fn a_custom_layout_with_a_builtin_name_replaces_it_in_place() {
+        let before = Config::default();
+        let at = names(&before).iter().position(|x| *x == "halves").unwrap();
+        let (cfg, w) = Config::parse("snap_layout.halves = split=60, L, R\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(cfg.snap_layouts.len(), before.snap_layouts.len());
+        assert_eq!(cfg.snap_layouts[at].name, "halves");
+        assert_eq!(cfg.snap_layouts[at].split, 600);
+    }
+
+    #[test]
+    fn builtin_layouts_can_be_removed_or_turned_off_entirely() {
+        let (cfg, w) = Config::parse("snap_layout.quarters = off\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert!(!names(&cfg).contains(&"quarters") && names(&cfg).contains(&"halves"));
+
+        // urutan baris tidak penting untuk snap_layouts_defaults
+        let (cfg, w) = Config::parse("snap_layout.mine = L, R\nsnap_layouts_defaults = off\n");
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(names(&cfg), vec!["mine"]);
+    }
+
+    #[test]
+    fn bad_snap_layout_lines_warn_and_are_skipped() {
+        let (cfg, w) = Config::parse(
+            "snap_layout.a = L, Q\nsnap_layout. = L\nsnap_layout.b =\nsnap_trigger = x\nsnap_assist = maybe\n",
+        );
+        assert_eq!(w.len(), 5, "{w:?}");
+        assert_eq!(cfg.snap_layouts, layout::builtin_presets());
+    }
+
+    #[test]
+    fn the_last_definition_of_a_layout_wins() {
+        let (cfg, _) = Config::parse("snap_layout.x = L\nsnap_layout.x = L, R\n");
+        let x: Vec<_> = cfg.snap_layouts.iter().filter(|p| p.name == "x").collect();
+        assert_eq!(x.len(), 1);
+        assert_eq!(x[0].zones.len(), 2);
     }
 }

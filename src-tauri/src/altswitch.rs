@@ -86,7 +86,7 @@ const RECENT_TAB_SEEN_MS: u64 = 80;
 /// Let the panel settle before thumbnail capture can compete for CPU time.
 const REFRESH_DELAY: Duration = Duration::from_millis(400);
 /// true = print timing lines to the terminal (set to false when no longer needed).
-const DEBUG_TIMING: bool = true;
+const DEBUG_TIMING: bool = false;
 /// true = Ctrl+Alt+Tab opens this switcher too. false = it is left to Windows (its sticky
 /// switcher). The launcher hotkey is Ctrl+Alt+J, so with false an Alt+Tab pressed while Ctrl is
 /// still down opens the Windows one.

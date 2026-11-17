@@ -6,6 +6,7 @@ mod events;
 mod mouse;
 mod overview_ctl;
 mod persist;
+mod snap;
 pub(crate) mod workspace;
 
 use std::collections::{HashMap, HashSet};
@@ -23,6 +24,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub(crate) use self::actions::show_config_problems;
 use self::anim::Anim;
+use self::snap::{SnapAssist, SnapDrag};
 use crate::consts::DEFAULT_ANIM_MS;
 use crate::hook::OVERVIEW_VK;
 use crate::winutil::{
@@ -87,6 +89,12 @@ pub(crate) struct App {
     pub(crate) saved_layout: Option<layout::SavedLayout>,
     /// Identitas (exe|class) window untuk layout.state, dihitung sekali per window.
     pub(crate) idents: HashMap<WindowId, String>,
+    /// Seretan window yang dipantau untuk menu snap layouts (snap.rs).
+    pub(crate) snap_drag: Option<SnapDrag>,
+    /// 0 = timer pemantau seretan tidak jalan.
+    pub(crate) snap_timer: usize,
+    /// Sesi daftar window untuk zona preset yang masih kosong.
+    pub(crate) snap_assist: Option<SnapAssist>,
 }
 
 impl App {
@@ -108,6 +116,9 @@ impl App {
             recheck: false,
             saved_layout: None,
             idents: HashMap::new(),
+            snap_drag: None,
+            snap_timer: 0,
+            snap_assist: None,
             anim_ms: DEFAULT_ANIM_MS,
             focus_border: None,
             border_applied: None,
@@ -182,7 +193,9 @@ impl App {
         // ikuti window yang difokuskan user (klik, alt-tab, tombol taskbar). Window di
         // workspace lain membawa kita ke workspace itu. Foreground lama yang masih
         // tertinggal di window yang baru diparkir tidak dihitung.
-        let fg = wid(GetForegroundWindow());
+        let fg_hwnd = GetForegroundWindow();
+        self.snap_assist_follow_focus(fg_hwnd);
+        let fg = wid(fg_hwnd);
         if (added && !self.parked.contains(&fg)) || self.last_fg != Some(fg) {
             self.last_fg = Some(fg);
             if self.map.contains_key(&fg) && self.ws.cur().focused() != Some(fg) {
@@ -365,6 +378,7 @@ impl App {
 
     /// Muat ulang file konfigurasi (menu tray). Aturan ignore butuh restart.
     pub(crate) unsafe fn reload_config(&mut self) {
+        self.snap_reset(false); // indeks preset di menu / slot bisa berubah
         let report = config::load();
         self.apply_config(&report.cfg);
         self.apply();

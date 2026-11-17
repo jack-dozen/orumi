@@ -39,6 +39,7 @@ impl App {
         if !overview::available() {
             return false;
         }
+        self.snap_reset(true); // slot kosong tidak boleh ikut masuk peta overview
         let maps = self.ws.overviews();
         if maps.is_empty() {
             return false;

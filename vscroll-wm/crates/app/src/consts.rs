@@ -64,6 +64,15 @@ pub(crate) const HOTKEY_WS_SEND_NEXT: i32 = 27;
 /// Win+Ctrl+D / Win+Ctrl+F4 (buat / tutup desktop virtual Windows): ditelan saja.
 pub(crate) const HOTKEY_WS_NOOP: i32 = 28;
 
+/// Snap layouts: window dipilih di daftar slot (wParam = id window, lParam = id slot).
+pub(crate) const WM_SNAP_PICK: u32 = WM_APP + 20;
+
+/// Snap layouts: daftar slot dibatalkan (Esc, tombol tutup, klik kanan).
+pub(crate) const WM_SNAP_CANCEL: u32 = WM_APP + 21;
+
+/// Interval (ms) memantau kursor selama window diseret untuk menu snap layouts.
+pub(crate) const SNAP_TICK_MS: u32 = 16;
+
 /// Win+Ctrl+1..9 -> HOTKEY_WS_GO + 0..8 (pindah ke workspace n).
 pub(crate) const HOTKEY_WS_GO: i32 = 30;
 

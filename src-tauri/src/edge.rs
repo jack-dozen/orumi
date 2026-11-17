@@ -22,7 +22,7 @@ const PIN_GRACE: Duration = Duration::from_secs(6);
 const POLL_FAST: Duration = Duration::from_millis(30);
 const POLL_IDLE: Duration = Duration::from_millis(150);
 /// true = print how long the switcher takes to show on the main thread (turn off when not needed).
-const DEBUG_SHOW: bool = true;
+const DEBUG_SHOW: bool = false;
 
 /// The edge thread, so opening or closing a panel can wake it from its polling sleep instead of
 /// waiting for the interval to end (up to POLL_IDLE).
@@ -31,6 +31,12 @@ static EDGE_THREAD: OnceLock<thread::Thread> = OnceLock::new();
 fn wake() {
     if let Some(t) = EDGE_THREAD.get() {
         t.unpark();
+    }
+}
+
+fn left_mouse_down() -> bool {
+    unsafe {
+        (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01) as u16) & 0x8000 != 0
     }
 }
 /// "Near the edge" = within this distance of the screen edge (design units).
@@ -374,7 +380,7 @@ pub fn panel_activation(
     if label != "bar" && label != "notch" && label != "launcher" {
         return;
     }
-    if label == "notch" {
+    if DEBUG_SHOW && label == "notch" {
         eprintln!("[edge] notch keyboard activation: {enable}");
     }
     if let Some((key, _)) = panels.0.get_key_value(label.as_str()) {
@@ -997,6 +1003,10 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         {
                             p.armed = true;
                         }
+                        p.inside_since = None;
+                    } else if left_mouse_down() {
+                        // Do not pop open notch/bar while dragging a window near the edge
+                        // (lets vscroll-wm Snap Layouts capture top-edge drops unobstructed).
                         p.inside_since = None;
                     } else if trigger_rect.contains(cursor.x, cursor.y) {
                         let since = *p.inside_since.get_or_insert_with(Instant::now);

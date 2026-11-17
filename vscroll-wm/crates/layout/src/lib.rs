@@ -7,14 +7,17 @@
 //! Tinggi tiap window independen. Viewport meng-scroll mengikuti fokus.
 //!
 //! Aksi: snap (tinggi / sisi), maximize, focus, dan move_window (tukar posisi
-//! dengan tetangga di arah tertentu, apa pun ukurannya).
+//! dengan tetangga di arah tertentu, apa pun ukurannya). Snap layout (preset zona
+//! yang dipasang lewat drag) ada di `snap`.
 
 mod flow;
 mod ops;
+mod snap;
 #[cfg(test)]
 mod tests;
 mod types;
 mod workspaces;
 
+pub use snap::{builtin_presets, SnapPreset, SnapZone, MAX_ZONES};
 pub use types::*;
 pub use workspaces::{SavedLayout, SavedStrip, Workspaces};

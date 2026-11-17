@@ -95,6 +95,7 @@ impl App {
             "vscroll-wm"
         });
         if paused {
+            self.snap_reset(false);
             self.close_overview(false);
             cheatsheet::hide();
             osd::hide();

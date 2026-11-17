@@ -313,7 +313,7 @@ pub fn start(app: AppHandle) {
                         let _ = send_cmd("cheatsheet_ui off");
                         let _ = send_cmd("overview_ui off");
                         let sync_app = app.clone();
-                        thread::spawn(move || sync_theme_focus_border(&sync_app));
+                        thread::spawn(move || sync_theme_colors(&sync_app));
                         let reader = BufReader::new(file);
                         for line in reader.lines() {
                             if SHUTDOWN.load(Ordering::Relaxed) {
@@ -547,6 +547,14 @@ fn default_border_mode() -> String {
     "off".to_string()
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_snap_trigger() -> i32 {
+    24
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct WmConfigData {
     #[serde(default)]
@@ -567,6 +575,14 @@ pub struct WmConfigData {
     pub height_step: i32,
     pub mouse_drag: bool,
     pub remember_layout: bool,
+    #[serde(default = "default_true")]
+    pub snap_layouts: bool,
+    #[serde(default = "default_true")]
+    pub snap_assist: bool,
+    #[serde(default = "default_snap_trigger")]
+    pub snap_trigger: i32,
+    #[serde(default = "default_true")]
+    pub snap_layouts_defaults: bool,
     #[serde(default)]
     pub binds: HashMap<String, String>,
     #[serde(default)]
@@ -588,6 +604,10 @@ fn default_wm_config() -> WmConfigData {
         height_step: 80,
         mouse_drag: true,
         remember_layout: true,
+        snap_layouts: true,
+        snap_assist: true,
+        snap_trigger: 24,
+        snap_layouts_defaults: true,
         binds: HashMap::new(),
         ignore_text: String::new(),
     }
@@ -677,6 +697,26 @@ fn parse_wm_conf(text: &str) -> WmConfigData {
                     d.remember_layout = b;
                 }
             }
+            "snap_layouts" => {
+                if let Some(b) = parse_wm_bool(val) {
+                    d.snap_layouts = b;
+                }
+            }
+            "snap_assist" => {
+                if let Some(b) = parse_wm_bool(val) {
+                    d.snap_assist = b;
+                }
+            }
+            "snap_trigger" => {
+                if let Ok(n) = val.parse::<i32>() {
+                    d.snap_trigger = n.clamp(2, 300);
+                }
+            }
+            "snap_layouts_defaults" => {
+                if let Some(b) = parse_wm_bool(val) {
+                    d.snap_layouts_defaults = b;
+                }
+            }
             _ => {
                 if let Some(action) = key.strip_prefix("bind.") {
                     let action = action.trim();
@@ -697,7 +737,19 @@ fn parse_wm_conf(text: &str) -> WmConfigData {
     d
 }
 
-fn render_wm_conf(existing: &str, data: &WmConfigData) -> String {
+fn current_normalized_theme_colors() -> Option<(String, String, String)> {
+    let (surface, container, primary) = crate::theme::current_colors()?;
+    let surface = normalize_hex(&surface).filter(|s| !s.is_empty())?;
+    let container = normalize_hex(&container).filter(|s| !s.is_empty())?;
+    let primary = normalize_hex(&primary).filter(|s| !s.is_empty())?;
+    Some((surface, container, primary))
+}
+
+fn render_wm_conf(
+    existing: &str,
+    data: &WmConfigData,
+    theme_colors: Option<(&str, &str, &str)>,
+) -> String {
     let focus_border_val = if data.focus_border_mode == "off" {
         "off".to_string()
     } else {
@@ -711,7 +763,7 @@ fn render_wm_conf(existing: &str, data: &WmConfigData) -> String {
         "preset"
     };
 
-    let managed: [(&str, String); 8] = [
+    let mut managed: Vec<(&str, String)> = vec![
         ("gap", data.gap.clamp(0, 200).to_string()),
         ("anim_ms", data.anim_ms.clamp(0, 1000).to_string()),
         ("focus_border", focus_border_val),
@@ -726,7 +778,29 @@ fn render_wm_conf(existing: &str, data: &WmConfigData) -> String {
             "remember_layout",
             if data.remember_layout { "on" } else { "off" }.to_string(),
         ),
+        (
+            "snap_layouts",
+            if data.snap_layouts { "on" } else { "off" }.to_string(),
+        ),
+        (
+            "snap_assist",
+            if data.snap_assist { "on" } else { "off" }.to_string(),
+        ),
+        ("snap_trigger", data.snap_trigger.clamp(2, 300).to_string()),
+        (
+            "snap_layouts_defaults",
+            if data.snap_layouts_defaults { "on" } else { "off" }.to_string(),
+        ),
     ];
+    if let Some((surface, container, primary)) = theme_colors {
+        managed.extend([
+            ("overview_color_background", surface.to_string()),
+            ("overview_color_box", container.to_string()),
+            ("overview_color_active", primary.to_string()),
+            ("overview_color_selected", primary.to_string()),
+            ("overview_color_view", primary.to_string()),
+        ]);
+    }
 
     let mut written_keys: HashSet<String> = HashSet::new();
     let mut written_binds: HashSet<String> = HashSet::new();
@@ -794,24 +868,23 @@ fn render_wm_conf(existing: &str, data: &WmConfigData) -> String {
     out
 }
 
-/// Update `vscroll-wm.conf` and reload `vscroll-wm` when focus border is set to follow ORUMI's theme.
-pub fn sync_theme_focus_border(app: &AppHandle) {
-    let Some(primary) = crate::theme::current_primary().and_then(|p| normalize_hex(&p)) else {
+/// Update `vscroll-wm.conf` and reload `vscroll-wm` so Snap Menu/Assist and (when enabled) focus border follow ORUMI's live theme.
+pub fn sync_theme_colors(app: &AppHandle) {
+    let Some((surface, container, primary)) = current_normalized_theme_colors() else {
         return;
     };
-    if primary.is_empty() {
-        return;
-    }
     let Ok(conf_path) = wm_config_path(app) else {
         return;
     };
     let existing = std::fs::read_to_string(&conf_path).unwrap_or_default();
     let mut data = parse_wm_conf(&existing);
-    if data.focus_border_mode != "theme" || data.focus_border == primary {
+    if data.focus_border_mode == "theme" {
+        data.focus_border = primary.clone();
+    }
+    let rendered = render_wm_conf(&existing, &data, Some((&surface, &container, &primary)));
+    if existing.replace("\r\n", "\n") == rendered {
         return;
     }
-    data.focus_border = primary;
-    let rendered = render_wm_conf(&existing, &data);
     if std::fs::write(&conf_path, rendered).is_ok() {
         let _ = send_cmd("reload");
         refresh_snapshot_sync();
@@ -844,8 +917,12 @@ pub fn wm_config_save(
     mut data: WmConfigData,
     restart: Option<bool>,
 ) -> Result<WmConfigData, String> {
+    let theme_colors = current_normalized_theme_colors();
     if data.focus_border_mode == "theme" {
-        if let Some(primary) = crate::theme::current_primary().and_then(|p| normalize_hex(&p)) {
+        if let Some((_, _, ref primary)) = theme_colors {
+            data.focus_border = primary.clone();
+        } else if let Some(primary) = crate::theme::current_primary().and_then(|p| normalize_hex(&p))
+        {
             if !primary.is_empty() {
                 data.focus_border = primary;
             }
@@ -859,7 +936,13 @@ pub fn wm_config_save(
     let ign_path = ign_opt.ok_or_else(|| "cannot resolve vscroll-wm.ignore path".to_string())?;
 
     let existing = std::fs::read_to_string(&conf_path).unwrap_or_default();
-    let rendered = render_wm_conf(&existing, &data);
+    let rendered = render_wm_conf(
+        &existing,
+        &data,
+        theme_colors
+            .as_ref()
+            .map(|(s, c, p)| (s.as_str(), c.as_str(), p.as_str())),
+    );
     std::fs::write(&conf_path, rendered).map_err(|e| format!("failed writing config: {e}"))?;
 
     let mut ign_out = data.ignore_text.replace("\r\n", "\n");

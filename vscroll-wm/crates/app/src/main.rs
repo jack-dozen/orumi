@@ -38,6 +38,8 @@ mod osd;
 mod overview;
 mod rules;
 mod safety;
+mod snap_menu;
+mod snap_slots;
 mod taskbar;
 mod tray;
 mod winutil;
@@ -49,7 +51,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::HiDpi::{
-    SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 
 #[allow(unused_imports)]
@@ -60,7 +62,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::app::App;
 use crate::consts::{
     DIRS, HOTKEY_FLOAT, HOTKEY_INSPECT, HOTKEY_MAXIMIZE, HOTKEY_OVERVIEW, HOTKEY_QUIT, RECHECK_MS,
-    WM_ACTION, WM_CANCEL_START, WM_IPC, WM_WINEVENT,
+    WM_ACTION, WM_CANCEL_START, WM_IPC, WM_SNAP_CANCEL, WM_SNAP_PICK, WM_WINEVENT,
 };
 use crate::hook::{win_event_proc, MAIN_THREAD};
 use crate::winutil::{single_instance, work_area};
@@ -146,6 +148,13 @@ fn main() {
         } else if !osd::init() {
             eprintln!("gagal membuat jendela osd workspace");
         }
+        let dpi_scale = GetDpiForSystem() as f32 / 96.0;
+        if !snap_menu::init(dpi_scale) {
+            eprintln!("gagal membuat jendela menu snap layouts");
+        }
+        if !snap_slots::init(GetCurrentThreadId(), dpi_scale) {
+            eprintln!("gagal membuat jendela daftar window snap layouts");
+        }
         if RegisterHotKey(
             None,
             HOTKEY_OVERVIEW,
@@ -165,7 +174,7 @@ fn main() {
         let mut event_hooks: Vec<HWINEVENTHOOK> = Vec::new();
         for (lo, hi) in [
             (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
-            (EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND),
+            (EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND),
             (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
             (EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE),
             (EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED),
@@ -236,6 +245,8 @@ fn main() {
                 overview::WM_OV_CANCEL => app.close_overview(false),
                 overview::WM_OV_PICK => app.overview_pick(msg.wParam.0 as u64),
                 overview::WM_OV_DROP => app.overview_drop(),
+                WM_SNAP_PICK => app.snap_assist_pick(msg.wParam.0 as u64, msg.lParam.0 as u64),
+                WM_SNAP_CANCEL => app.snap_assist_end(true),
                 WM_WINEVENT => {
                     if !tray::PAUSED.load(Ordering::Relaxed) {
                         app.on_event(msg.wParam.0 as u32, HWND(msg.lParam.0 as *mut c_void));
@@ -251,6 +262,8 @@ fn main() {
                     let paused = tray::PAUSED.load(Ordering::Relaxed);
                     if app.anim_timer != 0 && id == app.anim_timer {
                         app.tick_anim();
+                    } else if app.snap_timer != 0 && id == app.snap_timer {
+                        app.tick_snap_drag();
                     } else if app.sync_timer != 0 && id == app.sync_timer {
                         app.stop_sync_timer();
                         if !paused {
