@@ -240,6 +240,10 @@ pub fn notch_set_toast_rect(width: f64, height: f64) {
 /// the panel on mouse-down) does not immediately re-open it on mouse-up.
 static LAST_CLOSE: Mutex<Vec<(&'static str, Instant)>> = Mutex::new(Vec::new());
 
+fn is_locked_by_fullscreen(label: &str) -> bool {
+    matches!(label, "bar" | "launcher" | "notch") && crate::winlist::is_foreground_fullscreen()
+}
+
 /// Per-panel "forced open" flag (hotkey, tray, or button click).
 pub struct Panels(pub HashMap<&'static str, Arc<AtomicBool>>);
 
@@ -247,6 +251,9 @@ impl Panels {
     /// Hotkey and tray: stays open until closed again.
     pub fn toggle(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
+            if !flag.load(Ordering::Relaxed) && is_locked_by_fullscreen(key) {
+                return;
+            }
             if *key == "launcher" {
                 LAUNCHER_HOVER.store(false, Ordering::Relaxed);
             }
@@ -263,6 +270,9 @@ impl Panels {
 
     pub fn set(&self, label: &str, open: bool) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
+            if open && is_locked_by_fullscreen(key) {
+                return;
+            }
             if *key == "launcher" {
                 LAUNCHER_HOVER.store(false, Ordering::Relaxed);
             }
@@ -300,6 +310,9 @@ impl Panels {
     /// UI click: opens, then hides when the cursor moves away.
     pub fn set_transient(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
+            if is_locked_by_fullscreen(key) {
+                return;
+            }
             flag_set(&TRANSIENT, key, true);
             flag_set(&DISMISSED, key, false);
             flag.store(true, Ordering::Relaxed);
@@ -549,7 +562,7 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
             // Always open the launcher at its usual size (the wallpaper view expands it itself).
             if spec.label == "launcher" {
                 set_size_override("launcher", None);
-                let compact = crate::winlist::is_foreground_maximized();
+                let compact = crate::winlist::has_visible_window();
                 let _ = window.emit("launcher-compact", compact);
             }
 
@@ -713,6 +726,8 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
         let probe = panels[0].window.clone();
         let mut metrics = monitor_metrics(&probe);
         let mut last_refresh = Instant::now();
+        let mut last_fs_check = Instant::now() - Duration::from_secs(1);
+        let mut fullscreen = false;
         let mut interval = POLL_FAST;
 
         loop {
@@ -721,6 +736,10 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             if last_refresh.elapsed() >= METRICS_REFRESH {
                 metrics = monitor_metrics(&probe).or(metrics);
                 last_refresh = Instant::now();
+            }
+            if last_fs_check.elapsed() >= Duration::from_millis(200) {
+                fullscreen = crate::winlist::is_foreground_fullscreen();
+                last_fs_check = Instant::now();
             }
             let Some(m) = metrics else { continue };
             let Ok(cursor) = probe.cursor_position() else { continue };
@@ -753,6 +772,26 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 .any(|q| q.spec.label == "overview" && (q.visible || q.pinned.load(Ordering::Relaxed)));
 
             for p in panels.iter_mut() {
+                if fullscreen && matches!(p.spec.label, "bar" | "launcher" | "notch") {
+                    p.pinned.store(false, Ordering::Relaxed);
+                    flag_set(&TRANSIENT, p.spec.label, false);
+                    flag_set(&HELD, p.spec.label, false);
+                    if p.spec.label == "launcher" {
+                        LAUNCHER_HOVER.store(false, Ordering::Relaxed);
+                    }
+                    if p.spec.label == "notch" && p.toast_hit {
+                        p.toast_hit = false;
+                        set_toast_passthrough(&app, &p.window, true);
+                    }
+                    p.armed = false;
+                    p.inside_since = None;
+                    p.outside_since = None;
+                    if p.visible {
+                        p.visible = false;
+                        set_visible(&app, &p.window, &p.event, false, &p.spec);
+                    }
+                    continue;
+                }
                 if p.spec.label == "bar" && overview_open {
                     p.pinned.store(false, Ordering::Relaxed);
                     flag_set(&TRANSIENT, "bar", false);

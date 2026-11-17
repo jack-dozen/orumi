@@ -22,20 +22,22 @@ use windows::{
     Win32::{
         Foundation::{CloseHandle, HWND, LPARAM, RECT},
         Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
+        Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST},
         System::Threading::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
             PROCESS_QUERY_LIMITED_INFORMATION,
         },
         UI::{
             Accessibility::{SetWinEventHook, HWINEVENTHOOK},
+            Shell::{SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN},
             WindowsAndMessaging::{
                 DispatchMessageW, EnumWindows, GetClassNameW, GetForegroundWindow, GetMessageW,
                 GetShellWindow, GetSystemMetrics, GetWindow, GetWindowLongW, GetWindowRect,
                 GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow,
                 IsIconic, IsWindowVisible, IsZoomed, SetForegroundWindow, ShowWindow,
-                SwitchToThisWindow, TranslateMessage, GWL_EXSTYLE, GW_OWNER, MSG, SM_CXSCREEN,
-                SM_CYSCREEN, SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_EX_APPWINDOW,
-                WS_EX_TOOLWINDOW,
+                SwitchToThisWindow, TranslateMessage, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, MSG,
+                SM_CXSCREEN, SM_CYSCREEN, SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT,
+                WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
             },
         },
     },
@@ -426,9 +428,43 @@ pub fn restore_external_foreground_if_ours() {
     }
 }
 
-/// True if the active external foreground window is maximized or covers the full screen.
-pub fn is_foreground_maximized() -> bool {
+unsafe fn is_on_primary_screen(hwnd: HWND) -> bool {
+    if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+        return false;
+    }
+    let mut rect = RECT::default();
+    if GetWindowRect(hwnd, &mut rect).is_err() {
+        return false;
+    }
+    if rect.right - rect.left < 80 || rect.bottom - rect.top < 80 {
+        return false;
+    }
+    let sw = GetSystemMetrics(SM_CXSCREEN);
+    let sh = GetSystemMetrics(SM_CYSCREEN);
+    if sw <= 0 || sh <= 0 {
+        return true;
+    }
+    rect.right > 0 && rect.left < sw && rect.bottom > 0 && rect.top < sh
+}
+
+/// True if the active workspace currently has any non-minimized window visible on the primary
+/// screen (maximized, WM-tiled with gaps, or split). Returns false only when the desktop is empty.
+pub fn has_visible_window() -> bool {
+    collect_windows()
+        .into_iter()
+        .any(|w| !w.minimized && unsafe { is_on_primary_screen(to_hwnd(w.hwnd)) })
+}
+
+/// True when the foreground application on the primary monitor is in true fullscreen mode
+/// (e.g. F11 browser/video or borderless/exclusive game), NOT merely maximized.
+pub fn is_foreground_fullscreen() -> bool {
     unsafe {
+        if let Ok(state) = SHQueryUserNotificationState() {
+            if state == QUNS_RUNNING_D3D_FULL_SCREEN {
+                return true;
+            }
+        }
+
         let my_pid = std::process::id();
         let mut hwnd = GetForegroundWindow();
         let mut pid: u32 = 0;
@@ -452,24 +488,34 @@ pub fn is_foreground_maximized() -> bool {
         ) {
             return false;
         }
-        if IsZoomed(hwnd).as_bool() {
-            return true;
+
+        let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(mon, &mut mi).as_bool() {
+            return false;
         }
+        // Only lock when fullscreen occupies the primary monitor where ORUMI panels live.
+        if (mi.dwFlags & 1) == 0 {
+            return false;
+        }
+
         let mut rect = RECT::default();
-        if GetWindowRect(hwnd, &mut rect).is_ok() {
-            let sw = GetSystemMetrics(SM_CXSCREEN);
-            let sh = GetSystemMetrics(SM_CYSCREEN);
-            if sw > 0
-                && sh > 0
-                && rect.left <= 0
-                && rect.top <= 0
-                && rect.right >= sw
-                && rect.bottom >= sh
-            {
-                return true;
-            }
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return false;
         }
-        false
+        let mr = mi.rcMonitor;
+        let covers_monitor =
+            rect.left <= mr.left && rect.top <= mr.top && rect.right >= mr.right && rect.bottom >= mr.bottom;
+        if !covers_monitor {
+            return false;
+        }
+
+        let zoomed = IsZoomed(hwnd).as_bool();
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
+        // Normal maximized windows have IsZoomed == true and WS_CAPTION; F11 / borderless
+        // fullscreen clears IsZoomed or strips the window caption.
+        !zoomed || !has_caption
     }
 }
 
