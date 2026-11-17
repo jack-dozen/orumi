@@ -114,8 +114,11 @@ function computeDropSlot(
   }
 
   const gap = Math.max(8, Math.round(ws.width * 0.008));
+  const adj = Math.max(24, Math.round(ws.width * 0.02));
   const edgeOf = (it: OverviewItem) => Math.max(40, Math.round(it.h * 0.22));
-  const barH = Math.max(18, Math.round(ws.height * 0.018));
+  const seamOf = (it: OverviewItem) =>
+    Math.max(24, Math.min(Math.round(it.h * 0.18), Math.max(60, Math.round(ws.width * 0.045))));
+  const barH = Math.max(18, Math.round(ws.width * 0.012));
   const makeBar = (yy: number) => ({
     x: 0,
     y: Math.max(0, yy - barH / 2),
@@ -167,8 +170,27 @@ function computeDropSlot(
   }
   if (!near) return null;
 
+  const seamBand = seamOf(near);
   const inside = pointInItem(near, px, py);
   if (near.span === "full") {
+    if (py < near.y + seamBand) {
+      return {
+        targetWs: ws.index,
+        kind: "before",
+        targetHwnd: near.hwnd,
+        first: false,
+        mark: makeBar(near.y),
+      };
+    }
+    if (py >= near.y + near.h - seamBand) {
+      return {
+        targetWs: ws.index,
+        kind: "after",
+        targetHwnd: near.hwnd,
+        first: false,
+        mark: makeBar(near.y + near.h),
+      };
+    }
     if (inside && cleanFull(remaining, near, ws.width)) {
       const midX = near.x + near.w / 2;
       const first = px < midX;
@@ -191,7 +213,7 @@ function computeDropSlot(
         kind: "before",
         targetHwnd: near.hwnd,
         first: false,
-        mark: makeBar(Math.max(gap, near.y - gap)),
+        mark: makeBar(near.y),
       };
     }
     return {
@@ -199,8 +221,37 @@ function computeDropSlot(
       kind: "after",
       targetHwnd: near.hwnd,
       first: false,
-      mark: makeBar(Math.min(ws.height - gap, near.y + near.h + gap)),
+      mark: makeBar(near.y + near.h),
     };
+  }
+
+  // Allow full-width drops on the seam between a half-width block and an adjacent full window.
+  if (py < near.y + seamBand) {
+    const fullAbove = remaining.find(
+      (it) => it.span === "full" && Math.abs(it.y + it.h - near!.y) <= adj,
+    );
+    if (fullAbove) {
+      return {
+        targetWs: ws.index,
+        kind: "after",
+        targetHwnd: fullAbove.hwnd,
+        first: false,
+        mark: makeBar(fullAbove.y + fullAbove.h),
+      };
+    }
+  } else if (py >= near.y + near.h - seamBand) {
+    const fullBelow = remaining.find(
+      (it) => it.span === "full" && Math.abs(near!.y + near!.h - it.y) <= adj,
+    );
+    if (fullBelow) {
+      return {
+        targetWs: ws.index,
+        kind: "before",
+        targetHwnd: fullBelow.hwnd,
+        first: false,
+        mark: makeBar(fullBelow.y),
+      };
+    }
   }
 
   if (inside) {
