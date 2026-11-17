@@ -157,6 +157,7 @@ pub fn run() {
             edge::launcher_set_size,
             edge::notch_set_height,
             edge::notch_set_toast_rect,
+            edge::notch_set_lyrics_pin,
             notifications::notif_list,
             notifications::notif_mark_read,
             notifications::notif_clear_all,

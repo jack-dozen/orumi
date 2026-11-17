@@ -236,6 +236,16 @@ pub fn notch_set_toast_rect(width: f64, height: f64) {
     wake();
 }
 
+/// Notch only: true while the compact live-lyrics pill is pinned open (stays visible until clicked
+/// and keeps areas outside the pill click-through).
+static NOTCH_LYRICS_PIN: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+pub fn notch_set_lyrics_pin(pinned: bool) {
+    NOTCH_LYRICS_PIN.store(pinned, Ordering::Relaxed);
+    wake();
+}
+
 /// Timestamp of the last close per panel, so a bar button click that causes focus loss (closing
 /// the panel on mouse-down) does not immediately re-open it on mouse-up.
 static LAST_CLOSE: Mutex<Vec<(&'static str, Instant)>> = Mutex::new(Vec::new());
@@ -549,7 +559,14 @@ pub fn set_activatable(window: &WebviewWindow, activatable: bool) {
 }
 
 /// Update the window on the main thread: reset position, click-through and focus, then notify React.
-fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool, spec: &PanelSpec) {
+fn set_visible(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    event: &str,
+    show: bool,
+    spec: &PanelSpec,
+    notch_compact: bool,
+) {
     let app_handle = app.clone();
     let window = window.clone();
     let event = event.to_string();
@@ -564,6 +581,9 @@ fn set_visible(app: &AppHandle, window: &WebviewWindow, event: &str, show: bool,
                 set_size_override("launcher", None);
                 let compact = crate::winlist::has_visible_window();
                 let _ = window.emit("launcher-compact", compact);
+            }
+            if spec.label == "notch" {
+                let _ = window.emit("notch-compact", notch_compact);
             }
 
             // The display can change (power, resolution, dock), so reset each time it appears.
@@ -687,6 +707,7 @@ struct Runtime {
     pinned: Arc<AtomicBool>,
     event: String,
     visible: bool,
+    was_pinned: bool,
     outside_since: Option<Instant>,
     inside_since: Option<Instant>,
     /// Whether the cursor entered the window after the panel was opened by clicking.
@@ -696,6 +717,10 @@ struct Runtime {
     armed: bool,
     /// Notch only: true while cursor is over the closed-notch notification popup.
     toast_hit: bool,
+    /// Notch only: true while the compact live-lyrics pill is pinned open.
+    was_lyrics_pin: bool,
+    /// Notch only: true while cursor is over the pinned compact live-lyrics pill.
+    lyrics_hit: bool,
 }
 
 /// One thread for all panels.
@@ -711,11 +736,14 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 spec,
                 pinned,
                 visible: false,
+                was_pinned: false,
                 outside_since: None,
                 inside_since: None,
                 pin_entered: false,
                 armed: true,
                 toast_hit: false,
+                was_lyrics_pin: false,
+                lyrics_hit: false,
             })
             .collect();
         if panels.is_empty() {
@@ -752,10 +780,12 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 || cursor.y < m.1 + margin
                 || cursor.y > m.1 + m.3 - margin;
             let toast_rect = toast_hit_rect(m);
+            let lyrics_pin = NOTCH_LYRICS_PIN.load(Ordering::Relaxed);
             let busy = toast_rect.is_some()
-                || panels
-                    .iter()
-                    .any(|p| p.visible || p.pinned.load(Ordering::Relaxed));
+                || panels.iter().any(|p| {
+                    (p.visible && !(p.spec.label == "notch" && lyrics_pin && !p.was_pinned))
+                        || p.pinned.load(Ordering::Relaxed)
+                });
             interval = if near_edge || busy { POLL_FAST } else { POLL_IDLE };
 
             // A thumbnail preview extends the bar: keep the bar open while the cursor is over it.
@@ -779,16 +809,22 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     if p.spec.label == "launcher" {
                         LAUNCHER_HOVER.store(false, Ordering::Relaxed);
                     }
-                    if p.spec.label == "notch" && p.toast_hit {
-                        p.toast_hit = false;
-                        set_toast_passthrough(&app, &p.window, true);
+                    if p.spec.label == "notch" {
+                        NOTCH_LYRICS_PIN.store(false, Ordering::Relaxed);
+                        p.was_lyrics_pin = false;
+                        p.lyrics_hit = false;
+                        if p.toast_hit {
+                            p.toast_hit = false;
+                            set_toast_passthrough(&app, &p.window, true);
+                        }
                     }
                     p.armed = false;
+                    p.was_pinned = false;
                     p.inside_since = None;
                     p.outside_since = None;
                     if p.visible {
                         p.visible = false;
-                        set_visible(&app, &p.window, &p.event, false, &p.spec);
+                        set_visible(&app, &p.window, &p.event, false, &p.spec, false);
                     }
                     continue;
                 }
@@ -797,11 +833,12 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     flag_set(&TRANSIENT, "bar", false);
                     flag_set(&HELD, "bar", false);
                     p.armed = false;
+                    p.was_pinned = false;
                     p.inside_since = None;
                     p.outside_since = None;
                     if p.visible {
                         p.visible = false;
-                        set_visible(&app, &p.window, &p.event, false, &p.spec);
+                        set_visible(&app, &p.window, &p.event, false, &p.spec, false);
                     }
                     continue;
                 }
@@ -870,20 +907,38 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                                 LAUNCHER_HOVER.store(false, Ordering::Relaxed);
                             }
                         }
-                        set_visible(&app, &p.window, &p.event, pinned, &p.spec);
+                        set_visible(&app, &p.window, &p.event, pinned, &p.spec, false);
                     }
+                    p.was_pinned = pinned;
                     continue;
                 }
 
                 // Forced open: ignore cursor position, except for panels opened by clicking.
                 if pinned {
+                    if p.spec.label == "notch" {
+                        NOTCH_LYRICS_PIN.store(false, Ordering::Relaxed);
+                    }
                     if !p.visible {
                         p.visible = true;
                         p.toast_hit = false;
+                        p.was_lyrics_pin = false;
+                        p.lyrics_hit = false;
                         p.pin_entered = false;
                         p.outside_since = None;
-                        set_visible(&app, &p.window, &p.event, true, &p.spec);
+                        set_visible(&app, &p.window, &p.event, true, &p.spec, false);
+                    } else if p.spec.label == "notch" && !p.was_pinned {
+                        if p.was_lyrics_pin {
+                            p.was_lyrics_pin = false;
+                            p.lyrics_hit = false;
+                            set_toast_passthrough(&app, &p.window, false);
+                        }
+                        let w = p.window.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            let _ = w.emit("notch-lyrics-pin", false);
+                            let _ = w.emit("notch-compact", false);
+                        });
                     }
+                    p.was_pinned = true;
                     if flag_has(&TRANSIENT, p.spec.label) && !flag_has(&HELD, p.spec.label) {
                         let (win_rect, _) = layout(&p.spec, m);
                         let hit = panel_hit_rect(p.spec.label, win_rect, m.4);
@@ -904,15 +959,21 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     }
                     continue;
                 }
+                p.was_pinned = false;
 
                 if flag_has(&DISMISSED, p.spec.label) {
                     flag_set(&DISMISSED, p.spec.label, false);
                     p.armed = false;
                     p.inside_since = None;
                     p.outside_since = None;
+                    if p.spec.label == "notch" {
+                        NOTCH_LYRICS_PIN.store(false, Ordering::Relaxed);
+                        p.was_lyrics_pin = false;
+                        p.lyrics_hit = false;
+                    }
                     if p.visible {
                         p.visible = false;
-                        set_visible(&app, &p.window, &p.event, false, &p.spec);
+                        set_visible(&app, &p.window, &p.event, false, &p.spec, false);
                     }
                     continue;
                 }
@@ -940,27 +1001,52 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     } else if trigger_rect.contains(cursor.x, cursor.y) {
                         let since = *p.inside_since.get_or_insert_with(Instant::now);
                         if since.elapsed() >= EDGE_DWELL {
+                            let notch_compact = if p.spec.label == "notch" {
+                                crate::winlist::has_window_near_notch(
+                                    m.0,
+                                    m.1,
+                                    m.2,
+                                    m.4 * ui_scale(),
+                                )
+                            } else {
+                                false
+                            };
                             p.visible = true;
                             p.toast_hit = false;
                             p.inside_since = None;
                             p.outside_since = None;
-                            set_visible(&app, &p.window, &p.event, true, &p.spec);
+                            set_visible(&app, &p.window, &p.event, true, &p.spec, notch_compact);
                         }
                     } else {
                         p.inside_since = None;
                     }
-                } else if win_rect.contains(cursor.x, cursor.y)
-                    || flag_has(&HELD, p.spec.label)
-                    || (p.spec.label == "bar" && over_preview)
-                {
-                    // Cursor is inside, or the panel is being used for typing: do not close it.
+                } else if p.spec.label == "notch" && lyrics_pin {
+                    let over = win_rect.contains(cursor.x, cursor.y);
+                    if !p.was_lyrics_pin || over != p.lyrics_hit {
+                        p.lyrics_hit = over;
+                        set_toast_passthrough(&app, &p.window, !over);
+                    }
+                    p.was_lyrics_pin = true;
                     p.outside_since = None;
                 } else {
-                    let since = *p.outside_since.get_or_insert_with(Instant::now);
-                    if since.elapsed() >= HIDE_DELAY {
-                        p.visible = false;
+                    if p.spec.label == "notch" && p.was_lyrics_pin {
+                        p.was_lyrics_pin = false;
+                        p.lyrics_hit = false;
+                        set_toast_passthrough(&app, &p.window, false);
+                    }
+                    if win_rect.contains(cursor.x, cursor.y)
+                        || flag_has(&HELD, p.spec.label)
+                        || (p.spec.label == "bar" && over_preview)
+                    {
+                        // Cursor is inside, or the panel is being used for typing: do not close it.
                         p.outside_since = None;
-                        set_visible(&app, &p.window, &p.event, false, &p.spec);
+                    } else {
+                        let since = *p.outside_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() >= HIDE_DELAY {
+                            p.visible = false;
+                            p.outside_since = None;
+                            set_visible(&app, &p.window, &p.event, false, &p.spec, false);
+                        }
                     }
                 }
             }

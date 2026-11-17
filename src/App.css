@@ -244,11 +244,17 @@ button {
   transition:
     transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
     width 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    height 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    height 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-radius 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .notch--visible {
   transform: translateY(0);
+}
+
+.notch--compact {
+  border-radius: 0 0 20px 20px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 
 .notch--instant {
@@ -264,6 +270,250 @@ button {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.notch--compact .notch__inner {
+  padding: 0;
+  gap: 0;
+}
+
+.cnotch {
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  padding: 0 16px;
+  border: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: transparent;
+  color: var(--on-surface);
+  font: inherit;
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.cnotch:hover {
+  background: color-mix(in srgb, var(--surface-container-high) 42%, transparent);
+}
+
+.cnotch--media {
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px;
+}
+
+.cnotch__time {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cnotch__time--media {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+}
+
+.cnotch__sep {
+  color: var(--on-surface-variant);
+  opacity: 0.6;
+  font-weight: 600;
+}
+
+.cnotch__date {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+}
+
+.cnotch__coverbtn {
+  padding: 0;
+  border: 0;
+  margin: 0;
+  border-radius: 7px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 140ms, filter 140ms;
+}
+
+.cnotch__coverbtn:hover {
+  transform: scale(1.08);
+  filter: brightness(1.08);
+}
+
+.cnotch__cover {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+}
+
+.cnotch__cover--empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-container-high);
+  color: var(--primary);
+}
+
+.cnotch__viz {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 2px 6px;
+  border: 0;
+  margin: 0;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: background 150ms;
+}
+
+.cnotch__viz:hover {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.cnotch__bar {
+  width: 4px;
+  height: 100%;
+  max-height: 24px;
+  border-radius: 99px;
+  background: var(--primary);
+  transform: scaleY(0.18);
+  transform-origin: center;
+  opacity: 0.95;
+  will-change: transform;
+}
+
+.clyrics {
+  width: 100%;
+  height: 54px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--on-surface);
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.clyrics:hover {
+  background: color-mix(in srgb, var(--surface-container-high) 42%, transparent);
+}
+
+.clyrics--paused .clyrics__line {
+  opacity: 0.78;
+}
+
+.clyrics__cover {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.clyrics__cover--empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-container-high);
+  color: var(--primary);
+}
+
+.clyrics__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+.clyrics__line {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.28;
+  color: var(--on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: clyrics-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.clyrics__next {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--on-surface-variant);
+  opacity: 0.72;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes clyrics-in {
+  from {
+    opacity: 0.35;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.clyrics__btn,
+.clyrics__close {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-surface-variant);
+  flex-shrink: 0;
+}
+
+.clyrics__btn {
+  cursor: pointer;
+  transition: background 140ms, color 140ms;
+}
+
+.clyrics__btn:hover {
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+}
+
+.clyrics__close {
+  opacity: 0.55;
+  transition: opacity 150ms, background 150ms, color 150ms;
+}
+
+.clyrics:hover .clyrics__close {
+  opacity: 1;
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
 }
 
 .notch__body {

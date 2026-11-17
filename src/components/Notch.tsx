@@ -3,9 +3,10 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useGpu } from "../useGpu";
+import { useLyrics } from "../useLyrics";
 import { useMedia, type MediaState } from "../useMedia";
 import { useNotifications, type NotifEntry } from "../useNotifications";
-import { useVisualizerSource } from "../useVisualizer";
+import { useVisualizerBars, useVisualizerSource } from "../useVisualizer";
 import { useNow } from "../useNow";
 import { useProcesses, type ProcEntry } from "../useProcesses";
 import { useStats, type Stats } from "../useStats";
@@ -978,8 +979,204 @@ function NotificationsTab({
 
 type WsOsd = { active: number; total: number };
 
+const COMPACT_VIZ_BARS = 16;
+
+function CompactNotch({
+  media,
+  active,
+  onExpand,
+  onOpenLyrics,
+}: {
+  media: MediaState;
+  active: boolean;
+  onExpand: (targetTab?: TabId) => void;
+  onOpenLyrics: () => void;
+}) {
+  const now = useNow();
+  const playing = Boolean(media.info?.playing);
+  const { barRefs } = useVisualizerBars(active && playing, COMPACT_VIZ_BARS, {
+    minScale: 0.18,
+    beatLift: 0.08,
+  });
+
+  const timeText = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const dateText = now.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`cnotch ${playing ? "cnotch--media" : ""}`}
+      onClick={() => onExpand()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onExpand();
+        }
+      }}
+      title={
+        playing && media.info
+          ? `${media.info.title || "Playing media"} — Click to expand Notch`
+          : "Click to expand Notch"
+      }
+    >
+      {playing ? (
+        <>
+          <button
+            type="button"
+            className="cnotch__coverbtn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onExpand("media");
+            }}
+            title="Open Media tab"
+            aria-label="Open Media tab"
+          >
+            {media.art ? (
+              <img className="cnotch__cover" src={media.art} alt="" draggable={false} />
+            ) : (
+              <span className="cnotch__cover cnotch__cover--empty">
+                <Icon name="music_note" size={14} />
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            className="cnotch__viz"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenLyrics();
+            }}
+            title="Live lyrics (pin at notch)"
+            aria-label="Open live lyrics"
+          >
+            {Array.from({ length: COMPACT_VIZ_BARS }, (_, i) => (
+              <span
+                key={i}
+                ref={(el) => {
+                  barRefs.current[i] = el;
+                }}
+                className="cnotch__bar"
+              />
+            ))}
+          </button>
+          <span className="cnotch__time cnotch__time--media" title="Open Notch (last tab)">
+            {timeText}
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="cnotch__time">{timeText}</span>
+          <span className="cnotch__sep" aria-hidden="true">
+            ·
+          </span>
+          <span className="cnotch__date">{dateText}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CompactLyrics({
+  media,
+  active,
+  onExit,
+}: {
+  media: MediaState;
+  active: boolean;
+  onExit: () => void;
+}) {
+  const { info, art } = media;
+  const lyrics = useLyrics(info, active);
+
+  let primary = info?.title || "Live lyrics";
+  let secondary = info?.artist || info?.source || "";
+
+  if (!info) {
+    primary = "No media playing";
+    secondary = "Click to return";
+  } else if (lyrics.status === "loading" || lyrics.status === "idle") {
+    secondary = "Loading lyrics…";
+  } else if (lyrics.status === "error") {
+    primary = "Couldn't load lyrics";
+    secondary = info.title || "Click to return";
+  } else if (!lyrics.data || lyrics.data.kind === "none") {
+    secondary = "No lyrics found";
+  } else if (lyrics.data.kind === "instrumental") {
+    secondary = "♪ Instrumental ♪";
+  } else if (lyrics.data.kind === "plain") {
+    secondary = "Unsynced lyrics · Click to return";
+  } else if (lyrics.data.kind === "synced") {
+    const lines = lyrics.data.lines;
+    const idx = lyrics.activeIndex;
+    if (idx >= 0 && idx < lines.length) {
+      primary = lines[idx].text;
+      secondary = lines[idx + 1]?.text ?? (info.artist ? `${info.title} · ${info.artist}` : info.title);
+    } else {
+      secondary = [info.artist, "♪"].filter(Boolean).join(" · ");
+    }
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`clyrics ${info && !info.playing ? "clyrics--paused" : ""}`}
+      onClick={onExit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onExit();
+        }
+      }}
+      title="Click to return to compact notch"
+    >
+      {art ? (
+        <img className="clyrics__cover" src={art} alt="" draggable={false} />
+      ) : (
+        <span className="clyrics__cover clyrics__cover--empty">
+          <Icon name="music_note" size={16} />
+        </span>
+      )}
+      <div className="clyrics__body">
+        <div
+          key={lyrics.data?.kind === "synced" ? `line-${lyrics.activeIndex}` : "line-static"}
+          className="clyrics__line"
+        >
+          {primary}
+        </div>
+        {secondary && <div className="clyrics__next">{secondary}</div>}
+      </div>
+      {lyrics.status === "error" && (
+        <button
+          type="button"
+          className="clyrics__btn"
+          title="Retry loading lyrics"
+          aria-label="Retry loading lyrics"
+          onClick={(e) => {
+            e.stopPropagation();
+            lyrics.retry();
+          }}
+        >
+          <Icon name="refresh" size={16} />
+        </button>
+      )}
+      <span className="clyrics__close" aria-hidden="true">
+        <Icon name="close" size={16} />
+      </span>
+    </div>
+  );
+}
+
 export default function Notch() {
   const visible = useEdgeVisible("notch");
+  const [opening, setOpening] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const [compactLyrics, setCompactLyrics] = useState(false);
   const [tab, setTab] = useState<TabId>("dashboard");
   const [quickSubView, setQuickSubView] = useState<QuickSubView>("grid");
   const [instantHide, setInstantHide] = useState(false);
@@ -987,13 +1184,23 @@ export default function Notch() {
   const [osdOpen, setOsdOpen] = useState(false);
   const osdTimer = useRef<number | undefined>(undefined);
 
+  const setLyricsPin = (next: boolean) => {
+    setCompactLyrics(next);
+    invoke("notch_set_lyrics_pin", { pinned: next }).catch(() => {});
+  };
+
   // Fetch data only while the notch is visible and its tab uses it.
-  const stats = useStats(visible && (tab === "dashboard" || tab === "system"));
-  const media = useMedia(visible && (tab === "dashboard" || tab === "media"));
-  useVisualizerSource(visible && (tab === "dashboard" || tab === "media") && Boolean(media.info));
-  const procs = useProcesses(visible && tab === "system");
-  const gpu = useGpu(visible && (tab === "dashboard" || tab === "system"));
-  const wifi = useWifi(visible && tab === "settings");
+  const stats = useStats(visible && !compact && (tab === "dashboard" || tab === "system"));
+  const media = useMedia((opening || visible) && (compact || tab === "dashboard" || tab === "media"));
+  const compactMediaPlaying = compact && Boolean(media.info?.playing);
+  useVisualizerSource(
+    (opening || visible) &&
+      ((compactMediaPlaying && !compactLyrics) ||
+        (!compact && (tab === "dashboard" || tab === "media") && Boolean(media.info))),
+  );
+  const procs = useProcesses(visible && !compact && tab === "system");
+  const gpu = useGpu(visible && !compact && (tab === "dashboard" || tab === "system"));
+  const wifi = useWifi(visible && !compact && tab === "settings");
   const cfg = useConfig();
   const weather = useWeather(cfg?.weather_city ?? "Bandung");
   const notifsEnabled = cfg?.notifications_enabled ?? true;
@@ -1031,8 +1238,13 @@ export default function Notch() {
   }, [stats]);
 
   const showMini = Boolean(media.info);
-  const width =
-    tab === "dashboard"
+  const width = compact
+    ? compactLyrics
+      ? 390
+      : compactMediaPlaying
+        ? 272
+        : 248
+    : tab === "dashboard"
       ? showMini
         ? 740
         : 550
@@ -1058,6 +1270,11 @@ export default function Notch() {
   }, []);
 
   useLayoutEffect(() => {
+    const el = innerRef.current;
+    if (el) setHeight(el.offsetHeight);
+  }, [compact, compactLyrics, tab, quickSubView, showMini]);
+
+  useLayoutEffect(() => {
     if (height === null) return;
     invoke("notch_set_height", { height, width }).catch(() => {});
   }, [height, width]);
@@ -1067,6 +1284,8 @@ export default function Notch() {
     setInstantHide(false);
     if (!visible) {
       setQuickSubView("grid");
+      setCompactLyrics(false);
+      invoke("notch_set_lyrics_pin", { pinned: false }).catch(() => {});
       invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
     }
   }, [visible]);
@@ -1090,9 +1309,31 @@ export default function Notch() {
     return () => window.removeEventListener("blur", onBlur);
   }, []);
 
+  // Track compact-vs-full open mode and pre-warm media status as soon as Rust signals open.
+  useEffect(() => {
+    const unlistenCompact = listen<boolean>("notch-compact", (e) => {
+      setCompact(e.payload);
+      if (!e.payload) setCompactLyrics(false);
+    });
+    const unlistenLyricsPin = listen<boolean>("notch-lyrics-pin", (e) => {
+      setCompactLyrics(e.payload);
+    });
+    const unlistenOpen = listen<boolean>("edge-visible:notch", (e) => {
+      setOpening(e.payload);
+      if (!e.payload) setCompactLyrics(false);
+    });
+    return () => {
+      unlistenCompact.then((fn) => fn());
+      unlistenLyricsPin.then((fn) => fn());
+      unlistenOpen.then((fn) => fn());
+    };
+  }, []);
+
   // The bar can ask the notch to switch to a specific tab (clock or WiFi icon click).
   useEffect(() => {
     const unlisten = listen<string>("notch-tab", (e) => {
+      setLyricsPin(false);
+      setCompact(false);
       const [t, sub] = e.payload.split("/");
       if (TABS.some((x) => x.id === t)) setTab(t as TabId);
       if (t === "settings" && (sub === "wifi" || sub === "bluetooth" || sub === "grid")) {
@@ -1163,58 +1404,81 @@ export default function Notch() {
       <div
         className={`notch ${visible && !instantHide ? "notch--visible" : ""} ${
           instantHide ? "notch--instant" : ""
-        }`}
+        } ${compact ? "notch--compact" : ""}`}
         style={{ width, height: height ?? undefined }}
       >
       <div className="notch__inner" ref={innerRef}>
-        <div className="tabs">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`tabs__item ${tab === t.id ? "tabs__item--active" : ""}`}
-              onClick={() => setTab(t.id)}
-            >
-              <span className="tabs__icon-wrap">
-                <Icon name={t.icon} size={22} fill={tab === t.id} />
-                {t.id === "notification" && notifs.unreadCount > 0 && (
-                  <span className="tabs__badge">
-                    {notifs.unreadCount > 99 ? "99+" : notifs.unreadCount}
+        {compact ? (
+          compactLyrics ? (
+            <CompactLyrics
+              media={media}
+              active={visible && compact && compactLyrics}
+              onExit={() => setLyricsPin(false)}
+            />
+          ) : (
+            <CompactNotch
+              media={media}
+              active={visible && compact}
+              onExpand={(targetTab) => {
+                if (targetTab) setTab(targetTab);
+                setLyricsPin(false);
+                setCompact(false);
+              }}
+              onOpenLyrics={() => setLyricsPin(true)}
+            />
+          )
+        ) : (
+          <>
+            <div className="tabs">
+              {TABS.map((t) => (
+                <button
+                  key={t.id}
+                  className={`tabs__item ${tab === t.id ? "tabs__item--active" : ""}`}
+                  onClick={() => setTab(t.id)}
+                >
+                  <span className="tabs__icon-wrap">
+                    <Icon name={t.icon} size={22} fill={tab === t.id} />
+                    {t.id === "notification" && notifs.unreadCount > 0 && (
+                      <span className="tabs__badge">
+                        {notifs.unreadCount > 99 ? "99+" : notifs.unreadCount}
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-              {t.label}
-            </button>
-          ))}
-        </div>
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-        <div className="notch__body">
-          {tab === "dashboard" && (
-            <Dashboard stats={stats} media={media} gpu={gpu} weather={weather} visible={visible} />
-          )}
-          {tab === "media" && <MediaTab media={media} active={visible} />}
-          {tab === "notification" && (
-            <NotificationsTab
-              items={notifs.items}
-              enabled={notifsEnabled}
-              onOpen={notifs.openNotif}
-              onMarkRead={notifs.markRead}
-              onClearAll={notifs.clearAll}
-            />
-          )}
-          {tab === "system" && (
-            <SystemTab stats={stats} procs={procs} gpu={gpu} hist={sysHist} />
-          )}
-          {tab === "settings" && (
-            <QuickSettings
-              wifi={wifi}
-              visible={visible}
-              cfg={cfg}
-              subView={quickSubView}
-              onSubView={setQuickSubView}
-              onInstantHide={() => setInstantHide(true)}
-            />
-          )}
-        </div>
+            <div className="notch__body">
+              {tab === "dashboard" && (
+                <Dashboard stats={stats} media={media} gpu={gpu} weather={weather} visible={visible} />
+              )}
+              {tab === "media" && <MediaTab media={media} active={visible} />}
+              {tab === "notification" && (
+                <NotificationsTab
+                  items={notifs.items}
+                  enabled={notifsEnabled}
+                  onOpen={notifs.openNotif}
+                  onMarkRead={notifs.markRead}
+                  onClearAll={notifs.clearAll}
+                />
+              )}
+              {tab === "system" && (
+                <SystemTab stats={stats} procs={procs} gpu={gpu} hist={sysHist} />
+              )}
+              {tab === "settings" && (
+                <QuickSettings
+                  wifi={wifi}
+                  visible={visible}
+                  cfg={cfg}
+                  subView={quickSubView}
+                  onSubView={setQuickSubView}
+                  onInstantHide={() => setInstantHide(true)}
+                />
+              )}
+            </div>
+          </>
+        )}
       </div>
       </div>
     </>

@@ -455,6 +455,40 @@ pub fn has_visible_window() -> bool {
         .any(|w| !w.minimized && unsafe { is_on_primary_screen(to_hwnd(w.hwnd)) })
 }
 
+/// True if the active workspace has a non-minimized window overlapping the top-center notch
+/// proximity zone on the primary monitor.
+pub fn has_window_near_notch(mx: f64, my: f64, mw: f64, u: f64) -> bool {
+    let half_w = 260.0 * u;
+    let near_h = 96.0 * u;
+    let zx0 = mx + mw / 2.0 - half_w;
+    let zx1 = mx + mw / 2.0 + half_w;
+    let zy0 = my;
+    let zy1 = my + near_h;
+
+    collect_windows().into_iter().any(|w| {
+        if w.minimized {
+            return false;
+        }
+        let hwnd = to_hwnd(w.hwnd);
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+                return false;
+            }
+            let mut rect = RECT::default();
+            if GetWindowRect(hwnd, &mut rect).is_err() {
+                return false;
+            }
+            if rect.right - rect.left < 80 || rect.bottom - rect.top < 80 {
+                return false;
+            }
+            (rect.right as f64) > zx0
+                && (rect.left as f64) < zx1
+                && (rect.bottom as f64) > zy0
+                && (rect.top as f64) < zy1
+        }
+    })
+}
+
 /// True when the foreground application on the primary monitor is in true fullscreen mode
 /// (e.g. F11 browser/video or borderless/exclusive game), NOT merely maximized.
 pub fn is_foreground_fullscreen() -> bool {
