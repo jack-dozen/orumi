@@ -205,11 +205,6 @@ pub fn ensure_hook(reason: &'static str) {
     reinstall();
 }
 
-/// A launcher close can follow a focus transition that leaves the low-level hook detached.
-pub fn launcher_closed() {
-    ensure_hook("launcher closed");
-}
-
 /// Enable/disable the Alt+Tab replacement. Disabling also cancels any active session;
 /// enabling reinstalls the hook in case Windows or WebView2 has detached it.
 pub fn set_enabled(on: bool) {

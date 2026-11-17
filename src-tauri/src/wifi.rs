@@ -125,7 +125,7 @@ fn reason_code_string(reason: u32) -> String {
         return "Success".into();
     }
     let mut buf = vec![0u16; 512];
-    let slice: &[u16] = &mut buf;
+    let slice = unsafe { std::slice::from_raw_parts(buf.as_mut_ptr(), buf.len()) };
     let rc = unsafe { WlanReasonCodeToString(reason, slice, None) };
     if rc == 0 {
         let msg = wide_slice_to_string(&buf).trim().to_string();

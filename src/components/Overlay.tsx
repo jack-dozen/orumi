@@ -235,13 +235,15 @@ export default function Overlay() {
     vol.muted || vol.volume < 1 ? "volume_off" : vol.volume < 50 ? "volume_down" : "volume_up";
 
   const mixerMode = mode !== "power";
+  const powerHidden = mixerMode && !showPower;
   const power = (
-    <div className={`opower ${!mixerMode || showPower ? "opower--shown" : ""}`}>
+    <div className="opower" aria-hidden={powerHidden}>
       <div className="opill opill--power">
         {POWER_ITEMS.map((it) => (
           <button
             key={it.id}
             title={it.label}
+            tabIndex={powerHidden ? -1 : undefined}
             className={`obtn ${armed === it.id ? "obtn--armed" : ""}`}
             onClick={() => onPower(it)}
           >
@@ -253,7 +255,11 @@ export default function Overlay() {
   );
 
   return (
-    <div className={`overlay ${visible ? "overlay--visible" : ""}`}>
+    <div
+      className={`overlay ${visible ? "overlay--visible" : ""} ${
+        powerHidden ? "overlay--collapsed" : ""
+      }`}
+    >
       {mixerMode && (
         <div
           className={`opill opill--mixer ${tall ? "opill--tall" : ""}`}

@@ -42,31 +42,6 @@ pub fn wallpaper_stamp() -> Option<String> {
     Some(format!("{path}|{secs}|{}", meta.len()))
 }
 
-/// Wallpaper contents as a data URL. Called only when its stamp changes.
-#[tauri::command]
-pub async fn wallpaper_image() -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let path = wallpaper_path()?;
-        let meta = fs::metadata(&path).ok()?;
-        if meta.len() == 0 || meta.len() > 40_000_000 {
-            return None;
-        }
-        let bytes = fs::read(&path).ok()?;
-        let mime = if bytes.starts_with(&[0xFF, 0xD8]) {
-            "image/jpeg"
-        } else if bytes.starts_with(&[0x89, 0x50]) {
-            "image/png"
-        } else if bytes.starts_with(b"BM") {
-            "image/bmp"
-        } else {
-            "image/jpeg"
-        };
-        Some(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
-    })
-    .await
-    .map_err(|e| e.to_string())
-}
-
 /// Called by the notch after calculating the palette: save and broadcast it to all windows.
 #[tauri::command]
 pub fn set_theme(json: String, app: AppHandle) {

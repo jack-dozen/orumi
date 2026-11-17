@@ -286,6 +286,7 @@ pub struct Cell {
 
 pub struct Sheet {
     pub panel: Rect,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub columns: i32,
     pub cells: Vec<Cell>,
 }
