@@ -310,6 +310,7 @@ export default function WmOverview() {
   const [dotHover, setDotHover] = useState<number | null>(null);
 
   const stageRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const openedAt = useRef(0);
   const dotDwellTimer = useRef<number | undefined>(undefined);
@@ -627,6 +628,34 @@ export default function WmOverview() {
     ? Math.max(curWs.height * scale, stageWidth * 0.5625)
     : stageWidth * 0.5625;
 
+  // Keep the selected tile visible when navigating with arrow keys or switching workspaces.
+  useEffect(() => {
+    if (!visible || !curWs) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const activeHwnd = selectedHwnd || curWs.focused;
+    const item = curWs.items.find((it) => it.hwnd === activeHwnd);
+    if (!item) return;
+    const stage = stageRef.current;
+    const stageTop = stage
+      ? stage.offsetParent === canvas
+        ? stage.offsetTop
+        : stage.offsetTop - canvas.offsetTop
+      : 4;
+    const top = stageTop + item.y * scale;
+    const height = Math.max(24, item.h * scale);
+    const bottom = top + height;
+    const pad = 12;
+    if (top - pad < canvas.scrollTop) {
+      canvas.scrollTo({ top: Math.max(0, top - pad), behavior: "smooth" });
+    } else if (bottom + pad > canvas.scrollTop + canvas.clientHeight) {
+      canvas.scrollTo({
+        top: bottom + pad - canvas.clientHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [visible, viewedWs, selectedHwnd, scale, curWs]);
+
   return (
     <div
       className={`wmov ${visible ? "wmov--visible" : ""} ${fromBar ? "wmov--from-bar" : ""}`}
@@ -683,7 +712,7 @@ export default function WmOverview() {
           </span>
         </div>
 
-        <div className="wmov__canvas">
+        <div className="wmov__canvas" ref={canvasRef}>
           <div
             ref={stageRef}
             className={`wmov__stage ${curWs && curWs.items.length === 0 ? "wmov__stage--empty" : ""}`}
@@ -714,15 +743,14 @@ export default function WmOverview() {
                 {curWs?.items.map((item) => {
                   const thumbPath = thumbs[item.hwnd] ?? item.thumb;
                   const isDragged = drag?.active && drag.item.hwnd === item.hwnd;
-                  const isSelected = selectedHwnd === item.hwnd;
-                  const isFocused = curWs.focused === item.hwnd;
+                  const isSelected = (selectedHwnd || curWs.focused) === item.hwnd;
                   const label = tileLabel(item);
                   return (
                     <div
                       key={item.hwnd}
                       className={[
                         "wmov__tile",
-                        isSelected || isFocused ? "wmov__tile--selected" : "",
+                        isSelected ? "wmov__tile--selected" : "",
                         isDragged ? "wmov__tile--dragging" : "",
                       ]
                         .filter(Boolean)

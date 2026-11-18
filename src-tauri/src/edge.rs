@@ -39,6 +39,36 @@ fn left_mouse_down() -> bool {
         (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01) as u16) & 0x8000 != 0
     }
 }
+
+/// Inject a neutral key (VK 0xE8) while Alt is held so releasing Alt on the newly focused
+/// panel does not activate Windows' menu loop (`SC_KEYMENU`) or beep on the next keystroke.
+fn mask_alt_if_down() {
+    use std::mem::size_of;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+        KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+    };
+
+    unsafe {
+        if (GetAsyncKeyState(0x12) as u16) & 0x8000 == 0 {
+            return;
+        }
+        let key = |flags: KEYBD_EVENT_FLAGS| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(0xE8),
+                    wScan: 0,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
+        SendInput(&inputs, size_of::<INPUT>() as i32);
+    }
+}
 /// "Near the edge" = within this distance of the screen edge (design units).
 const NEAR_EDGE_DIP: f64 = 96.0;
 /// How often to reread monitor dimensions.
@@ -610,7 +640,9 @@ fn set_visible(
         };
         let _ = window.set_ignore_cursor_events(!show);
         if show && launcher_focus {
+            mask_alt_if_down();
             let _ = window.set_focus();
+            mask_alt_if_down();
         }
         let _ = window.emit(event.as_str(), show);
         if spec.label != "switcher" {
@@ -802,6 +834,13 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     .or_else(|| free_rect("preview"))
                     .map(|(x, y, w, h)| Rect { x, y, w, h }.contains(cursor.x, cursor.y))
                     .unwrap_or(false);
+            let over_bar = panels
+                .iter()
+                .find(|q| q.spec.label == "bar" && q.visible)
+                .is_some_and(|q| {
+                    let (bar_win, _) = layout(&q.spec, m);
+                    bar_win.contains(cursor.x, cursor.y)
+                });
 
             let overview_open = panels
                 .iter()
@@ -950,6 +989,9 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         let hit = panel_hit_rect(p.spec.label, win_rect, m.4);
                         if hit.contains(cursor.x, cursor.y) {
                             p.pin_entered = true;
+                            p.outside_since = None;
+                        } else if p.spec.label == "preview" && over_bar {
+                            // Cursor is still on the bar (e.g. moving toward the preview card).
                             p.outside_since = None;
                         } else {
                             let since = *p.outside_since.get_or_insert_with(Instant::now);

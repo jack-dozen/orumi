@@ -62,7 +62,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::app::App;
 use crate::consts::{
     DIRS, HOTKEY_FLOAT, HOTKEY_INSPECT, HOTKEY_MAXIMIZE, HOTKEY_OVERVIEW, HOTKEY_QUIT, RECHECK_MS,
-    WM_ACTION, WM_CANCEL_START, WM_IPC, WM_SNAP_CANCEL, WM_SNAP_PICK, WM_WINEVENT,
+    WM_ACTION, WM_CANCEL_START, WM_IPC, WM_MASK_ALT, WM_SNAP_CANCEL, WM_SNAP_PICK, WM_WINEVENT,
 };
 use crate::hook::{win_event_proc, MAIN_THREAD};
 use crate::winutil::{single_instance, work_area};
@@ -170,6 +170,12 @@ fn main() {
             eprintln!("gagal membuat ikon tray");
         }
         let ipc_rx = ipc::start(GetCurrentThreadId());
+        if winutil::is_elevated() {
+            hook::FG_ELEVATED.store(
+                winutil::is_hwnd_elevated(GetForegroundWindow()),
+                Ordering::Relaxed,
+            );
+        }
         hook::start_kb_hook();
         let mut event_hooks: Vec<HWINEVENTHOOK> = Vec::new();
         for (lo, hi) in [
@@ -228,6 +234,7 @@ fn main() {
                     app.on_hotkey(id);
                 }
                 WM_CANCEL_START => hook::cancel_start_menu(),
+                WM_MASK_ALT => hook::mask_alt_menu(),
                 tray::WM_TRAY_PAUSE => app.toggle_pause(),
                 tray::WM_TRAY_RELOAD => app.reload_config(),
                 tray::WM_TRAY_HELP => {
@@ -248,8 +255,14 @@ fn main() {
                 WM_SNAP_PICK => app.snap_assist_pick(msg.wParam.0 as u64, msg.lParam.0 as u64),
                 WM_SNAP_CANCEL => app.snap_assist_end(true),
                 WM_WINEVENT => {
+                    let ev = msg.wParam.0 as u32;
+                    let hwnd = HWND(msg.lParam.0 as *mut c_void);
+                    if ev == EVENT_SYSTEM_FOREGROUND && winutil::is_elevated() {
+                        hook::FG_ELEVATED
+                            .store(winutil::is_hwnd_elevated(hwnd), Ordering::Relaxed);
+                    }
                     if !tray::PAUSED.load(Ordering::Relaxed) {
-                        app.on_event(msg.wParam.0 as u32, HWND(msg.lParam.0 as *mut c_void));
+                        app.on_event(ev, hwnd);
                     }
                 }
                 WM_TIMER if !msg.hwnd.0.is_null() => {

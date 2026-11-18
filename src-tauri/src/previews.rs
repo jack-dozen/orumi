@@ -260,8 +260,11 @@ pub fn preview_keep() {
 pub fn preview_close_soon(app: AppHandle) {
     let generation = GEN.fetch_add(1, Ordering::SeqCst) + 1;
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(260));
+        thread::sleep(Duration::from_millis(340));
         if GEN.load(Ordering::SeqCst) == generation {
+            if let Some((_, true)) = cursor_state(&app) {
+                return;
+            }
             close_now(&app);
         }
     });

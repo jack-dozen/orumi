@@ -31,13 +31,14 @@ use windows::{
             Accessibility::{SetWinEventHook, HWINEVENTHOOK},
             Shell::{SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN},
             WindowsAndMessaging::{
-                DispatchMessageW, EnumWindows, GetClassNameW, GetForegroundWindow, GetMessageW,
-                GetShellWindow, GetSystemMetrics, GetWindow, GetWindowLongW, GetWindowRect,
-                GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow,
-                IsIconic, IsWindowVisible, IsZoomed, SetForegroundWindow, ShowWindow,
-                SwitchToThisWindow, TranslateMessage, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, MSG,
-                SM_CXSCREEN, SM_CYSCREEN, SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT,
-                WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+                AllowSetForegroundWindow, DispatchMessageW, EnumWindows, GetAncestor,
+                GetClassNameW, GetForegroundWindow, GetMessageW, GetShellWindow, GetSystemMetrics,
+                GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+                GetWindowThreadProcessId, IsHungAppWindow, IsIconic, IsWindowVisible, IsZoomed,
+                SetForegroundWindow, ShowWindow, SwitchToThisWindow, TranslateMessage, ASFW_ANY,
+                GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, MSG, SM_CXSCREEN, SM_CYSCREEN,
+                SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_CAPTION, WS_EX_APPWINDOW,
+                WS_EX_TOOLWINDOW,
             },
         },
     },
@@ -412,11 +413,28 @@ pub fn restore_external_foreground_if_ours() {
             let h = HWND(target as *mut c_void);
             if IsWindowVisible(h).as_bool() && !IsIconic(h).as_bool() {
                 SwitchToThisWindow(h, true);
+                let fg = GetForegroundWindow();
+                if fg != h
+                    && GetAncestor(fg, GA_ROOT) != h
+                    && crate::wm_ipc::is_elevated()
+                {
+                    let _ = AllowSetForegroundWindow(ASFW_ANY);
+                    let _ = crate::wm_ipc::focus_window(target as i64);
+                }
                 return;
             }
         }
         if let Some(first) = collect_windows().into_iter().find(|w| !w.minimized) {
-            SwitchToThisWindow(to_hwnd(first.hwnd), true);
+            let h = to_hwnd(first.hwnd);
+            SwitchToThisWindow(h, true);
+            let fg = GetForegroundWindow();
+            if fg != h
+                && GetAncestor(fg, GA_ROOT) != h
+                && crate::wm_ipc::is_elevated()
+            {
+                let _ = AllowSetForegroundWindow(ASFW_ANY);
+                let _ = crate::wm_ipc::focus_window(first.hwnd);
+            }
             return;
         }
         // Active workspace has no visible non-minimized windows: yield focus to the desktop
@@ -571,6 +589,11 @@ pub fn activate_window(hwnd: i64) {
             let _ = ShowWindow(h, SW_RESTORE);
         }
         SwitchToThisWindow(h, true);
+        let fg = GetForegroundWindow();
+        if fg != h && GetAncestor(fg, GA_ROOT) != h && crate::wm_ipc::is_elevated() {
+            let _ = AllowSetForegroundWindow(ASFW_ANY);
+            let _ = crate::wm_ipc::focus_window(hwnd);
+        }
     }
 }
 
@@ -589,12 +612,20 @@ pub fn focus_window(hwnd: i64) -> Result<(), String> {
         if !SetForegroundWindow(h).as_bool() {
             SwitchToThisWindow(h, true);
         }
+        let fg = GetForegroundWindow();
+        if fg != h && GetAncestor(fg, GA_ROOT) != h && crate::wm_ipc::is_elevated() {
+            let _ = AllowSetForegroundWindow(ASFW_ANY);
+            let _ = crate::wm_ipc::focus_window(hwnd);
+        }
     }
     Ok(())
 }
 
 #[tauri::command]
 pub fn minimize_window(hwnd: i64) {
+    if crate::wm_ipc::is_elevated() && crate::wm_ipc::minimize_window(hwnd).is_ok() {
+        return;
+    }
     unsafe {
         let _ = ShowWindow(to_hwnd(hwnd), SW_MINIMIZE);
     }

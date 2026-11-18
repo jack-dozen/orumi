@@ -84,6 +84,9 @@ export default function Launcher() {
   const [csFromLauncher, setCsFromLauncher] = useState(false);
   const visibleRef = useRef(false);
   visibleRef.current = visible;
+  const openRef = useRef(false);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [pickerWidth, setPickerWidth] = useState<number | null>(null);
   const [settingsWidth, setSettingsWidth] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -92,6 +95,7 @@ export default function Launcher() {
   const focusOnOpen = useRef(true);
 
   const activateLauncher = useCallback(() => {
+    focusOnOpen.current = true;
     activatedAt.current = Date.now();
     invoke("panel_activation", { label: "launcher", enable: true }).catch(() => {});
     window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 20);
@@ -131,6 +135,7 @@ export default function Launcher() {
   // so height/compact layout settles off-screen before the CSS slide-up begins.
   useEffect(() => {
     const unlisten = listen<boolean>("edge-visible:launcher", (e) => {
+      openRef.current = e.payload;
       if (!e.payload) return;
       openedAt.current = Date.now();
       setQuery("");
@@ -139,10 +144,77 @@ export default function Launcher() {
       const nextView = pendingView.current ?? "list";
       pendingView.current = null;
       if (nextView === "cheatsheet") setCsFromLauncher(false);
+      viewRef.current = nextView;
       setView(nextView);
+      if (focusOnOpen.current && nextView === "list") {
+        inputRef.current?.focus({ preventScroll: true });
+      }
     });
     return () => {
       unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Suppress WebView2's Alt menu-bar beep/mnemonic handling and capture keystrokes typed while
+  // Alt from an Alt+Space hotkey is still held or before DOM focus settles on the input.
+  useEffect(() => {
+    const applyChar = (ch: string) => {
+      if (ch === ">") {
+        setMode((m) => (m === "apps" ? "actions" : "apps"));
+        setIndex(0);
+      } else {
+        setQuery((q) => q + ch);
+        setIndex(0);
+      }
+    };
+
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      if (!openRef.current || viewRef.current !== "list") return;
+      if (e.key === "Alt") {
+        e.preventDefault();
+        return;
+      }
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        if ((e.code === "Space" || e.key === " ") && Date.now() - openedAt.current < 400) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        if (e.key.length === 1 && !e.isComposing) {
+          e.preventDefault();
+          e.stopPropagation();
+          inputRef.current?.focus({ preventScroll: true });
+          applyChar(e.key);
+        }
+        return;
+      }
+      if (
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        e.key.length === 1 &&
+        !e.isComposing &&
+        document.activeElement !== inputRef.current
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        inputRef.current?.focus({ preventScroll: true });
+        applyChar(e.key);
+      }
+    };
+
+    const onKeyUpCapture = (e: KeyboardEvent) => {
+      if (!openRef.current || viewRef.current !== "list") return;
+      if (e.key === "Alt") {
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDownCapture, true);
+    window.addEventListener("keyup", onKeyUpCapture, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDownCapture, true);
+      window.removeEventListener("keyup", onKeyUpCapture, true);
     };
   }, []);
 

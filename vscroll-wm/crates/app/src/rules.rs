@@ -85,6 +85,18 @@ fn ignore_path() -> String {
             }
         }
     }
+    let local = std::path::PathBuf::from("vscroll-wm.ignore");
+    if local.exists() {
+        return "vscroll-wm.ignore".into();
+    }
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        let p = std::path::PathBuf::from(appdata)
+            .join("com.example.edgeshell")
+            .join("vscroll-wm.ignore");
+        if p.exists() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
     "vscroll-wm.ignore".into()
 }
 

@@ -15,8 +15,11 @@ use std::time::Instant;
 
 use layout::{Rect, WindowId};
 use windows::Win32::Foundation::HWND;
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetShellWindow, SetForegroundWindow, SwitchToThisWindow,
+    AllowSetForegroundWindow, BringWindowToTop, GetAncestor, GetForegroundWindow, GetShellWindow,
+    GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, SwitchToThisWindow,
+    ASFW_ANY, GA_ROOT, SW_RESTORE,
 };
 
 use super::App;
@@ -114,9 +117,41 @@ impl App {
         self.update_workspace_tip();
     }
 
-    /// Bring `h` to foreground (with `SwitchToThisWindow` fallback) and sync `last_fg`.
+    /// Bring `h` to foreground (handling background-thread foreground locks and elevated windows)
+    /// and sync `last_fg`.
     pub(crate) unsafe fn focus_hwnd(&mut self, h: HWND) {
-        if !SetForegroundWindow(h).as_bool() {
+        if IsIconic(h).as_bool() {
+            let _ = ShowWindow(h, SW_RESTORE);
+        }
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+        let matches = |fg: HWND| fg == h || (!fg.0.is_null() && GetAncestor(fg, GA_ROOT) == h);
+        let _ = SetForegroundWindow(h);
+        if !matches(GetForegroundWindow()) {
+            let cur_tid = GetCurrentThreadId();
+            let fg = GetForegroundWindow();
+            let fg_tid = if !fg.0.is_null() {
+                GetWindowThreadProcessId(fg, None)
+            } else {
+                0
+            };
+            let tgt_tid = GetWindowThreadProcessId(h, None);
+            let attached_fg = fg_tid != 0
+                && fg_tid != cur_tid
+                && AttachThreadInput(cur_tid, fg_tid, true).as_bool();
+            let attached_tgt = tgt_tid != 0
+                && tgt_tid != cur_tid
+                && tgt_tid != fg_tid
+                && AttachThreadInput(cur_tid, tgt_tid, true).as_bool();
+            let _ = BringWindowToTop(h);
+            let _ = SetForegroundWindow(h);
+            if attached_tgt {
+                let _ = AttachThreadInput(cur_tid, tgt_tid, false);
+            }
+            if attached_fg {
+                let _ = AttachThreadInput(cur_tid, fg_tid, false);
+            }
+        }
+        if !matches(GetForegroundWindow()) {
             SwitchToThisWindow(h, true);
         }
         // Always record the actual foreground window so a rejected focus change never causes

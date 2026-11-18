@@ -91,3 +91,6 @@ pub(crate) const WM_CANCEL_START: u32 = WM_APP + 16;
 
 /// Posted to the dedicated hook thread to reinstall `WH_KEYBOARD_LL`.
 pub(crate) const WM_REINSTALL_HOOK: u32 = WM_APP + 17;
+
+/// Posted from `kb_hook` to `MAIN_THREAD` to mask an Alt+Tab menu outside the hook callback.
+pub(crate) const WM_MASK_ALT: u32 = WM_APP + 18;

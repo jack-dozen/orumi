@@ -412,6 +412,7 @@ pub fn toggle_alt_tab(app: &AppHandle) {
         c.clone()
     };
     crate::altswitch::set_enabled(snapshot.alt_tab);
+    crate::wm_ipc::sync_shell_relay(app);
     let _ = save(app, &snapshot);
     let _ = app.emit("config-changed", &snapshot);
 }
@@ -463,6 +464,9 @@ pub fn set_config(
     *state.0.lock().map_err(|e| e.to_string())? = new.clone();
 
     crate::altswitch::set_enabled(new.alt_tab);
+    if new.alt_tab != old.alt_tab {
+        crate::wm_ipc::sync_shell_relay(&app);
+    }
     if new.taskbar_autohide != old.taskbar_autohide || new.taskbar_hidden != old.taskbar_hidden {
         crate::taskbar::apply(&app, new.taskbar_autohide, new.taskbar_hidden);
         crate::wm_ipc::reapply();

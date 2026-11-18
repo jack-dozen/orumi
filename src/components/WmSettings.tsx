@@ -6,6 +6,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 type WmConfigData = {
   connected: boolean;
   paused: boolean;
+  elevated: boolean;
+  elevated_task_installed: boolean;
   config_path: string;
   ignore_path: string;
   gap: number;
@@ -77,6 +79,7 @@ export default function WmSettings() {
   const [bindFilter, setBindFilter] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
   const [errMsg, setErrMsg] = useState("");
+  const [busyElevated, setBusyElevated] = useState(false);
   const colorTimer = useRef<number | undefined>(undefined);
 
   const load = () => {
@@ -145,6 +148,21 @@ export default function WmSettings() {
     }
   };
 
+  const setupElevated = async (enable: boolean, msg: string) => {
+    setErrMsg("");
+    setStatusMsg("");
+    setBusyElevated(true);
+    try {
+      const next = await invoke<WmConfigData>("wm_setup_elevated", { enable });
+      setCfg(next);
+      setStatusMsg(msg);
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      setBusyElevated(false);
+    }
+  };
+
   const pickBorderColor = (hex: string) => {
     setBorderHex(hex);
     window.clearTimeout(colorTimer.current);
@@ -170,17 +188,24 @@ export default function WmSettings() {
       <div className="appset__col">
         <div className="wmset__head">
           <div className="appset__title">Tiling & Behavior</div>
-          <span
-            className={`wmset__badge ${
-              !cfg.connected
-                ? "wmset__badge--off"
-                : cfg.paused
-                  ? "wmset__badge--paused"
-                  : "wmset__badge--ok"
-            }`}
-          >
-            {!cfg.connected ? "Offline" : cfg.paused ? "Paused" : "Active"}
-          </span>
+          <div className="wmset__actions">
+            {cfg.connected && cfg.elevated && (
+              <span className="wmset__badge wmset__badge--ok" title="Can tile and focus elevated (admin) windows">
+                Admin
+              </span>
+            )}
+            <span
+              className={`wmset__badge ${
+                !cfg.connected
+                  ? "wmset__badge--off"
+                  : cfg.paused
+                    ? "wmset__badge--paused"
+                    : "wmset__badge--ok"
+              }`}
+            >
+              {!cfg.connected ? "Offline" : cfg.paused ? "Paused" : "Active"}
+            </span>
+          </div>
         </div>
 
         <Row label="Window manager">
@@ -191,6 +216,58 @@ export default function WmSettings() {
             <button type="button" className="wmset__btn" onClick={reapply}>
               Re-tile now
             </button>
+          </div>
+        </Row>
+
+        <Row
+          label={
+            cfg.elevated
+              ? "Admin windows (active)"
+              : cfg.elevated_task_installed
+                ? "Admin windows (installed)"
+                : "Admin windows"
+          }
+        >
+          <div className="wmset__actions">
+            {!cfg.elevated_task_installed ? (
+              <button
+                type="button"
+                className="wmset__btn"
+                disabled={busyElevated}
+                onClick={() => setupElevated(true, "Elevated WM helper installed & active.")}
+              >
+                {busyElevated ? "Waiting UAC…" : "Enable (UAC)"}
+              </button>
+            ) : (
+              <>
+                {!cfg.elevated && (
+                  <button
+                    type="button"
+                    className="wmset__btn"
+                    disabled={busyElevated}
+                    onClick={() => save(cfg, true, "Restarted WM.")}
+                  >
+                    Restart elevated
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="wmset__btn"
+                  disabled={busyElevated}
+                  onClick={() => setupElevated(true, "Updated elevated WM binary.")}
+                >
+                  {busyElevated ? "Waiting UAC…" : "Update binary (UAC)"}
+                </button>
+                <button
+                  type="button"
+                  className="wmset__btn"
+                  disabled={busyElevated}
+                  onClick={() => setupElevated(false, "Removed elevated WM helper.")}
+                >
+                  Disable (UAC)
+                </button>
+              </>
+            )}
           </div>
         </Row>
 

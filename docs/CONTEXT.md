@@ -4,7 +4,7 @@ This file is the single source of context for ORUMI. It replaces the older `edge
 `HANDOFF-activities.md`. It is written mainly for Claude in a fresh chat, but it doubles as the project blueprint
 and roadmap for the owner.
 
-- Last updated: 2026-11-16
+- Last updated: 2026-11-18
 - Code snapshot this file was checked against: `orumi-v0_1_3` archive (the code is the source of truth; if this file and the code disagree, trust the code and fix this file)
 - Chat language with the owner: **Indonesian**. This file, code comments, and commit messages: **English** (see section 2).
 
@@ -265,6 +265,12 @@ or the guard mode without a migration plan.
 
 ### 3.2 Implemented but not yet reported as working (do not assume proven)
 
+- **Elevated Admin Window Control via Split Scheduled Task Helper (2026-11-18, compiled via `cargo check` + `npm run build`; awaiting owner runtime test with UAC)**:
+  - Keeps ORUMI (Tauri / WebView2) running at standard Medium integrity while allowing `vscroll-wm.exe` to run elevated via Windows Task Scheduler (`ORUMI-vscroll-wm`, installed in admin-protected `C:\Program Files\ORUMI\vscroll-wm.exe`, with task SDDL `D:(A;;FA;;;BA)(A;;FA;;;SY)(A;;GRGX;;;<USER_SID>)` so non-admin ORUMI can start/restart it via `schtasks /Run` without UAC prompts on launch).
+  - Hardened `vscroll-wm/crates/app/src/ipc.rs` with `PIPE_REJECT_REMOTE_CLIENTS` and SDDL `D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;<USER_SID>)S:(ML;;NW;;;ME)` so Medium-integrity ORUMI (same user) can connect when `vscroll-wm` is elevated while Low-integrity/AppContainer and other users are denied; added `%APPDATA%\com.example.edgeshell` fallback in `config.rs` and `rules.rs` for Task-Scheduler launches without env vars.
+  - Added allowlisted window primitives (`focus`, `minimize`, `close`, `shell_relay`) and `"elevated"` snapshot flag in `vscroll-wm/crates/app/src/ipc.rs`; delegated `winlist.rs` (`activate_window`, `focus_window`, `minimize_window`, `restore_external_foreground_if_ours`) to `wm_ipc` when `vscroll-wm` is elevated.
+  - Added elevated `Alt+Tab` and `Win`-tap relay in `vscroll-wm/crates/app/src/hook.rs` (`FG_ELEVATED` tracked on `EVENT_SYSTEM_FOREGROUND` in `main.rs` + transient `shell_event` queue in `ipc.rs`) → `wm_ipc.rs` → `altswitch::on_elevated_event` & `activities::on_elevated_win_event`, so `Alt+Tab` and `Win` tap work even while an elevated window holds foreground focus.
+  - Added standalone `scripts/setup-elevated-wm.ps1`, `wm_setup_elevated` command in `wm_ipc.rs` (one UAC prompt via `Start-Process -Verb RunAs`), and `Admin windows` status/buttons (`Enable (UAC)` / `Update binary (UAC)` / `Disable (UAC)` + `Admin` badge) in `src/components/WmSettings.tsx`.
 - **Windows-style Wi-Fi & Bluetooth Quick Settings (2026-11-17, compiled via `cargo check` + `npm run build`; awaiting owner runtime test via `npm run tauri dev`)**:
   - Expanded `src-tauri/src/wifi.rs` (`wifi_list`, `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_forget`) with `WlanGetAvailableNetworkList` + `WlanGetProfileList` deduplication, XML-escaped WLAN profile creation (`Open`, `WPA-Personal`, `WPA2-Personal`, `WPA3-Personal`, `WEP`), `WlanConnect` completion/error tracking via `WLAN_CONNECTION_NOTIFICATION_DATA` + `WlanReasonCodeToString` (deleting invalid newly-created profiles on auth failure), and scan notifications.
   - Added `src-tauri/src/bluetooth.rs` (`BtState` registered in `orumi-state`): paired Classic + BLE enumeration via WinRT `DeviceInformation` + Win32 `BluetoothFindFirstDevice` + battery property lookup, Classic profile connect/disconnect via `BluetoothEnumerateInstalledServices` + `BluetoothSetServiceState` (`AudioSink`/`Handsfree`/`Headset`/`AVRCP`/`SPP`), BLE `GattSession` connect, `bt_unpair`, live nearby `DeviceWatcher` scan (`bt_scan_start`/`bt_scan_stop`), and `DeviceInformationCustomPairing` (`ConfirmOnly`, `DisplayPin`, `ConfirmPinMatch`, `ProvidePin` via `bt_pair_respond`).
@@ -414,6 +420,7 @@ Activities merge checklist (build the combined version and test):
 
 - `vscroll-wm` (`vscroll-wm/`) is integrated over Named Pipe IPC (`src-tauri/src/wm_ipc.rs`) with `VScrollIpcProvider` in Activities (Stage 1–3 verified by owner; Stage 4 settings & bundling ready).
 - Next phase (when ready): replace the native Win32 `overview.rs`, `osd.rs`, and `cheatsheet.rs` windows with ORUMI shell UI (bottom overview / shell-styled workspace OSD / settings UI for `vscroll-wm.conf`), and decide whether Activities and the WM overview become one view or two.
+- Elevated admin-window control (split non-admin ORUMI + Scheduled Task `ORUMI-vscroll-wm`) is implemented in 3.2 and awaiting runtime UAC/admin-window verification.
 
 ---
 
@@ -443,6 +450,8 @@ Activities merge checklist (build the combined version and test):
 
 ## 7. Session log
 
+- 2026-11-18 (elevated admin-window control): implemented split non-admin ORUMI + elevated `vscroll-wm` via Task Scheduler (`ORUMI-vscroll-wm` in `C:\Program Files\ORUMI\vscroll-wm.exe`): added SDDL pipe ACL (`D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;<USER_SID>)S:(ML;;NW;;;ME)`) + `PIPE_REJECT_REMOTE_CLIENTS`, `%APPDATA%\com.example.edgeshell` config/ignore fallback, allowlisted `focus`/`minimize`/`close`/`shell_relay` IPC commands, elevated `Alt+Tab` & `Win`-tap hook relay when an elevated window has focus (`hook.rs` + `ipc.rs` shell events -> `altswitch.rs` + `activities/winkey.rs`), `winlist.rs` delegation, `scripts/setup-elevated-wm.ps1`, and `WmSettings.tsx` `Admin windows` UAC setup UI (`wm_setup_elevated`).
+- 2026-11-17 (architecture & roadmap planning): discussed morphing top-island RAM trade-offs, Windows Update resilience (`tray_flyout.rs`, `osd.rs`, `notifications.rs`, `taskbar.rs`), and UIPI strategies for controlling elevated windows; added the split non-admin ORUMI + Scheduled Task elevated helper plan (with mandatory binary-path, pipe ACL, and command-allowlist security rules) to section 5.3.
 - 2026-11-17 (vscroll-wm Snap Layouts & Snap Assist): merged `ref/vscroll-wm-snap-layouts` into tracked `vscroll-wm/` (`snap.rs`, `snap_menu.rs`, `snap_slots.rs`, `app/snap.rs`) preserving ORUMI IPC/hook/focus integration; added `left_mouse_down()` edge-hover guard in `edge.rs` so top-edge window drags trigger Snap Layouts without triggering Notch/Bar; added live Material You color sync (`theme.rs::current_colors()` + `wm_ipc::sync_theme_colors()`) for `overview_color_*` (Snap Menu & Snap Assist cards); added `snap_layouts`, `snap_assist`, `snap_trigger`, `snap_layouts_defaults` settings in `wm_ipc.rs` and `WmSettings.tsx`.
 
 - 2026-11-17 (Wi-Fi & Bluetooth Quick Settings): expanded `wifi.rs` (`wifi_list`, `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_forget` with WLAN XML profile creation & error tracking), added `bluetooth.rs` (`BtState` in `orumi-state`, paired Classic+BLE listing with battery, `BluetoothSetServiceState` / `GattSession` connect/disconnect, `UnpairAsync`, nearby `DeviceWatcher` scan, and `CustomPairing` PIN/confirm UI flow), added split tiles & subviews (`QuickPanels.tsx`, `Notch.tsx`, `useWifi.ts`, `useBluetooth.ts`, `App.css`), and regenerated `make-icon-font.ps1` (85 icons); verified `npm run build` and `cargo check` pass.

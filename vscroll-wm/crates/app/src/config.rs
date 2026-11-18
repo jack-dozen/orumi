@@ -538,7 +538,18 @@ fn find_file() -> Option<PathBuf> {
         }
     }
     let p = PathBuf::from("vscroll-wm.conf");
-    p.exists().then_some(p)
+    if p.exists() {
+        return Some(p);
+    }
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        let p = PathBuf::from(appdata)
+            .join("com.example.edgeshell")
+            .join("vscroll-wm.conf");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 /// Hasil memuat konfigurasi: isinya, masalah yang ditemukan (untuk ditampilkan ke

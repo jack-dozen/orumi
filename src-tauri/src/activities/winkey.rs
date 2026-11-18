@@ -117,6 +117,47 @@ pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
 }
 
+pub fn is_enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+static ELEVATED_DISMISSED: AtomicBool = AtomicBool::new(false);
+/// Set while `vscroll-wm`'s hook saw a Win+key combo during the current physical Win hold, and
+/// cleared only when `vscroll-wm` sees Win released. Prevents Admin<->Normal focus changes
+/// mid-hold from making the poller hallucinate a fresh standalone Win tap.
+static REMOTE_COMBO_HELD: AtomicBool = AtomicBool::new(false);
+
+/// Handle a Win-key relay event forwarded by `vscroll-wm`.
+pub fn on_elevated_event(kind: &str, combo: bool) {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    match kind {
+        "win_down" => {
+            let open = super::is_open();
+            ELEVATED_DISMISSED.store(open, Ordering::Relaxed);
+            if open {
+                send(Msg::Dismiss);
+            }
+        }
+        "win_combo" => {
+            COMBO.store(true, Ordering::Relaxed);
+            REMOTE_COMBO_HELD.store(true, Ordering::Relaxed);
+        }
+        "win_release" => {
+            REMOTE_COMBO_HELD.store(false, Ordering::Relaxed);
+        }
+        "win_up" => {
+            let remote_combo = REMOTE_COMBO_HELD.swap(false, Ordering::Relaxed);
+            let dismissed = ELEVATED_DISMISSED.swap(false, Ordering::Relaxed);
+            if !combo && !remote_combo && !dismissed {
+                send(Msg::Tap);
+            }
+        }
+        _ => {}
+    }
+}
+
 // ---------- Hook (supplement) ----------
 
 unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) {
@@ -195,7 +236,7 @@ fn poller() {
             for vk in 1..256u32 {
                 base[vk as usize] = unsafe { async_down(vk) };
             }
-            polled_combo = false;
+            polled_combo = REMOTE_COMBO_HELD.load(Ordering::Relaxed);
             dismissed = super::is_open();
             send(Msg::Mask);
             if dismissed {
@@ -203,6 +244,9 @@ fn poller() {
             }
             log(format!("pemantau: win-down, activities_terbuka={dismissed}"));
         } else if win && !polled_combo {
+            if REMOTE_COMBO_HELD.load(Ordering::Relaxed) {
+                polled_combo = true;
+            }
             // While Win is held, a new key press or mouse click means a combination.
             for vk in 1..256u32 {
                 if vk == VK_LWIN || vk == VK_RWIN || vk == VK_NEUTRAL {
@@ -224,7 +268,10 @@ fn poller() {
                 let _ = ResetEvent(ev);
                 hit
             });
-            let combo = COMBO.swap(false, Ordering::Relaxed) || polled_combo || wm_combo;
+            let combo = COMBO.swap(false, Ordering::Relaxed)
+                || polled_combo
+                || wm_combo
+                || REMOTE_COMBO_HELD.load(Ordering::Relaxed);
             let tap = !combo && !dismissed;
             log(format!(
                 "pemantau: win-up, kombinasi={combo}, ditutup_saat_down={dismissed} -> {}",
@@ -236,6 +283,9 @@ fn poller() {
         } else if !win {
             // Clear any leftover event from a sub-8ms Win+key tap while idle so it cannot eat
             // the next standalone Win tap.
+            if !REMOTE_COMBO_HELD.load(Ordering::Relaxed) {
+                COMBO.store(false, Ordering::Relaxed);
+            }
             if let Some(ev) = combo_ev {
                 unsafe {
                     let _ = ResetEvent(ev);

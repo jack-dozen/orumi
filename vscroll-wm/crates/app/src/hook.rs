@@ -18,14 +18,37 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::bindings::{self, ALT, CTRL, SHIFT, WIN};
 use crate::consts::{
     DIRS, HOTKEY_OVERVIEW, HOTKEY_QUIT, HOTKEY_WS_GO, HOTKEY_WS_NEXT, HOTKEY_WS_PREV, WM_ACTION,
-    WM_CANCEL_START, WM_REINSTALL_HOOK, WM_SNAP_CANCEL, WM_WINEVENT,
+    WM_CANCEL_START, WM_MASK_ALT, WM_REINSTALL_HOOK, WM_SNAP_CANCEL, WM_WINEVENT,
 };
-use crate::{overview, tray};
+use crate::{ipc, overview, tray, winutil};
 
 pub(crate) static MAIN_THREAD: AtomicU32 = AtomicU32::new(0);
 static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
 
 pub(crate) static WIN_DOWN: AtomicBool = AtomicBool::new(false);
+pub(crate) static FG_ELEVATED: AtomicBool = AtomicBool::new(false);
+
+static RELAY_ALT_TAB: AtomicBool = AtomicBool::new(false);
+static RELAY_WINKEY: AtomicBool = AtomicBool::new(false);
+static ELEVATED_ALTTAB_ACTIVE: AtomicBool = AtomicBool::new(false);
+static ELEVATED_ALTTAB_SWALLOWED: AtomicU32 = AtomicU32::new(0);
+static ELEVATED_WIN_ACTIVE: AtomicBool = AtomicBool::new(false);
+static ANY_WIN_HELD: AtomicBool = AtomicBool::new(false);
+static ANY_WIN_COMBO: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn set_shell_relay(alt_tab: bool, winkey: bool) {
+    RELAY_ALT_TAB.store(alt_tab, Ordering::Relaxed);
+    RELAY_WINKEY.store(winkey, Ordering::Relaxed);
+    if !alt_tab {
+        ELEVATED_ALTTAB_ACTIVE.store(false, Ordering::Relaxed);
+        ELEVATED_ALTTAB_SWALLOWED.store(0, Ordering::Relaxed);
+    }
+    if !winkey {
+        ELEVATED_WIN_ACTIVE.store(false, Ordering::Relaxed);
+        ANY_WIN_HELD.store(false, Ordering::Relaxed);
+        ANY_WIN_COMBO.store(false, Ordering::Relaxed);
+    }
+}
 
 /// Tombol untuk berputar antar window saat overview terbuka dan Win ditahan (kode
 /// virtual-key; 0 = mati). Diturunkan dari ikatan `overview` (lihat bindings.rs).
@@ -50,6 +73,9 @@ const VSCROLL_COMBO_TAG: usize = 0x5653_4352;
 static COMBO_EVENT: AtomicIsize = AtomicIsize::new(0);
 
 unsafe fn notify_combo() {
+    if RELAY_WINKEY.load(Ordering::Relaxed) && !ANY_WIN_COMBO.swap(true, Ordering::Relaxed) {
+        ipc::publish_shell_event(r#"{"shell_event":"win_combo"}"#);
+    }
     let mut h = COMBO_EVENT.load(Ordering::Relaxed);
     if h == 0 {
         if let Ok(ev) = CreateEventW(None, true, false, w!("Local\\vscroll-wm-combo")) {
@@ -156,6 +182,183 @@ unsafe fn post_cancel_start_menu() {
     );
 }
 
+unsafe fn post_mask_alt_menu() {
+    let _ = PostThreadMessageW(
+        MAIN_THREAD.load(Ordering::Relaxed),
+        WM_MASK_ALT,
+        WPARAM(0),
+        LPARAM(0),
+    );
+}
+
+/// Inject a neutral key while Alt is held so an elevated app's menu bar does not activate
+/// when we swallow Alt+Tab.
+pub(crate) unsafe fn mask_alt_menu() {
+    let key = |flags: KEYBD_EVENT_FLAGS| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(0xE8),
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
+    SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+}
+
+fn alttab_swallow_bit(vk: u16) -> u32 {
+    match VIRTUAL_KEY(vk) {
+        VK_TAB => 1,
+        VK_ESCAPE => 2,
+        VK_LEFT => 4,
+        VK_RIGHT => 8,
+        VK_UP => 16,
+        VK_DOWN => 32,
+        _ => 0,
+    }
+}
+
+/// Relay Alt+Tab and Win-tap to non-admin ORUMI when an elevated window holds foreground focus
+/// (UIPI blocks ORUMI's own Medium-integrity hooks on elevated windows), and track Win combos
+/// across elevated/normal focus transitions so ORUMI never misreads Win+Shift+Arrow as a Win tap.
+unsafe fn handle_elevated_shell_relay(m: u32, k: &KBDLLHOOKSTRUCT) -> bool {
+    let down = m == WM_KEYDOWN || m == WM_SYSKEYDOWN;
+    let up = m == WM_KEYUP || m == WM_SYSKEYUP;
+    if !down && !up {
+        return false;
+    }
+    let vk = k.vkCode as u16;
+    let injected = (k.flags.0 & LLKHF_INJECTED.0) != 0;
+    let is_win = vk == VK_LWIN.0 || vk == VK_RWIN.0;
+    let is_alt = matches!(VIRTUAL_KEY(vk), VK_MENU | VK_LMENU | VK_RMENU);
+    let fg_elevated = FG_ELEVATED.load(Ordering::Relaxed);
+
+    if RELAY_WINKEY.load(Ordering::Relaxed) && !injected {
+        if is_win {
+            if down {
+                if !ANY_WIN_HELD.swap(true, Ordering::Relaxed) {
+                    ANY_WIN_COMBO.store(false, Ordering::Relaxed);
+                    if winutil::is_elevated()
+                        && fg_elevated
+                        && !ELEVATED_WIN_ACTIVE.swap(true, Ordering::Relaxed)
+                    {
+                        post_cancel_start_menu();
+                        ipc::publish_shell_event(r#"{"shell_event":"win_down"}"#);
+                    }
+                }
+            } else if ANY_WIN_HELD.swap(false, Ordering::Relaxed) {
+                let combo = ANY_WIN_COMBO.swap(false, Ordering::Relaxed);
+                if ELEVATED_WIN_ACTIVE.swap(false, Ordering::Relaxed) {
+                    ipc::publish_shell_event(&format!(
+                        r#"{{"shell_event":"win_up","combo":{combo}}}"#
+                    ));
+                } else if combo {
+                    ipc::publish_shell_event(r#"{"shell_event":"win_release"}"#);
+                }
+            }
+        } else if down && ANY_WIN_HELD.load(Ordering::Relaxed) && vk != 0xE8 {
+            if !ANY_WIN_COMBO.swap(true, Ordering::Relaxed) {
+                ipc::publish_shell_event(r#"{"shell_event":"win_combo"}"#);
+            }
+        }
+    }
+
+    if !winutil::is_elevated() {
+        return false;
+    }
+
+    if RELAY_ALT_TAB.load(Ordering::Relaxed) {
+        if is_alt && up {
+            ELEVATED_ALTTAB_SWALLOWED.store(0, Ordering::Relaxed);
+            if ELEVATED_ALTTAB_ACTIVE.swap(false, Ordering::Relaxed) {
+                ipc::publish_shell_event(r#"{"shell_event":"alt_tab_commit"}"#);
+            }
+            return false;
+        }
+        if injected {
+            return false;
+        }
+        if up {
+            let bit = alttab_swallow_bit(vk);
+            if bit != 0 && (ELEVATED_ALTTAB_SWALLOWED.fetch_and(!bit, Ordering::Relaxed) & bit) != 0
+            {
+                return true;
+            }
+            return false;
+        }
+
+        let alt_down =
+            (k.flags.0 & LLKHF_ALTDOWN.0) != 0 || GetAsyncKeyState(VK_MENU.0 as i32) < 0;
+        let active = ELEVATED_ALTTAB_ACTIVE.load(Ordering::Relaxed);
+        if active && !alt_down && !is_alt {
+            ELEVATED_ALTTAB_ACTIVE.store(false, Ordering::Relaxed);
+            ELEVATED_ALTTAB_SWALLOWED.store(0, Ordering::Relaxed);
+            ipc::publish_shell_event(r#"{"shell_event":"alt_tab_commit"}"#);
+            return false;
+        }
+        if !active && !fg_elevated {
+            return false;
+        }
+
+        let held = held_mods();
+        let ctrl = (held & CTRL) != 0;
+        let shift = (held & SHIFT) != 0;
+        let win_down =
+            GetAsyncKeyState(VK_LWIN.0 as i32) < 0 || GetAsyncKeyState(VK_RWIN.0 as i32) < 0;
+
+        let swallow = match VIRTUAL_KEY(vk) {
+            VK_TAB if alt_down && !ctrl && !win_down => {
+                if active {
+                    ipc::publish_shell_event(&format!(
+                        r#"{{"shell_event":"alt_tab_next","reverse":{shift}}}"#
+                    ));
+                } else {
+                    ELEVATED_ALTTAB_ACTIVE.store(true, Ordering::Relaxed);
+                    post_mask_alt_menu();
+                    ipc::publish_shell_event(&format!(
+                        r#"{{"shell_event":"alt_tab_start","reverse":{shift}}}"#
+                    ));
+                }
+                true
+            }
+            VK_ESCAPE if active => {
+                ELEVATED_ALTTAB_ACTIVE.store(false, Ordering::Relaxed);
+                ipc::publish_shell_event(r#"{"shell_event":"alt_tab_cancel"}"#);
+                true
+            }
+            VK_LEFT if active => {
+                ipc::publish_shell_event(r#"{"shell_event":"alt_tab_step","delta":-1}"#);
+                true
+            }
+            VK_RIGHT if active => {
+                ipc::publish_shell_event(r#"{"shell_event":"alt_tab_step","delta":1}"#);
+                true
+            }
+            VK_UP if active => {
+                ipc::publish_shell_event(r#"{"shell_event":"alt_tab_row","delta":-1}"#);
+                true
+            }
+            VK_DOWN if active => {
+                ipc::publish_shell_event(r#"{"shell_event":"alt_tab_row","delta":1}"#);
+                true
+            }
+            _ => false,
+        };
+        if swallow {
+            let bit = alttab_swallow_bit(vk);
+            if bit != 0 {
+                ELEVATED_ALTTAB_SWALLOWED.fetch_or(bit, Ordering::Relaxed);
+            }
+            return true;
+        }
+    }
+    false
+}
+
 pub(crate) fn start_kb_hook() {
     std::thread::Builder::new()
         .name("vscroll-kb-hook".into())
@@ -226,6 +429,12 @@ unsafe fn fire(vk: u16, id: i32, down: bool) -> LRESULT {
 /// Low-level keyboard hook. Harus cepat: kerjanya cuma menelan tombol dan
 /// mengirim pesan ke thread utama, eksekusinya di message loop.
 pub(crate) unsafe extern "system" fn kb_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 {
+        let k = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+        if handle_elevated_shell_relay(wparam.0 as u32, k) {
+            return LRESULT(1);
+        }
+    }
     if code == HC_ACTION as i32 && !tray::PAUSED.load(Ordering::Relaxed) {
         let k = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
         if k.flags.0 & LLKHF_INJECTED.0 == 0 {

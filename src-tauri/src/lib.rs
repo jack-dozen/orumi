@@ -239,7 +239,8 @@ pub fn run() {
             wm_ipc::wm_config_get,
             wm_ipc::wm_config_save,
             wm_ipc::wm_toggle_pause_cmd,
-            wm_ipc::wm_reapply_cmd
+            wm_ipc::wm_reapply_cmd,
+            wm_ipc::wm_setup_elevated
         ])
         .setup(|app| {
             let cfg = config::current(app.handle());

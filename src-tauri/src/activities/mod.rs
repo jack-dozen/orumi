@@ -57,6 +57,15 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 #[allow(dead_code)]
 pub fn set_win_key_enabled(on: bool) {
     winkey::set_enabled(on);
+    crate::wm_ipc::sync_shell_relay_current();
+}
+
+pub fn is_win_key_enabled() -> bool {
+    winkey::is_enabled()
+}
+
+pub fn on_elevated_win_event(kind: &str, combo: bool) {
+    winkey::on_elevated_event(kind, combo);
 }
 
 pub fn is_open() -> bool {

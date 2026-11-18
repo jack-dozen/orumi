@@ -3,6 +3,8 @@
 //! - `\\.\pipe\vscroll-wm`        line-based request/response commands
 //! - `\\.\pipe\vscroll-wm-events` newline-delimited JSON state snapshots pushed on change
 
+use std::collections::VecDeque;
+use std::ffi::c_void;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
@@ -12,14 +14,23 @@ use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use layout::{InsertPosition, Span, WindowId};
-use windows::core::w;
-use windows::Win32::Foundation::{ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE, LPARAM, WPARAM};
+use windows::core::{w, PCWSTR};
+use windows::Win32::Foundation::{
+    ERROR_PIPE_CONNECTED, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, WPARAM,
+};
+use windows::Win32::Security::Authorization::{
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+};
+use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows::Win32::Storage::FileSystem::{FlushFileBuffers, PIPE_ACCESS_DUPLEX, PIPE_ACCESS_OUTBOUND};
 use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
-    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
-use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
+use windows::Win32::UI::WindowsAndMessaging::{
+    IsIconic, IsWindow, PostMessageW, PostThreadMessageW, ShowWindow, SC_CLOSE, SW_MINIMIZE,
+    SW_RESTORE, WM_SYSCOMMAND,
+};
 
 use crate::app::workspace::{slide_dir, Slide};
 use crate::app::App;
@@ -90,6 +101,23 @@ pub enum Cmd {
     ReinstallHook {
         reply: SyncSender<String>,
     },
+    Focus {
+        hwnd: i64,
+        reply: SyncSender<String>,
+    },
+    Minimize {
+        hwnd: i64,
+        reply: SyncSender<String>,
+    },
+    Close {
+        hwnd: i64,
+        reply: SyncSender<String>,
+    },
+    ShellRelay {
+        alt_tab: bool,
+        winkey: bool,
+        reply: SyncSender<String>,
+    },
     Quit {
         reply: SyncSender<String>,
     },
@@ -106,8 +134,14 @@ pub(crate) fn bump_overview_seq() {
     OVERVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
 }
 
+struct EventState {
+    snapshot: String,
+    next_seq: u64,
+    events: VecDeque<(u64, String)>,
+}
+
 struct EventHub {
-    state: Mutex<String>,
+    state: Mutex<EventState>,
     cvar: Condvar,
 }
 
@@ -115,7 +149,11 @@ static HUB: OnceLock<EventHub> = OnceLock::new();
 
 fn hub() -> &'static EventHub {
     HUB.get_or_init(|| EventHub {
-        state: Mutex::new(String::new()),
+        state: Mutex::new(EventState {
+            snapshot: String::new(),
+            next_seq: 1,
+            events: VecDeque::new(),
+        }),
         cvar: Condvar::new(),
     })
 }
@@ -124,21 +162,36 @@ fn hub() -> &'static EventHub {
 pub(crate) fn publish(json: String) {
     let h = hub();
     if let Ok(mut g) = h.state.lock() {
-        if *g != json {
-            *g = json;
+        if g.snapshot != json {
+            g.snapshot = json;
             h.cvar.notify_all();
         }
     }
 }
 
+/// Push a transient shell event (e.g. elevated Alt+Tab / Win relay) to connected subscribers.
+pub(crate) fn publish_shell_event(json: &str) {
+    let h = hub();
+    if let Ok(mut g) = h.state.lock() {
+        let seq = g.next_seq;
+        g.next_seq = g.next_seq.saturating_add(1);
+        g.events.push_back((seq, json.to_string()));
+        while g.events.len() > 64 {
+            g.events.pop_front();
+        }
+        h.cvar.notify_all();
+    }
+}
+
 pub(crate) fn snapshot_json(app: &App) -> String {
     let paused = tray::PAUSED.load(Ordering::Relaxed);
+    let elevated = crate::winutil::is_elevated();
     let active = app.ws.active();
     let count = app.ws.count();
     let cheatsheet_seq = CHEATSHEET_SEQ.load(Ordering::Relaxed);
     let overview_seq = OVERVIEW_SEQ.load(Ordering::Relaxed);
     let mut out = format!(
-        r#"{{"paused":{paused},"active":{active},"cheatsheet_seq":{cheatsheet_seq},"overview_seq":{overview_seq},"workspaces":["#
+        r#"{{"paused":{paused},"elevated":{elevated},"active":{active},"cheatsheet_seq":{cheatsheet_seq},"overview_seq":{overview_seq},"workspaces":["#
     );
     for idx in 0..count {
         if idx > 0 {
@@ -327,23 +380,89 @@ fn parse_cmd(line: &str, reply: SyncSender<String>) -> Result<Cmd, String> {
             Ok(Cmd::SetOsd { enabled, reply })
         }
         "reinstall_hook" => Ok(Cmd::ReinstallHook { reply }),
+        "focus" => {
+            let hwnd: i64 = parts
+                .next()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| "missing hwnd".to_string())?;
+            Ok(Cmd::Focus { hwnd, reply })
+        }
+        "minimize" => {
+            let hwnd: i64 = parts
+                .next()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| "missing hwnd".to_string())?;
+            Ok(Cmd::Minimize { hwnd, reply })
+        }
+        "close" => {
+            let hwnd: i64 = parts
+                .next()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| "missing hwnd".to_string())?;
+            Ok(Cmd::Close { hwnd, reply })
+        }
+        "shell_relay" => {
+            let alt_tab = parts.next().is_some_and(|s| s == "1" || s == "true" || s == "on");
+            let winkey = parts.next().is_some_and(|s| s == "1" || s == "true" || s == "on");
+            Ok(Cmd::ShellRelay { alt_tab, winkey, reply })
+        }
         "quit" => Ok(Cmd::Quit { reply }),
         other => Err(format!("unknown command '{other}'")),
     }
 }
 
+struct PipeSd(*mut c_void);
+unsafe impl Send for PipeSd {}
+unsafe impl Sync for PipeSd {}
+
+static PIPE_SD: OnceLock<Option<PipeSd>> = OnceLock::new();
+
+/// Restrict Named Pipe access to SYSTEM, Administrators, and the current user SID with a
+/// Medium Mandatory Integrity label so non-admin ORUMI (same user) can connect when elevated,
+/// while Low-integrity / AppContainer processes and other users are denied.
+unsafe fn pipe_security_attributes() -> Option<SECURITY_ATTRIBUTES> {
+    let ptr = PIPE_SD.get_or_init(|| {
+        let sddl = if let Some(sid) = crate::winutil::current_user_sid_string() {
+            format!("D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{sid})S:(ML;;NW;;;ME)")
+        } else {
+            "D:(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NW;;;ME)".to_string()
+        };
+        let wide: Vec<u16> = sddl.encode_utf16().chain(Some(0)).collect();
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(wide.as_ptr()),
+            SDDL_REVISION_1,
+            &mut sd,
+            None,
+        )
+        .is_ok()
+            && !sd.0.is_null()
+        {
+            Some(PipeSd(sd.0))
+        } else {
+            None
+        }
+    });
+    ptr.as_ref().map(|sd| SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: sd.0,
+        bInheritHandle: false.into(),
+    })
+}
+
 fn cmd_server(main_thread: u32, tx: Sender<Cmd>) {
     loop {
         unsafe {
+            let sa = pipe_security_attributes();
             let pipe = CreateNamedPipeW(
                 w!(r"\\.\pipe\vscroll-wm"),
                 PIPE_ACCESS_DUPLEX,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
                 4096,
                 4096,
                 0,
-                None,
+                sa.as_ref().map(|s| s as *const SECURITY_ATTRIBUTES),
             );
             if pipe == INVALID_HANDLE_VALUE || pipe.is_invalid() {
                 std::thread::sleep(Duration::from_millis(200));
@@ -389,15 +508,16 @@ fn event_server() {
     let h = hub();
     loop {
         unsafe {
+            let sa = pipe_security_attributes();
             let pipe = CreateNamedPipeW(
                 w!(r"\\.\pipe\vscroll-wm-events"),
                 PIPE_ACCESS_OUTBOUND,
-                PIPE_TYPE_BYTE | PIPE_WAIT,
+                PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
                 8192,
                 0,
                 0,
-                None,
+                sa.as_ref().map(|s| s as *const SECURITY_ATTRIBUTES),
             );
             if pipe == INVALID_HANDLE_VALUE || pipe.is_invalid() {
                 std::thread::sleep(Duration::from_millis(200));
@@ -409,23 +529,49 @@ fn event_server() {
             }
             let mut file = File::from_raw_handle(pipe.0);
             let mut last_sent = String::new();
+            let mut last_seq = h
+                .state
+                .lock()
+                .map(|g| g.next_seq.saturating_sub(1))
+                .unwrap_or(0);
 
             'conn: loop {
-                let next = {
+                let (next_snapshot, pending_events) = {
                     let Ok(mut g) = h.state.lock() else { break 'conn };
-                    while g.is_empty() || *g == last_sent {
+                    while (g.snapshot.is_empty() || g.snapshot == last_sent)
+                        && g.events.back().is_none_or(|(s, _)| *s <= last_seq)
+                    {
                         g = match h.cvar.wait(g) {
                             Ok(g) => g,
                             Err(_) => break 'conn,
                         };
                     }
-                    g.clone()
+                    let snap = if !g.snapshot.is_empty() && g.snapshot != last_sent {
+                        Some(g.snapshot.clone())
+                    } else {
+                        None
+                    };
+                    let mut evs = Vec::new();
+                    for (seq, line) in &g.events {
+                        if *seq > last_seq {
+                            evs.push((*seq, line.clone()));
+                        }
+                    }
+                    (snap, evs)
                 };
-                if writeln!(file, "{next}").is_err() {
-                    break;
+                if let Some(next) = next_snapshot {
+                    if writeln!(file, "{next}").is_err() {
+                        break;
+                    }
+                    last_sent = next;
+                }
+                for (seq, ev) in pending_events {
+                    if writeln!(file, "{ev}").is_err() {
+                        break 'conn;
+                    }
+                    last_seq = seq;
                 }
                 let _ = FlushFileBuffers(HANDLE(file.as_raw_handle()));
-                last_sent = next;
             }
 
             let _ = DisconnectNamedPipe(HANDLE(file.as_raw_handle()));
@@ -601,6 +747,64 @@ pub(crate) unsafe fn handle(app: &mut App, cmd: Cmd) -> bool {
         }
         Cmd::ReinstallHook { reply } => {
             crate::hook::reinstall_kb_hook();
+            let _ = reply.send("ok".to_string());
+        }
+        Cmd::Focus { hwnd, reply } => {
+            let h = HWND(hwnd as isize as *mut c_void);
+            if !IsWindow(Some(h)).as_bool() {
+                let _ = reply.send("err invalid window".to_string());
+                return false;
+            }
+            if !tray::PAUSED.load(Ordering::Relaxed) {
+                let target = WindowId(hwnd as isize as usize as u64);
+                let old = app.ws.active();
+                let switched = app.ws.focus_window(target);
+                if switched {
+                    app.slide = Some(Slide::switching(slide_dir(old, app.ws.active())));
+                    app.update_workspace_tip();
+                }
+                if switched || app.map.contains_key(&target) {
+                    app.apply();
+                }
+            }
+            if IsIconic(h).as_bool() {
+                let _ = ShowWindow(h, SW_RESTORE);
+            }
+            app.focus_hwnd(h);
+            let _ = reply.send("ok".to_string());
+        }
+        Cmd::Minimize { hwnd, reply } => {
+            let h = HWND(hwnd as isize as *mut c_void);
+            if !IsWindow(Some(h)).as_bool() {
+                let _ = reply.send("err invalid window".to_string());
+                return false;
+            }
+            let id = WindowId(hwnd as isize as usize as u64);
+            if !tray::PAUSED.load(Ordering::Relaxed) && app.map.contains_key(&id) {
+                app.ws.set_hidden(id, true);
+                app.hidden.insert(id);
+                app.anim.remove(&id);
+                app.apply();
+            }
+            let _ = ShowWindow(h, SW_MINIMIZE);
+            let _ = reply.send("ok".to_string());
+        }
+        Cmd::Close { hwnd, reply } => {
+            let h = HWND(hwnd as isize as *mut c_void);
+            let id = WindowId(hwnd as isize as usize as u64);
+            let allowed = IsWindow(Some(h)).as_bool()
+                && (app.map.contains_key(&id)
+                    || app.floating.contains_key(&id)
+                    || crate::winutil::manageable(h));
+            if !allowed {
+                let _ = reply.send("err window not eligible".to_string());
+                return false;
+            }
+            let _ = PostMessageW(Some(h), WM_SYSCOMMAND, WPARAM(SC_CLOSE as usize), LPARAM(0));
+            let _ = reply.send("ok".to_string());
+        }
+        Cmd::ShellRelay { alt_tab, winkey, reply } => {
+            crate::hook::set_shell_relay(alt_tab, winkey);
             let _ = reply.send("ok".to_string());
         }
         Cmd::Quit { reply } => {

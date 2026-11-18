@@ -155,7 +155,7 @@ fn async_down(vk: u32) -> bool {
 }
 
 enum Msg {
-    Start { reverse: bool, sticky: bool },
+    Start { reverse: bool, sticky: bool, elevated: bool },
     Next { reverse: bool },
     SetPreviews(bool),
     Step(i32),
@@ -387,7 +387,7 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
                 send(Msg::Next { reverse });
             } else {
                 ACTIVE.store(true, Ordering::Relaxed);
-                send(Msg::Start { reverse, sticky: false });
+                send(Msg::Start { reverse, sticky: false, elevated: false });
             }
             true
         }
@@ -453,6 +453,7 @@ struct Session {
     index: usize,
     shown: bool,
     sticky: bool,
+    elevated: bool,
     started: Instant,
     layout: GridLayout,
     /// Window size (design units) that fits the grid.
@@ -715,10 +716,11 @@ fn cancel(app: &AppHandle, session: &mut Option<Session>) {
 
 fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
     match msg {
-        Msg::Start { reverse, sticky } => {
+        Msg::Start { reverse, sticky, elevated } => {
             let started = Instant::now();
-            // First, suppress the active app's menu bar while Alt is still held.
-            if !sticky {
+            // First, suppress the active app's menu bar while Alt is still held (elevated WM
+            // already handles masking when elevated).
+            if !sticky && !elevated {
                 unsafe { mask_alt_menu() };
             }
 
@@ -763,6 +765,7 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
                 index,
                 shown: false,
                 sticky,
+                elevated,
                 started,
                 layout,
                 window,
@@ -830,9 +833,11 @@ fn worker(app: AppHandle, rx: Receiver<Msg>) {
 
         let Some(s) = session.as_mut() else { continue };
         let age = s.started.elapsed();
-        if !s.sticky && age >= ALT_POLL_GRACE && !async_down(VK_MENU) {
+        if !s.sticky && !s.elevated && age >= ALT_POLL_GRACE && !async_down(VK_MENU) {
             // Alt-up was missed (hook removed, desktop is safe, etc.): consider the session finished.
             finish(&app, &mut session);
+        } else if s.elevated && !crate::wm_ipc::is_connected() {
+            cancel(&app, &mut session);
         } else if !s.shown && age >= SHOW_DELAY {
             show(&app, s);
         }
@@ -930,7 +935,7 @@ fn watchdog() {
                 if ACTIVE.swap(true, Ordering::Relaxed) {
                     send(Msg::Next { reverse });
                 } else {
-                    send(Msg::Start { reverse, sticky: false });
+                    send(Msg::Start { reverse, sticky: false, elevated: false });
                 }
             }
         }
@@ -956,7 +961,48 @@ pub fn switcher_open() {
     STICKY.store(true, Ordering::Relaxed);
     ACTIVE.store(true, Ordering::Relaxed);
     ensure_hook("switcher_open");
-    send(Msg::Start { reverse: false, sticky: true });
+    send(Msg::Start { reverse: false, sticky: true, elevated: false });
+}
+
+/// Handle an Alt+Tab relay event forwarded by elevated `vscroll-wm` while an admin window
+/// holds foreground focus (where ORUMI's own Medium-integrity hook is blocked by UIPI).
+pub fn on_elevated_event(kind: &str, reverse: bool, delta: i32) {
+    match kind {
+        "alt_tab_start" => {
+            if !ENABLED.load(Ordering::Relaxed) {
+                return;
+            }
+            ACTIVE.store(true, Ordering::Relaxed);
+            STICKY.store(false, Ordering::Relaxed);
+            send(Msg::Start { reverse, sticky: false, elevated: true });
+        }
+        "alt_tab_next" => {
+            if ACTIVE.load(Ordering::Relaxed) {
+                send(Msg::Next { reverse });
+            }
+        }
+        "alt_tab_step" => {
+            if ACTIVE.load(Ordering::Relaxed) {
+                send(Msg::Step(delta));
+            }
+        }
+        "alt_tab_row" => {
+            if ACTIVE.load(Ordering::Relaxed) {
+                send(Msg::StepRow(delta));
+            }
+        }
+        "alt_tab_commit" => {
+            if ACTIVE.swap(false, Ordering::Relaxed) {
+                send(Msg::Commit);
+            }
+        }
+        "alt_tab_cancel" => {
+            if ACTIVE.swap(false, Ordering::Relaxed) {
+                send(Msg::Cancel);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Enable or disable thumbnail previews for the current process.

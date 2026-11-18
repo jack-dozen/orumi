@@ -15,11 +15,15 @@ use std::sync::{LazyLock, OnceLock, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 const CMD_PIPE: &str = r"\\.\pipe\vscroll-wm";
 const EVENT_PIPE: &str = r"\\.\pipe\vscroll-wm-events";
+const ELEVATED_TASK_NAME: &str = "ORUMI-vscroll-wm";
+const ELEVATED_DIR: &str = r"C:\Program Files\ORUMI";
+const ELEVATED_EXE_PATH: &str = r"C:\Program Files\ORUMI\vscroll-wm.exe";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const ERROR_PIPE_BUSY: i32 = 231;
 
@@ -90,6 +94,8 @@ pub struct OverviewStateData {
 #[derive(Deserialize)]
 struct RawSnapshot {
     paused: bool,
+    #[serde(default)]
+    elevated: bool,
     active: usize,
     #[serde(default)]
     cheatsheet_seq: u64,
@@ -102,6 +108,7 @@ struct RawSnapshot {
 struct WmSnapshot {
     connected: bool,
     paused: bool,
+    elevated: bool,
     active_ws: usize,
     cheatsheet_seq: u64,
     overview_seq: u64,
@@ -123,6 +130,7 @@ fn build_snapshot(raw: RawSnapshot) -> WmSnapshot {
     WmSnapshot {
         connected: true,
         paused: raw.paused,
+        elevated: raw.elevated,
         active_ws: raw.active,
         cheatsheet_seq: raw.cheatsheet_seq,
         overview_seq: raw.overview_seq,
@@ -267,8 +275,43 @@ fn ensure_wm_files(app: &AppHandle) -> (Option<PathBuf>, Option<PathBuf>) {
     (conf, ign)
 }
 
+fn elevated_task_installed() -> bool {
+    if !std::path::Path::new(ELEVATED_EXE_PATH).is_file() {
+        return false;
+    }
+    Command::new("schtasks.exe")
+        .args(["/Query", "/TN", ELEVATED_TASK_NAME])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+fn spawn_elevated_task() -> bool {
+    let ok = Command::new("schtasks.exe")
+        .args(["/Run", "/TN", ELEVATED_TASK_NAME])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !ok {
+        return false;
+    }
+    for _ in 0..20 {
+        thread::sleep(Duration::from_millis(80));
+        if send_cmd("list").is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
 fn maybe_spawn_vscroll(app: &AppHandle) {
     if send_cmd("list").is_ok() {
+        return;
+    }
+    let _ = ensure_wm_files(app);
+    if elevated_task_installed() && spawn_elevated_task() {
+        SPAWNED_BY_ORUMI.store(true, Ordering::Relaxed);
+        eprintln!("[wm-ipc] launched elevated task {ELEVATED_TASK_NAME}");
         return;
     }
     let Some(exe) = find_vscroll_exe() else {
@@ -298,6 +341,49 @@ fn maybe_spawn_vscroll(app: &AppHandle) {
     }
 }
 
+pub fn sync_shell_relay(app: &AppHandle) {
+    let alt_tab = crate::config::current(app).alt_tab;
+    let winkey = crate::activities::is_win_key_enabled();
+    let cmd = format!(
+        "shell_relay {} {}",
+        if alt_tab { 1 } else { 0 },
+        if winkey { 1 } else { 0 }
+    );
+    thread::spawn(move || {
+        let _ = send_cmd(&cmd);
+    });
+}
+
+pub fn sync_shell_relay_current() {
+    if let Some(app) = APP.get() {
+        sync_shell_relay(app);
+    }
+}
+
+fn handle_event_line(app: &AppHandle, line: &str) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return;
+    };
+    if let Some(kind) = val.get("shell_event").and_then(|s| s.as_str()) {
+        if kind.starts_with("alt_tab_") {
+            let reverse = val.get("reverse").and_then(|b| b.as_bool()).unwrap_or(false);
+            let delta = val.get("delta").and_then(|n| n.as_i64()).unwrap_or(0) as i32;
+            crate::altswitch::on_elevated_event(kind, reverse, delta);
+        } else if kind.starts_with("win_") {
+            let combo = val.get("combo").and_then(|b| b.as_bool()).unwrap_or(false);
+            crate::activities::on_elevated_win_event(kind, combo);
+        }
+        return;
+    }
+    if let Ok(raw) = serde_json::from_value::<RawSnapshot>(val) {
+        apply_snapshot(Some(app), build_snapshot(raw));
+    }
+}
+
 /// Start the event listener and auto-launch `vscroll-wm.exe` if it is not already running.
 pub fn start(app: AppHandle) {
     SHUTDOWN.store(false, Ordering::Relaxed);
@@ -312,6 +398,7 @@ pub fn start(app: AppHandle) {
                         let _ = send_cmd("osd off");
                         let _ = send_cmd("cheatsheet_ui off");
                         let _ = send_cmd("overview_ui off");
+                        sync_shell_relay(&app);
                         let sync_app = app.clone();
                         thread::spawn(move || sync_theme_colors(&sync_app));
                         let reader = BufReader::new(file);
@@ -320,9 +407,7 @@ pub fn start(app: AppHandle) {
                                 return;
                             }
                             let Ok(line) = line else { break };
-                            if let Ok(raw) = serde_json::from_str::<RawSnapshot>(line.trim()) {
-                                apply_snapshot(Some(&app), build_snapshot(raw));
-                            }
+                            handle_event_line(&app, &line);
                         }
                         apply_snapshot(Some(&app), WmSnapshot::default());
                     }
@@ -341,6 +426,7 @@ pub fn shutdown() {
     if SPAWNED_BY_ORUMI.load(Ordering::Relaxed) {
         let _ = send_cmd("quit");
     } else {
+        let _ = send_cmd("shell_relay 0 0");
         let _ = send_cmd("osd on");
         let _ = send_cmd("cheatsheet_ui on");
         let _ = send_cmd("overview_ui on");
@@ -495,6 +581,28 @@ pub fn wm_overview_pick(app: AppHandle, hwnd: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// True if `vscroll-wm` is connected.
+pub fn is_connected() -> bool {
+    WM_SNAPSHOT.read().is_ok_and(|g| g.connected)
+}
+
+/// True if `vscroll-wm` is connected and running elevated (capable of controlling admin windows).
+pub fn is_elevated() -> bool {
+    WM_SNAPSHOT
+        .read()
+        .is_ok_and(|g| g.connected && g.elevated)
+}
+
+pub fn focus_window(hwnd: i64) -> Result<(), String> {
+    let _ = send_cmd(&format!("focus {hwnd}"))?;
+    Ok(())
+}
+
+pub fn minimize_window(hwnd: i64) -> Result<(), String> {
+    let _ = send_cmd(&format!("minimize {hwnd}"))?;
+    Ok(())
+}
+
 /// True if `hwnd` belongs to an inactive workspace while `vscroll-wm` is connected and active.
 pub fn is_in_other_workspace(hwnd: i64) -> bool {
     let Ok(g) = WM_SNAPSHOT.read() else {
@@ -562,6 +670,10 @@ pub struct WmConfigData {
     #[serde(default)]
     pub paused: bool,
     #[serde(default)]
+    pub elevated: bool,
+    #[serde(default)]
+    pub elevated_task_installed: bool,
+    #[serde(default)]
     pub config_path: String,
     #[serde(default)]
     pub ignore_path: String,
@@ -593,6 +705,8 @@ fn default_wm_config() -> WmConfigData {
     WmConfigData {
         connected: false,
         paused: false,
+        elevated: false,
+        elevated_task_installed: false,
         config_path: String::new(),
         ignore_path: String::new(),
         gap: 16,
@@ -907,7 +1021,9 @@ pub fn wm_config_get(app: AppHandle) -> Result<WmConfigData, String> {
     if let Ok(g) = WM_SNAPSHOT.read() {
         data.connected = g.connected;
         data.paused = g.paused;
+        data.elevated = g.connected && g.elevated;
     }
+    data.elevated_task_installed = elevated_task_installed();
     Ok(data)
 }
 
@@ -981,4 +1097,175 @@ pub fn wm_reapply_cmd() -> Result<(), String> {
     let _ = send_cmd("reapply")?;
     refresh_snapshot_sync();
     Ok(())
+}
+
+fn current_user_sid() -> Result<String, String> {
+    let out = Command::new("whoami.exe")
+        .args(["/user", "/fo", "csv", "/nh"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("failed reading current user SID: {e}"))?;
+    if !out.status.success() {
+        return Err("whoami /user failed".into());
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let sid = text
+        .trim()
+        .rsplit(',')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    if !sid.starts_with("S-1-") {
+        return Err(format!("unexpected SID format: {sid}"));
+    }
+    Ok(sid)
+}
+
+fn ps_single_quote(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+fn encode_ps_utf16(script: &str) -> String {
+    let mut bytes = Vec::with_capacity(script.len() * 2);
+    for u in script.encode_utf16() {
+        bytes.extend_from_slice(&u.to_le_bytes());
+    }
+    STANDARD.encode(bytes)
+}
+
+fn run_elevated_ps(script: &str) -> Result<(), String> {
+    let encoded = encode_ps_utf16(script);
+    let launcher = format!(
+        "$p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','{encoded}'); exit $p.ExitCode"
+    );
+    let out = Command::new("powershell.exe")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &launcher])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("failed launching UAC prompt: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "UAC prompt cancelled or elevated setup failed".into()
+        } else {
+            stderr
+        });
+    }
+    Ok(())
+}
+
+/// Install/update or remove the elevated Scheduled Task for `vscroll-wm.exe` (one UAC prompt)
+/// and restart `vscroll-wm` cleanly so admin-window control activates immediately.
+#[tauri::command]
+pub async fn wm_setup_elevated(app: AppHandle, enable: bool) -> Result<WmConfigData, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let sid = current_user_sid()?;
+        let script = if enable {
+            let src = find_vscroll_exe()
+                .ok_or_else(|| "vscroll-wm.exe was not found; build it first.".to_string())?;
+            let src_q = ps_single_quote(&src.to_string_lossy());
+            let dir_q = ps_single_quote(ELEVATED_DIR);
+            let dst_q = ps_single_quote(ELEVATED_EXE_PATH);
+            let task_q = ps_single_quote(ELEVATED_TASK_NAME);
+            let sid_q = ps_single_quote(&sid);
+            format!(
+                r#"$ErrorActionPreference = 'Stop'
+$taskName = '{task_q}'
+$targetDir = '{dir_q}'
+$targetExe = '{dst_q}'
+$srcExe = '{src_q}'
+$sid = '{sid_q}'
+try {{ & schtasks.exe /End /TN $taskName *> $null }} catch {{}}
+Get-Process -Name 'vscroll-wm' -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq $targetExe }} | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 150
+New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+Copy-Item -LiteralPath $srcExe -Destination $targetExe -Force
+$escExe = [System.Security.SecurityElement]::Escape($targetExe)
+$escSid = [System.Security.SecurityElement]::Escape($sid)
+$xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Elevated vscroll-wm helper for ORUMI.</Description></RegistrationInfo>
+  <Triggers />
+  <Principals>
+    <Principal id="Author">
+      <UserId>$escSid</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>5</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>$escExe</Command>
+      <Arguments>--no-tray --no-osd --no-cheatsheet --no-overview</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
+$sddl = "D:(A;;FA;;;BA)(A;;FA;;;SY)(A;;GRGX;;;$sid)"
+$svc = New-Object -ComObject Schedule.Service
+$svc.Connect()
+$folder = $svc.GetFolder('\')
+$null = $folder.RegisterTask($taskName, $xml, 6, $sid, $null, 3, $sddl)
+"#
+            )
+        } else {
+            let dir_q = ps_single_quote(ELEVATED_DIR);
+            let dst_q = ps_single_quote(ELEVATED_EXE_PATH);
+            let task_q = ps_single_quote(ELEVATED_TASK_NAME);
+            format!(
+                r#"$ErrorActionPreference = 'Stop'
+$taskName = '{task_q}'
+$targetDir = '{dir_q}'
+$targetExe = '{dst_q}'
+try {{ & schtasks.exe /End /TN $taskName *> $null }} catch {{}}
+Get-Process -Name 'vscroll-wm' -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq $targetExe }} | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 150
+try {{ & schtasks.exe /Delete /TN $taskName /F *> $null }} catch {{}}
+if (Test-Path -LiteralPath $targetExe -PathType Leaf) {{ Remove-Item -LiteralPath $targetExe -Force }}
+if ((Test-Path -LiteralPath $targetDir -PathType Container) -and ((Get-ChildItem -LiteralPath $targetDir -Force | Measure-Object).Count -eq 0)) {{
+  Remove-Item -LiteralPath $targetDir -Force
+}}
+"#
+            )
+        };
+
+        let _ = send_cmd("quit");
+        for _ in 0..16 {
+            thread::sleep(Duration::from_millis(40));
+            if send_cmd("list").is_err() {
+                break;
+            }
+        }
+
+        let setup_res = run_elevated_ps(&script);
+        maybe_spawn_vscroll(&app);
+        for _ in 0..15 {
+            if send_cmd("list").is_ok() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
+        refresh_snapshot_sync();
+        sync_shell_relay(&app);
+        setup_res?;
+        wm_config_get(app)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

@@ -2,18 +2,27 @@
 
 use std::ffi::c_void;
 use std::sync::atomic::Ordering;
+use std::sync::OnceLock;
 
 use layout::{Rect, WindowId};
 
-use windows::core::{w, BOOL, HRESULT};
+use windows::core::{w, BOOL, HRESULT, PWSTR};
 use windows::Win32::Foundation::{
-    GetLastError, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, HWND, LPARAM, RECT,
+    CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, HANDLE,
+    HLOCAL, HWND, LPARAM, RECT,
 };
 use windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CLOAKED,
     DWMWA_EXTENDED_FRAME_BOUNDS,
 };
-use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
+use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
+use windows::Win32::Security::{
+    GetTokenInformation, TokenElevation, TokenUser, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
+};
+use windows::Win32::System::Threading::{
+    CreateMutexW, GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 #[allow(unused_imports)]
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -187,4 +196,98 @@ pub(crate) unsafe fn single_instance() -> bool {
         Ok(_handle) => GetLastError() != ERROR_ALREADY_EXISTS, // handle sengaja tidak ditutup
         Err(_) => true,
     }
+}
+
+unsafe fn token_is_elevated(token: HANDLE) -> bool {
+    let mut elev = TOKEN_ELEVATION::default();
+    let mut len = 0u32;
+    let ok = GetTokenInformation(
+        token,
+        TokenElevation,
+        Some(&mut elev as *mut TOKEN_ELEVATION as *mut c_void),
+        std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+        &mut len,
+    )
+    .is_ok();
+    ok && elev.TokenIsElevated != 0
+}
+
+pub(crate) unsafe fn is_process_elevated() -> bool {
+    let mut tok = HANDLE::default();
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut tok).is_err() {
+        return false;
+    }
+    let elevated = token_is_elevated(tok);
+    let _ = CloseHandle(tok);
+    elevated
+}
+
+pub(crate) fn is_elevated() -> bool {
+    static ELEVATED: OnceLock<bool> = OnceLock::new();
+    *ELEVATED.get_or_init(|| unsafe { is_process_elevated() })
+}
+
+/// True if the window's owning process is running with an elevated (administrator) token.
+pub(crate) unsafe fn is_hwnd_elevated(hwnd: HWND) -> bool {
+    if hwnd.0.is_null() {
+        return false;
+    }
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    if pid == 0 || pid == GetCurrentProcessId() {
+        return false;
+    }
+    let Ok(proc_h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+        // Protected / inaccessible processes cannot be controlled by Medium-integrity ORUMI either.
+        return true;
+    };
+    let mut tok = HANDLE::default();
+    let elevated = if OpenProcessToken(proc_h, TOKEN_QUERY, &mut tok).is_ok() {
+        let e = token_is_elevated(tok);
+        let _ = CloseHandle(tok);
+        e
+    } else {
+        true
+    };
+    let _ = CloseHandle(proc_h);
+    elevated
+}
+
+/// String SID of the current process token user (e.g. `S-1-5-21-...`), used to build strict Named Pipe ACLs.
+pub(crate) unsafe fn current_user_sid_string() -> Option<String> {
+    let mut tok = HANDLE::default();
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut tok).is_err() {
+        return None;
+    }
+    let mut needed = 0u32;
+    let _ = GetTokenInformation(tok, TokenUser, None, 0, &mut needed);
+    if needed == 0 {
+        let _ = CloseHandle(tok);
+        return None;
+    }
+    let mut buf = vec![0u8; needed as usize];
+    let ok = GetTokenInformation(
+        tok,
+        TokenUser,
+        Some(buf.as_mut_ptr().cast::<c_void>()),
+        needed,
+        &mut needed,
+    )
+    .is_ok();
+    let _ = CloseHandle(tok);
+    if !ok {
+        return None;
+    }
+    let user = &*(buf.as_ptr().cast::<TOKEN_USER>());
+    let mut pwstr = PWSTR::null();
+    if ConvertSidToStringSidW(user.User.Sid, &mut pwstr).is_err() || pwstr.0.is_null() {
+        return None;
+    }
+    let mut len = 0usize;
+    while *pwstr.0.add(len) != 0 {
+        len += 1;
+    }
+    let sid = String::from_utf16_lossy(std::slice::from_raw_parts(pwstr.0, len));
+    let _ = LocalFree(Some(HLOCAL(pwstr.0.cast::<c_void>())));
+    Some(sid)
 }
