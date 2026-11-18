@@ -72,25 +72,51 @@ pub struct WindowEntry {
     pub aumid: String,
 }
 
-/// Full program path (e.g. C:\...\chrome.exe), or empty if it cannot be read.
-unsafe fn process_path(pid: u32) -> String {
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetApplicationUserModelId(
+        hprocess: windows::Win32::Foundation::HANDLE,
+        applicationusermodelidlength: *mut u32,
+        applicationusermodelid: PWSTR,
+    ) -> i32;
+}
+
+/// Full program path (e.g. C:\...\chrome.exe) and packaged process AUMID (if MSIX/Store app).
+unsafe fn process_info(pid: u32) -> (String, String) {
     let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
-        return String::new();
+        return (String::new(), String::new());
     };
     let mut buf = [0u16; 1024];
     let mut len = buf.len() as u32;
-    let ok = QueryFullProcessImageNameW(
+    let path = if QueryFullProcessImageNameW(
         handle,
         PROCESS_NAME_WIN32,
         PWSTR(buf.as_mut_ptr()),
         &mut len,
     )
-    .is_ok();
+    .is_ok()
+    {
+        String::from_utf16_lossy(&buf[..len as usize])
+    } else {
+        String::new()
+    };
+
+    let mut aumid_buf = [0u16; 260];
+    let mut aumid_len = aumid_buf.len() as u32;
+    let proc_aumid = if GetApplicationUserModelId(
+        handle,
+        &mut aumid_len,
+        PWSTR(aumid_buf.as_mut_ptr()),
+    ) == 0
+        && aumid_len > 1
+    {
+        String::from_utf16_lossy(&aumid_buf[..(aumid_len as usize).saturating_sub(1)])
+    } else {
+        String::new()
+    };
+
     let _ = CloseHandle(handle);
-    if !ok {
-        return String::new();
-    }
-    String::from_utf16_lossy(&buf[..len as usize])
+    (path, proc_aumid)
 }
 
 /// Window AppUserModelID (the identity used by the taskbar). For Store apps, this is the only way
@@ -151,8 +177,8 @@ struct WinMeta {
 
 #[derive(Default)]
 struct MetaCache {
-    /// pid -> (full path, exe stem, lowercase filename)
-    procs: HashMap<u32, (String, String, String)>,
+    /// pid -> (full path, exe stem, lowercase filename, process AUMID)
+    procs: HashMap<u32, (String, String, String, String)>,
     /// hwnd -> static window metadata
     wins: HashMap<isize, WinMeta>,
 }
@@ -221,11 +247,11 @@ unsafe fn inspect(
         Some(m) if m.pid == pid => m.clone(),
         _ => {
             let class = class_name(hwnd);
-            let (path, exe, lower) = cache
+            let (path, exe, lower, proc_aumid) = cache
                 .procs
                 .entry(pid)
                 .or_insert_with(|| {
-                    let p = process_path(pid);
+                    let (p, proc_aumid) = process_info(pid);
                     let file = Path::new(&p)
                         .file_name()
                         .map(|s| s.to_string_lossy().into_owned())
@@ -239,16 +265,14 @@ unsafe fn inspect(
                             .map(|s| s.to_string_lossy().into_owned())
                             .unwrap_or_default()
                     };
-                    (p, stem, low)
+                    (p, stem, low, proc_aumid)
                 })
                 .clone();
             let is_store_frame =
                 lower == "applicationframehost.exe" && class == "ApplicationFrameWindow";
-            let aumid = if is_store_frame {
-                window_aumid(hwnd).unwrap_or_default()
-            } else {
-                String::new()
-            };
+            let aumid = window_aumid(hwnd)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(proc_aumid);
             let m = WinMeta {
                 pid,
                 class,

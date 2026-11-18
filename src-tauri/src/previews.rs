@@ -125,7 +125,7 @@ fn position(app: &AppHandle, n: usize, anchor_y: f64) -> Option<CardGeom> {
     let win_h = size.height as f64;
 
     let win_h_css = win_h / u;
-    let top = (anchor_y - card_h / 2.0).clamp(8.0, (win_h_css - card_h - 8.0).max(8.0));
+    let top = (anchor_y - card_h / 2.0).clamp(58.0, (win_h_css - card_h - 58.0).max(58.0));
 
     crate::edge::set_hit_rect("preview", Some((win_x, win_y + top * u, card_w * u, card_h * u)));
 

@@ -438,8 +438,10 @@ export default function Launcher() {
         className={`lpanel ${visible ? "lpanel--visible" : ""}`}
         style={{ width, height: height ?? undefined }}
       >
-        <div className="lpanel__inner" ref={innerRef}>
-          {view === "settings" ? (
+        <div className="lpanel__clip">
+          <div className="lpanel__inner" ref={innerRef}>
+            <div key={view} className="lpanel__stage">
+              {view === "settings" ? (
             <LauncherSettings onBack={() => setView("list")} onWidth={setSettingsWidth} />
           ) : view === "cheatsheet" ? (
             <WmCheatsheet
@@ -546,6 +548,8 @@ export default function Launcher() {
               </div>
             </>
           )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -980,3 +980,45 @@
     transform: translate3d(100%, -50%, 0) scaleY(1.35);
   }
 }
+
+/* Pixel-aligned Mica wallpaper backdrop (works in Material You & Windows 11 Fluent) */
+[data-mica="on"] .act {
+  --mica-tint: color-mix(in srgb, var(--surface) 74%, transparent);
+  background-color: color-mix(in srgb, var(--surface) 92%, transparent);
+  background-image:
+    linear-gradient(var(--mica-tint), var(--mica-tint)),
+    var(--mica-image, none);
+  background-size:
+    100% 100%,
+    var(--mica-screen-w, 100vw) var(--mica-screen-h, 100vh);
+  background-position:
+    0 0,
+    calc(-1 * var(--mica-win-x, 0px)) calc(-1 * var(--mica-win-y, 0px));
+  background-repeat: no-repeat;
+}
+
+/* Windows 11 Fluent style override */
+[data-style="fluent"] .act {
+  border-radius: 12px 12px 0 0;
+  border: 1px solid color-mix(in srgb, var(--on-surface) 11%, transparent);
+  border-bottom: none;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent);
+}
+
+[data-style="fluent"] .act-ws,
+[data-style="fluent"] .act-ws__preview,
+[data-style="fluent"] .act-app,
+[data-style="fluent"] .act-card__shot,
+[data-style="fluent"] .act__switch {
+  border-radius: 8px;
+}
+
+[data-style="fluent"] .act-ws {
+  border: 1px solid color-mix(in srgb, var(--on-surface) 11%, transparent);
+}
+
+[data-style="fluent"] .act__search {
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--on-surface) 11%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--primary) 72%, transparent);
+}

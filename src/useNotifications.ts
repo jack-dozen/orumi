@@ -14,7 +14,7 @@ export type NotifEntry = {
 };
 
 const TOAST_DURATION_MS = 5000;
-const TOAST_EXIT_MS = 220;
+const TOAST_EXIT_MS = 320;
 const MAX_QUEUE = 4;
 
 export function useNotifications(enabled: boolean, popupEnabled: boolean, notchVisible: boolean) {

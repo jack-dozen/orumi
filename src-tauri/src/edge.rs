@@ -74,7 +74,7 @@ const NEAR_EDGE_DIP: f64 = 96.0;
 /// How often to reread monitor dimensions.
 const METRICS_REFRESH: Duration = Duration::from_secs(5);
 /// Bar distance from the top and bottom screen edges (design units, before UI scaling).
-const BAR_INSET_DIP: f64 = 12.0;
+const BAR_INSET_DIP: f64 = 16.0;
 
 // ---------- UI scale (can be changed at runtime) ----------
 
@@ -149,7 +149,7 @@ static DISMISSED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 static SIZE_OVERRIDE: Mutex<Vec<(&'static str, (f64, f64))>> = Mutex::new(Vec::new());
 
 /// Launcher size (design units) while showing the wallpaper picker: wide and short.
-const WALLPAPER_VIEW_SIZE: (f64, f64) = (1040.0, 300.0);
+const WALLPAPER_VIEW_SIZE: (f64, f64) = (1080.0, 300.0);
 /// Launcher size (design units) while showing the WM keyboard shortcuts cheatsheet.
 const CHEATSHEET_VIEW_SIZE: (f64, f64) = (1120.0, 620.0);
 static LAUNCHER_CHEATSHEET: AtomicBool = AtomicBool::new(false);
@@ -454,8 +454,8 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
 
     match spec.edge {
         Edge::Left => {
-            let inset = BAR_INSET_DIP * u;
-            let win = Rect { x: mx, y: my + inset, w: size.0 * u, h: mh - 2.0 * inset };
+            // Span full monitor height so top/bottom 16 DIP margin hosts concave edge ears.
+            let win = Rect { x: mx, y: my, w: size.0 * u, h: mh };
             let trig = Rect { x: mx, y: my, w: EDGE_TRIGGER_DIP * scale, h: mh };
             (win, trig)
         }
@@ -685,6 +685,11 @@ fn set_visible(
 fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
     if let Some((x, y, w, h)) = hit_rect(label) {
         return Rect { x, y, w, h };
+    }
+    if matches!(label, "bar" | "overview") {
+        let inset = BAR_INSET_DIP * scale * ui_scale();
+        win.y += inset;
+        win.h = (win.h - 2.0 * inset).max(0.0);
     }
     if label == "launcher" {
         if let Ok(ls) = LAUNCHER_SIZE.lock() {

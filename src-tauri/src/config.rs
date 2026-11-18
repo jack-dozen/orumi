@@ -91,6 +91,10 @@ pub struct Config {
     pub taskbar_hidden: bool,
     /// "icons" or "dots": how the open-app list appears in the bar.
     pub bar_app_style: String,
+    /// "material" (Material You + Material Symbols Rounded) or "fluent" (Windows 11 Fluent + Segoe Fluent Icons).
+    pub ui_style: String,
+    /// Enable blurred wallpaper Mica backdrop behind ORUMI panels (works with both UI styles).
+    pub mica: bool,
     /// Custom search bar placeholder for Launcher & Activities. Empty = built-in default.
     pub search_placeholder: String,
     /// "manual" or "auto" (follows wallpaper luminance for Windows dark/light mode).
@@ -123,6 +127,8 @@ impl Default for Config {
             taskbar_autohide: true,
             taskbar_hidden: false,
             bar_app_style: "icons".into(),
+            ui_style: "material".into(),
+            mica: true,
             search_placeholder: String::new(),
             windows_theme_mode: "manual".into(),
             autostart: false,
@@ -181,6 +187,9 @@ fn sanitize(mut c: Config) -> Config {
     c.bg_tint = c.bg_tint.min(100);
     if c.bar_app_style != "dots" {
         c.bar_app_style = "icons".into();
+    }
+    if c.ui_style != "fluent" {
+        c.ui_style = "material".into();
     }
     c.search_placeholder = c.search_placeholder.trim().to_string();
     if c.windows_theme_mode != "auto" {
