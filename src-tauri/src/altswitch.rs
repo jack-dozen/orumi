@@ -566,11 +566,9 @@ fn refresh_thumbs(app: &AppHandle, dir: PathBuf, known: HashMap<i64, PathBuf>, m
             if known.get(&hwnd) == Some(&path) {
                 continue;
             }
-            let _ = app.emit_to(
-                "switcher",
-                "switcher-thumb",
-                ThumbPayload { hwnd, thumb: path.to_string_lossy().into_owned() },
-            );
+            let payload = ThumbPayload { hwnd, thumb: path.to_string_lossy().into_owned() };
+            let target = if edge::is_pill_mode() { "notch" } else { "switcher" };
+            let _ = app.emit_to(target, "switcher-thumb", payload);
             thread::sleep(Duration::from_millis(8));
         }
     });
@@ -580,19 +578,23 @@ fn refresh_thumbs(app: &AppHandle, dir: PathBuf, known: HashMap<i64, PathBuf>, m
 /// the list to the UI (which renders it and decodes the images). `show` then only reveals it.
 fn prepare(app: &AppHandle, s: &mut Session) {
     let t = Instant::now();
+    let pill = edge::is_pill_mode();
     let size = (s.window.0.round() as i64, s.window.1.round() as i64);
-    let changed = LAST_WINDOW
-        .lock()
-        .map(|mut l| {
-            let c = *l != Some(size);
-            *l = Some(size);
-            c
-        })
-        .unwrap_or(true);
-    edge::set_size_override("switcher", Some(s.window));
-    if changed {
-        let a = app.clone();
-        let _ = app.run_on_main_thread(move || crate::place_panel(&a, "switcher"));
+    let mut changed = false;
+    if !pill {
+        changed = LAST_WINDOW
+            .lock()
+            .map(|mut l| {
+                let c = *l != Some(size);
+                *l = Some(size);
+                c
+            })
+            .unwrap_or(true);
+        edge::set_size_override("switcher", Some(s.window));
+        if changed {
+            let a = app.clone();
+            let _ = app.run_on_main_thread(move || crate::place_panel(&a, "switcher"));
+        }
     }
 
     // Thumbnails already on disk are used right away; fresh ones arrive after the panel is shown.
@@ -610,8 +612,9 @@ fn prepare(app: &AppHandle, s: &mut Session) {
             SwItem { entry, thumb }
         })
         .collect();
+    let target = if pill { "notch" } else { "switcher" };
     let _ = app.emit_to(
-        "switcher",
+        target,
         "switcher-items",
         ItemsPayload { items, index: s.index, layout: s.layout },
     );
@@ -629,8 +632,14 @@ fn prepare(app: &AppHandle, s: &mut Session) {
 fn show(app: &AppHandle, s: &mut Session) {
     s.shown = true;
     PANEL_OPEN.store(true, Ordering::Relaxed);
-    let _ = app.emit_to("switcher", "switcher-select", s.index);
-    app.state::<Panels>().set("switcher", true);
+    if edge::is_pill_mode() {
+        let _ = app.emit_to("notch", "switcher-select", s.index);
+        let _ = app.emit_to("notch", "pill-switcher", true);
+        app.state::<Panels>().set("notch", true);
+    } else {
+        let _ = app.emit_to("switcher", "switcher-select", s.index);
+        app.state::<Panels>().set("switcher", true);
+    }
     if DEBUG_TIMING {
         eprintln!("[alt+tab] panel requested {} ms after the key press", s.started.elapsed().as_millis());
     }
@@ -649,13 +658,19 @@ fn refresh_session_thumbs(app: &AppHandle, s: &Session) {
 
 fn hide_panel(app: &AppHandle) {
     PANEL_OPEN.store(false, Ordering::Relaxed);
-    app.state::<Panels>().set("switcher", false);
+    if edge::is_pill_mode() {
+        let _ = app.emit_to("notch", "pill-switcher", false);
+        app.state::<Panels>().set("notch", false);
+    } else {
+        app.state::<Panels>().set("switcher", false);
+    }
 }
 
 /// Tell the UI which item is selected (showing the panel first if it is not visible yet).
 fn select(app: &AppHandle, s: &mut Session) {
     if s.shown {
-        let _ = app.emit_to("switcher", "switcher-select", s.index);
+        let target = if edge::is_pill_mode() { "notch" } else { "switcher" };
+        let _ = app.emit_to(target, "switcher-select", s.index);
     } else {
         show(app, s); // user is cycling through items: show it now
     }
@@ -727,13 +742,23 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
             // Close any open ORUMI interactive overlays (launcher, notch, overlay, activities)
             // so pressing Alt+Tab while launcher/notch is open cleanly transitions to switching windows.
             let panels = app.state::<Panels>();
-            for label in ["launcher", "notch", "overlay", "preview"] {
+            let to_close: &[&str] = if edge::is_pill_mode() {
+                &["launcher", "overlay", "preview"]
+            } else {
+                &["launcher", "notch", "overlay", "preview"]
+            };
+            for label in to_close {
                 if panels.is_open(label) {
                     panels.set(label, false);
                 }
             }
             if crate::activities::is_open() {
-                crate::activities::dismiss(app);
+                if edge::is_pill_mode() {
+                    crate::activities::mark_closed();
+                    let _ = app.emit_to("notch", "pill-command", serde_json::json!({ "mode": "close-activities" }));
+                } else {
+                    crate::activities::dismiss(app);
+                }
             }
 
             let t = Instant::now();
@@ -1011,6 +1036,10 @@ pub fn switcher_set_previews(enabled: bool) {
     PREVIEWS_ENABLED.store(enabled, Ordering::Relaxed);
     send(Msg::SetPreviews(enabled));
     ensure_hook("preview mode changed");
+}
+
+pub fn is_active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
 }
 
 #[tauri::command]

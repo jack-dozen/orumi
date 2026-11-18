@@ -72,6 +72,10 @@ pub fn is_open() -> bool {
     OPEN.load(Ordering::SeqCst)
 }
 
+pub fn mark_closed() {
+    OPEN.store(false, Ordering::SeqCst);
+}
+
 /// Close when Win is pressed while Activities is open (see winkey.rs). Uses the same animation
 /// as `hide`. If the Start menu appears again during repeated Win presses, replace its contents
 /// with an immediate hide instead of waiting for `CLOSE_ANIM`.
@@ -107,6 +111,21 @@ pub fn show(app: &AppHandle) {
             if !OPEN.load(Ordering::SeqCst) {
                 return;
             }
+            if crate::edge::is_pill_mode() {
+                if let Some(notch) = a.get_webview_window("notch") {
+                    crate::edge::set_activatable(&notch, true);
+                    let _ = notch.set_focus();
+                }
+                let _ = a.emit_to("notch", "activities-open", payload);
+                let _ = a.emit_to(
+                    "notch",
+                    "pill-command",
+                    serde_json::json!({ "mode": "activities" }),
+                );
+                a.state::<crate::edge::Panels>().set("notch", true);
+                crate::altswitch::ensure_hook("activities opened");
+                return;
+            }
             let Some(window) = a.get_webview_window(LABEL) else {
                 OPEN.store(false, Ordering::SeqCst);
                 return;
@@ -125,6 +144,31 @@ pub fn show(app: &AppHandle) {
 
 pub fn hide(app: &AppHandle) {
     if !OPEN.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    if crate::edge::is_pill_mode() {
+        let _ = app.emit_to("notch", "activities-close", ());
+        let _ = app.emit_to(
+            "notch",
+            "pill-command",
+            serde_json::json!({ "mode": "close-activities" }),
+        );
+        if let Some(notch) = app.get_webview_window("notch") {
+            crate::edge::set_activatable(&notch, false);
+        }
+        app.state::<crate::edge::Panels>().set("notch", false);
+        crate::altswitch::ensure_hook("activities closing");
+        let app = app.clone();
+        thread::spawn(move || {
+            thread::sleep(CLOSE_ANIM);
+            let _ = app.run_on_main_thread(move || {
+                if OPEN.load(Ordering::SeqCst) {
+                    return;
+                }
+                crate::winlist::restore_external_foreground_if_ours();
+                crate::altswitch::ensure_hook("activities hidden");
+            });
+        });
         return;
     }
     // React plays the close animation; hide the window afterward.

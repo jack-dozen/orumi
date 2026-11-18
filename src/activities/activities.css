@@ -1022,3 +1022,38 @@
   border: 1px solid color-mix(in srgb, var(--on-surface) 11%, transparent);
   border-bottom: 2px solid color-mix(in srgb, var(--primary) 72%, transparent);
 }
+
+/* Embedded Activities view inside Unified Top-Edge Morphing Pill */
+.act.act--pill,
+[data-mica="on"] .act.act--pill,
+[data-style="fluent"] .act.act--pill {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: min(620px, calc(100vh - 56px));
+  background: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  transform: none !important;
+  transition: none;
+  pointer-events: auto;
+}
+
+.act--pill .act__top {
+  padding: 18px 24px 0;
+}
+
+.act--pill .act__wins {
+  padding: 164px 28px 72px;
+}
+
+.act--pill .act__cards {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 20px 18px;
+}
+
+.act--pill .act__apps {
+  padding: 24px 36px 72px 64px;
+}

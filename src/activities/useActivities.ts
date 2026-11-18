@@ -40,19 +40,30 @@ export const closeActivities = () => invoke("activities_close").catch(() => {});
  *  - "activities-open"  (payload: window list + thumbnails) when the window is shown
  *  - "activities-close" when closing starts
  */
-export function useActivities() {
-  const [visible, setVisible] = useState(false);
+export function useActivities(initialWins?: SnapWindow[], embedded = false) {
+  const [visible, setVisible] = useState(embedded);
   /** Increments each time it opens; used by React to reset the display. */
-  const [openCount, setOpenCount] = useState(0);
-  const [wins, setWins] = useState<SnapWindow[]>([]);
+  const [openCount, setOpenCount] = useState(embedded ? 1 : 0);
+  const [wins, setWins] = useState<SnapWindow[]>(initialWins ?? []);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [apps, setApps] = useState<AppEntry[]>([]);
+
+  useEffect(() => {
+    if (embedded && initialWins) {
+      setWins(initialWins);
+      setOpenCount((n) => n + 1);
+    }
+  }, [embedded, initialWins]);
 
   const refreshWorkspaces = useCallback(() => {
     return invoke<Workspace[]>("ws_list")
       .then(setWorkspaces)
       .catch(() => setWorkspaces([]));
   }, []);
+
+  useEffect(() => {
+    if (embedded) refreshWorkspaces();
+  }, [embedded, refreshWorkspaces]);
 
   // The app list is loaded once (cached by Rust, shared with the launcher).
   useEffect(() => {

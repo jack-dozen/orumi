@@ -4846,3 +4846,601 @@ button.vb__icon:hover {
 [data-style="fluent"] .wsosd__dot--active {
   width: 18px;
 }
+
+/* ---------- Unified Top-Edge Morphing Pill ---------- */
+
+.notch--flush .notch__inner {
+  padding: 0;
+  gap: 0;
+}
+
+.cnotch__time {
+  transition: color 140ms ease;
+}
+
+button.cnotch__time:hover {
+  color: var(--primary);
+}
+
+.tabs__item--bar {
+  color: var(--on-surface-variant);
+  opacity: 0.85;
+}
+
+.tabs__item--bar:hover {
+  opacity: 1;
+  color: var(--on-surface);
+}
+
+/* Horizontal top Bar inside the unified pill */
+.pbar {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 14px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pbar__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  height: 40px;
+}
+
+.pbar__group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pbar__btn {
+  height: 30px;
+  min-width: 30px;
+  padding: 0 7px;
+  border-radius: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--on-surface);
+  transition: background 150ms, color 150ms;
+}
+
+.pbar__btn:hover {
+  background: var(--surface-container-high);
+}
+
+.pbar__btn--active {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+
+.pbar__ws {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 14px;
+  background: var(--surface-container-high);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.pbar__ws:hover {
+  background: var(--surface-container-highest);
+}
+
+.pbar__ws-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--on-surface-variant);
+  opacity: 0.45;
+  transition:
+    width 180ms var(--morph-ease),
+    background 180ms,
+    opacity 180ms;
+}
+
+.pbar__ws-dot--active {
+  width: 18px;
+  background: var(--primary);
+  opacity: 1;
+}
+
+.pbar__apps {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: safe center;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  cursor: pointer;
+}
+
+.pbar__apps::-webkit-scrollbar {
+  display: none;
+}
+
+.pbar__appicon {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 150ms, opacity 150ms;
+}
+
+.pbar__appicon:hover {
+  background: var(--surface-container-high);
+}
+
+.pbar__appicon--focus {
+  background: var(--secondary-container);
+}
+
+.pbar__appicon--focus::after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: 2px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.pbar__appicon--min {
+  opacity: 0.5;
+}
+
+.pbar__appdot {
+  width: 18px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--outline);
+  flex-shrink: 0;
+  transition:
+    width 200ms var(--morph-ease),
+    background 180ms,
+    opacity 180ms;
+}
+
+.pbar__appdot:hover {
+  background: var(--on-surface-variant);
+}
+
+.pbar__appdot--focus {
+  width: 30px;
+  background: var(--primary);
+}
+
+.pbar__appdot--min {
+  opacity: 0.45;
+}
+
+.pbar__status {
+  height: 30px;
+  padding: 0 4px;
+  border-radius: 15px;
+  background: var(--surface-container-high);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pbar__status .pbar__btn {
+  height: 24px;
+  min-width: 26px;
+  padding: 0 6px;
+  border-radius: 12px;
+}
+
+.pbar__status .pbar__btn:hover {
+  background: var(--surface-container-highest);
+}
+
+.pbar__battery {
+  gap: 3px;
+}
+
+.pbar__pct {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar__battery--perf .pbar__pct {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.pbar__clock {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 15px;
+  font-size: 13.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  transition: background 150ms;
+}
+
+.pbar__clock:hover {
+  background: var(--surface-container-high);
+}
+
+.pbar__preview {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 4px 6px;
+  margin-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent);
+  animation: edgeStageIn 180ms var(--morph-ease);
+}
+
+.pbar__pvcard {
+  width: 196px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 7px;
+  border-radius: 14px;
+  background: var(--surface-container);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  transition: background 150ms;
+}
+
+.pbar__pvcard:hover {
+  background: var(--surface-container-high);
+}
+
+.pbar__pvcard:hover .pbar__pvthumb {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.pbar__pvthumb {
+  position: relative;
+  width: 100%;
+  height: 108px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-container-high);
+  transition: box-shadow 150ms;
+}
+
+.pbar__pvthumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  animation: pvimg 160ms ease-out;
+}
+
+/* Top-pill Volume / Brightness / Power Overlay */
+.poverlay {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.poverlay__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.poverlay__sliders {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.poverlay__title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+  padding: 0 4px;
+}
+
+.poslider-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.poslider__iconbtn,
+.poslider__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-surface);
+  transition: background 150ms;
+}
+
+.poslider__iconbtn:hover {
+  background: var(--surface-container-high);
+}
+
+.poslider {
+  position: relative;
+  flex: 1;
+  min-width: 96px;
+  height: 28px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 14px;
+  background: var(--surface-container-high);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.poslider__fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background: var(--primary);
+  border-radius: 14px;
+  pointer-events: none;
+}
+
+.poslider__val {
+  position: relative;
+  z-index: 1;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  color: var(--on-surface);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.poverlay__power {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent);
+  animation: edgeStageIn 180ms var(--morph-ease);
+}
+
+.poverlay__pbtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 6px;
+  border-radius: 12px;
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  font-size: 11px;
+  font-weight: 500;
+  transition: background 150ms, color 150ms;
+}
+
+.poverlay__pbtn:hover {
+  background: var(--surface-container-highest);
+}
+
+.poverlay__pbtn--armed {
+  background: var(--error-container);
+  color: var(--on-error-container);
+  font-weight: 700;
+}
+
+.poverlay__pbtn--armed:hover {
+  background: var(--error-container);
+}
+
+/* Embedded Workspace Overview inside Morphing Pill (horizontal workspace indicator on top) */
+.wmov.wmov--pill,
+[data-mica="on"] .wmov.wmov--pill,
+[data-style="fluent"] .wmov.wmov--pill {
+  position: relative;
+  top: auto;
+  bottom: auto;
+  left: auto;
+  right: auto;
+  width: 100%;
+  height: min(600px, calc(100vh - 48px));
+  background: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  opacity: 1;
+  transform: none;
+  clip-path: none !important;
+  transition: none;
+}
+
+.wmov.wmov--pill::before,
+.wmov.wmov--pill::after,
+[data-mica="on"]:not([data-style="fluent"]) .wmov.wmov--pill::before,
+[data-mica="on"]:not([data-style="fluent"]) .wmov.wmov--pill::after {
+  display: none;
+}
+
+.wmov--pill .wmov__clip {
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wmov--pill .wmov__rail {
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  flex-direction: row;
+  padding: 0 16px;
+  border-right: none;
+  border-bottom: 1px solid var(--surface-container-high);
+}
+
+.wmov--pill .wmov__dots {
+  flex-direction: row;
+  gap: 8px;
+}
+
+.wmov--pill .wmov__dot {
+  transition:
+    width 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 180ms,
+    opacity 180ms,
+    box-shadow 180ms;
+}
+
+.wmov--pill .wmov__dot--viewed {
+  width: 24px;
+  height: 9px;
+}
+
+.wmov--pill .wmov__main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px 16px 12px;
+}
+
+.wmov__close {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-surface-variant);
+  transition: background 150ms, color 150ms;
+}
+
+.wmov__close:hover {
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+}
+
+/* Embedded Launcher / Settings / Wallpaper / Cheatsheet inside Morphing Pill */
+.lpanel__stage--pill {
+  padding: 12px 16px 14px;
+  box-sizing: border-box;
+  animation: edgeStageIn 200ms var(--morph-ease);
+}
+
+.lpanel__stage--pill .launcher__list {
+  flex-direction: column;
+  max-height: min(440px, calc(100vh - 180px));
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.lpanel__stage--pill .launcher__list::-webkit-scrollbar {
+  display: none;
+}
+
+/* Embedded Alt+Tab Switcher inside Morphing Pill */
+.swpanel.swpanel--pill,
+[data-mica="on"] .swpanel.swpanel--pill,
+[data-style="fluent"] .swpanel.swpanel--pill {
+  position: relative;
+  width: 100%;
+  max-height: min(560px, calc(100vh - 60px));
+  background: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  transform: none !important;
+  transition: none;
+  pointer-events: auto;
+}
+
+/* Fluent overrides for Morphing Pill views */
+[data-style="fluent"] .pbar__btn,
+[data-style="fluent"] .pbar__clock,
+[data-style="fluent"] .pbar__appicon,
+[data-style="fluent"] .pbar__ws,
+[data-style="fluent"] .pbar__status,
+[data-style="fluent"] .poverlay__pbtn {
+  border-radius: 8px;
+}
+
+[data-style="fluent"] .pbar__ws,
+[data-style="fluent"] .pbar__status,
+[data-style="fluent"] .pbar__pvcard,
+[data-style="fluent"] .poverlay__pbtn {
+  background: var(--fluent-card);
+  border: 1px solid var(--fluent-stroke);
+}
+
+[data-style="fluent"] .pbar__pvcard {
+  border-radius: 10px;
+}
+
+[data-style="fluent"] .pbar__ws:hover,
+[data-style="fluent"] .poverlay__pbtn:hover {
+  background: var(--surface-container-highest);
+  border-color: var(--fluent-stroke-strong);
+}
+
+[data-style="fluent"] .poverlay__pbtn--armed,
+[data-style="fluent"] .poverlay__pbtn--armed:hover {
+  background: var(--error-container);
+  border-color: color-mix(in srgb, var(--error) 55%, transparent);
+}
+
+[data-style="fluent"] .pbar__ws-dot,
+[data-style="fluent"] .wmov--pill .wmov__dot {
+  border-radius: 4px;
+}
+
+[data-style="fluent"] .pbar__pvthumb,
+[data-style="fluent"] .poslider,
+[data-style="fluent"] .poslider__fill {
+  border-radius: 8px;
+}
+
+[data-style="fluent"] .poslider {
+  border: 1px solid var(--fluent-stroke);
+}

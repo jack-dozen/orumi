@@ -27,6 +27,7 @@ export type Config = {
   taskbar_hidden: boolean;
   bar_app_style: "icons" | "dots";
   ui_style: "material" | "fluent";
+  shell_mode: "panels" | "pill";
   mica: boolean;
   search_placeholder: string;
   windows_theme_mode: "manual" | "auto";

@@ -64,6 +64,19 @@ fn show(app: &AppHandle, mode: &str, manual: bool) {
         *m = mode.to_string();
     }
     AUTO_POPUP.store(!manual, Ordering::Relaxed);
+    if crate::edge::is_pill_mode() {
+        let _ = app.emit_to(
+            "notch",
+            "pill-command",
+            json!({ "mode": "overlay", "sub": mode, "manual": manual }),
+        );
+        if manual {
+            app.state::<Panels>().set("notch", true);
+        } else {
+            app.state::<Panels>().set_transient("notch");
+        }
+        return;
+    }
     let _ = app.emit_to("overlay", "overlay-mode", json!({ "mode": mode, "manual": manual }));
     app.state::<Panels>().set("overlay", true);
 }
@@ -71,6 +84,13 @@ fn show(app: &AppHandle, mode: &str, manual: bool) {
 /// Automatic popup (keyboard key). Does not interfere with a manually opened overlay,
 /// but may replace another automatic popup (volume -> brightness).
 pub fn show_popup(app: &AppHandle, mode: &str) {
+    if crate::edge::is_pill_mode() {
+        let open = app.state::<Panels>().is_open("notch");
+        if !open || AUTO_POPUP.load(Ordering::Relaxed) {
+            show(app, mode, false);
+        }
+        return;
+    }
     let open = app.state::<Panels>().is_open("overlay");
     if !open || AUTO_POPUP.load(Ordering::Relaxed) {
         show(app, mode, false);
@@ -90,8 +110,16 @@ pub fn hover_open(app: &AppHandle) {
 /// Called from the bar: open an overlay with `mode` content, or close it if the same content is already open.
 #[tauri::command]
 pub fn overlay_toggle(mode: String, app: AppHandle, panels: State<'_, Panels>) {
+    if crate::edge::is_pill_mode() {
+        let _ = app.emit_to(
+            "notch",
+            "pill-command",
+            json!({ "mode": "overlay", "sub": mode, "manual": true, "toggle": true }),
+        );
+        return;
+    }
     if panels.is_open("overlay") && current_mode() == mode {
-        overlay_close(panels);
+        overlay_close(app, panels);
         return;
     }
     // Clicking the same button immediately after the overlay closes itself (due to focus loss)
@@ -110,7 +138,12 @@ pub fn overlay_toggle(mode: String, app: AppHandle, panels: State<'_, Panels>) {
 }
 
 #[tauri::command]
-pub fn overlay_close(panels: State<'_, Panels>) {
+pub fn overlay_close(app: AppHandle, panels: State<'_, Panels>) {
+    if crate::edge::is_pill_mode() {
+        AUTO_POPUP.store(false, Ordering::Relaxed);
+        let _ = app.emit_to("notch", "pill-command", json!({ "mode": "close-overlay" }));
+        return;
+    }
     panels.set("overlay", false);
     AUTO_POPUP.store(false, Ordering::Relaxed);
     if let Ok(mut last) = LAST_CLOSE.lock() {

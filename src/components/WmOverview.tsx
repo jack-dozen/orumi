@@ -4,6 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useEdgeVisible } from "../useEdgeVisible";
 import AppIcon from "./AppIcon";
 
+import Icon from "./Icon";
+
 type SpanKind = "full" | "left" | "right";
 
 type OverviewItem = {
@@ -297,17 +299,31 @@ function tileGlyph(item: OverviewItem): string {
   return tileLabel(item).charAt(0).toUpperCase() || "?";
 }
 
-export default function WmOverview() {
-  const visible = useEdgeVisible("overview");
+export default function WmOverview({
+  embedded = false,
+  onClose,
+}: {
+  embedded?: boolean;
+  onClose?: () => void;
+} = {}) {
+  const edgeVisible = useEdgeVisible("overview");
+  const visible = embedded ? true : edgeVisible;
   const [fromBar, setFromBar] = useState(false);
   const [data, setData] = useState<OverviewStateData | null>(null);
   const [viewedWs, setViewedWs] = useState(0);
   const [selectedHwnd, setSelectedHwnd] = useState<number>(0);
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
-  const [stageWidth, setStageWidth] = useState(380);
+  const [stageWidth, setStageWidth] = useState(embedded ? 356 : 380);
   const [drag, setDrag] = useState<DragSession | null>(null);
   const [dropSlot, setDropSlot] = useState<DropSlot | null>(null);
   const [dotHover, setDotHover] = useState<number | null>(null);
+
+  const dismiss = useCallback(() => {
+    if (embedded) onClose?.();
+    else closeOverview();
+  }, [embedded, onClose]);
+  const dismissRef = useRef(dismiss);
+  dismissRef.current = dismiss;
 
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -327,7 +343,28 @@ export default function WmOverview() {
   dragRef.current = drag;
   const dropSlotRef = useRef(dropSlot);
   dropSlotRef.current = dropSlot;
+  const pointerRef = useRef({ x: 0, y: 0 });
   const railWheel = useRef({ acc: 0, lastAt: 0, locked: false, lockedAt: 0 });
+
+  const updateDropSlotAt = useCallback((clientX: number, clientY: number, srcHwnd: number) => {
+    const ws = dataRef.current?.workspaces[viewedWsRef.current];
+    const stageEl = stageRef.current;
+    if (!ws || !stageEl) {
+      setDropSlot(null);
+      return;
+    }
+    const rect = stageEl.getBoundingClientRect();
+    const sw = stageWidthRef.current || rect.width || 1;
+    const scale = sw / ws.width;
+    const relX = clientX - rect.left;
+    const relY = clientY - rect.top;
+    if (relX < -16 || relX > rect.width + 16 || relY < -24 || relY > rect.height + 24) {
+      setDropSlot(null);
+      return;
+    }
+    const slot = computeDropSlot(ws, relX / scale, relY / scale, srcHwnd);
+    setDropSlot(slot);
+  }, []);
 
   const loadState = useCallback((resetToActive: boolean) => {
     invoke<OverviewStateData>("wm_overview_state")
@@ -404,19 +441,21 @@ export default function WmOverview() {
 
   // Outside click / focus loss closes overview (unless mid-drag).
   useEffect(() => {
+    if (embedded) return;
     const onBlur = () => {
       if (dragRef.current?.active) return;
-      if (Date.now() - openedAt.current > 350) closeOverview();
+      if (Date.now() - openedAt.current > 350) dismissRef.current();
     };
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
-  }, []);
+  }, [embedded]);
 
   const curWs = data?.workspaces[viewedWs] ?? null;
 
   // Global pointer tracking for smooth drag-and-drop across tiles & workspace dots.
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
+      pointerRef.current = { x: e.clientX, y: e.clientY };
       const d = dragRef.current;
       if (!d) return;
       const dist = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
@@ -459,23 +498,7 @@ export default function WmOverview() {
       }
 
       // 2. Compute exact drop slot inside currently displayed workspace stage.
-      const ws = dataRef.current?.workspaces[viewedWsRef.current];
-      const stageEl = stageRef.current;
-      if (!ws || !stageEl) {
-        setDropSlot(null);
-        return;
-      }
-      const rect = stageEl.getBoundingClientRect();
-      const sw = stageWidthRef.current || rect.width || 1;
-      const scale = sw / ws.width;
-      const relX = e.clientX - rect.left;
-      const relY = e.clientY - rect.top;
-      if (relX < -16 || relX > rect.width + 16 || relY < -24 || relY > rect.height + 24) {
-        setDropSlot(null);
-        return;
-      }
-      const slot = computeDropSlot(ws, relX / scale, relY / scale, d.item.hwnd);
-      setDropSlot(slot);
+      updateDropSlotAt(e.clientX, e.clientY, d.item.hwnd);
     };
 
     const onUp = () => {
@@ -492,6 +515,7 @@ export default function WmOverview() {
       if (!d.active) {
         // Short click on tile: focus that window (and switch workspace if needed).
         invoke("wm_overview_pick", { hwnd: d.item.hwnd }).catch(() => {});
+        if (embedded) dismissRef.current();
         return;
       }
 
@@ -527,7 +551,47 @@ export default function WmOverview() {
       window.removeEventListener("pointercancel", onUp);
       window.clearTimeout(dotDwellTimer.current);
     };
-  }, []);
+  }, [updateDropSlotAt]);
+
+  // Auto-scroll the workspace canvas when dragging a tile near its top or bottom edge.
+  useEffect(() => {
+    if (!drag?.active) return;
+    let rafId = 0;
+    const EDGE_ZONE = 56;
+    const tick = () => {
+      const d = dragRef.current;
+      const canvas = canvasRef.current;
+      if (d?.active && canvas && dotHoverRef.current === null) {
+        const r = canvas.getBoundingClientRect();
+        const { x, y } = pointerRef.current;
+        const maxScroll = canvas.scrollHeight - canvas.clientHeight;
+        if (maxScroll > 0 && x >= r.left - 32 && x <= r.right + 32) {
+          let delta = 0;
+          if (y >= r.top - 8 && y < r.top + EDGE_ZONE && canvas.scrollTop > 0) {
+            const t = Math.min(1, (r.top + EDGE_ZONE - y) / EDGE_ZONE);
+            delta = -(2.5 + t * t * 11.5);
+          } else if (
+            y > r.bottom - EDGE_ZONE &&
+            y <= r.bottom + 28 &&
+            canvas.scrollTop < maxScroll
+          ) {
+            const t = Math.min(1, (y - (r.bottom - EDGE_ZONE)) / EDGE_ZONE);
+            delta = 2.5 + t * t * 11.5;
+          }
+          if (delta !== 0) {
+            const prev = canvas.scrollTop;
+            canvas.scrollTop = Math.max(0, Math.min(maxScroll, prev + delta));
+            if (canvas.scrollTop !== prev) {
+              updateDropSlotAt(x, y, d.item.hwnd);
+            }
+          }
+        }
+      }
+      rafId = window.requestAnimationFrame(tick);
+    };
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [drag?.active, updateDropSlotAt]);
 
   // Keyboard navigation inside the overview (Esc, Enter, Arrows, 1-9).
   useEffect(() => {
@@ -541,7 +605,7 @@ export default function WmOverview() {
           setDropSlot(null);
           setDotHover(null);
         } else {
-          closeOverview();
+          dismissRef.current();
         }
         return;
       }
@@ -550,6 +614,7 @@ export default function WmOverview() {
       if (e.key === "Enter" && selectedHwnd) {
         e.preventDefault();
         invoke("wm_overview_pick", { hwnd: selectedHwnd }).catch(() => {});
+        if (embedded) dismissRef.current();
         return;
       }
       if (e.key >= "1" && e.key <= "9") {
@@ -611,7 +676,8 @@ export default function WmOverview() {
       }
     }
     if (gap > 110) s.acc = 0;
-    s.acc += e.deltaY;
+    const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    s.acc += delta;
     if (Math.abs(s.acc) < 40) return;
     const dir = s.acc > 0 ? 1 : -1;
     s.acc = 0;
@@ -658,10 +724,12 @@ export default function WmOverview() {
 
   return (
     <div
-      className={`wmov ${visible ? "wmov--visible" : ""} ${fromBar ? "wmov--from-bar" : ""}`}
+      className={`wmov ${visible ? "wmov--visible" : ""} ${
+        fromBar && !embedded ? "wmov--from-bar" : ""
+      } ${embedded ? "wmov--pill" : ""}`}
     >
       <div className="wmov__clip">
-        {/* Left vertical workspace dots rail */}
+        {/* Workspace dots rail (vertical on left edge, horizontal at top in Morphing Pill) */}
       <div className="wmov__rail" ref={railRef} onWheel={onRailWheel}>
         <div className="wmov__dots">
           {(data?.workspaces ?? []).map((ws) => {
@@ -711,9 +779,29 @@ export default function WmOverview() {
                 : `${curWs.items.length} ${curWs.items.length === 1 ? "window" : "windows"}`
               : ""}
           </span>
+          {embedded && (
+            <button
+              type="button"
+              className="wmov__close"
+              onClick={dismiss}
+              title="Close overview"
+              aria-label="Close overview"
+            >
+              <Icon name="close" size={18} />
+            </button>
+          )}
         </div>
 
-        <div className="wmov__canvas" ref={canvasRef}>
+        <div
+          className="wmov__canvas"
+          ref={canvasRef}
+          onScroll={() => {
+            const d = dragRef.current;
+            if (d?.active) {
+              updateDropSlotAt(pointerRef.current.x, pointerRef.current.y, d.item.hwnd);
+            }
+          }}
+        >
           <div
             ref={stageRef}
             className={`wmov__stage ${curWs && curWs.items.length === 0 ? "wmov__stage--empty" : ""}`}

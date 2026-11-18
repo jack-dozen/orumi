@@ -22,6 +22,12 @@ import { useQuick, type PowerMode, type QuickKey, type QuickState } from "../use
 import { useBluetooth } from "../useBluetooth";
 import { BluetoothPanel, WifiPanel } from "./QuickPanels";
 import VolumeBrightness from "./VolumeBrightness";
+import Launcher, { type LauncherView } from "./Launcher";
+import WmOverview from "./WmOverview";
+import Switcher, { type SwitcherItem, type SwitcherLayout, type SwitcherState } from "./Switcher";
+import Activities from "../activities/Activities";
+import type { SnapWindow } from "../activities/useActivities";
+import { PillBar, PillOverlay, type PillOverlayMode } from "./PillViews";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -986,11 +992,13 @@ function CompactNotch({
   active,
   onExpand,
   onOpenLyrics,
+  onOpenBar,
 }: {
   media: MediaState;
   active: boolean;
   onExpand: (targetTab?: TabId) => void;
   onOpenLyrics: () => void;
+  onOpenBar?: () => void;
 }) {
   const now = useNow();
   const playing = Boolean(media.info?.playing);
@@ -1006,22 +1014,29 @@ function CompactNotch({
     day: "numeric",
   });
 
+  const onNonClockActivate = () => {
+    if (onOpenBar) onOpenBar();
+    else onExpand();
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
       className={`cnotch ${playing ? "cnotch--media" : ""}`}
-      onClick={() => onExpand()}
+      onClick={onNonClockActivate}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onExpand();
+          onNonClockActivate();
         }
       }}
       title={
-        playing && media.info
-          ? `${media.info.title || "Playing media"} — Click to expand Notch`
-          : "Click to expand Notch"
+        onOpenBar
+          ? "Click clock to open Notch · Click elsewhere to open Bar"
+          : playing && media.info
+            ? `${media.info.title || "Playing media"} — Click to expand Notch`
+            : "Click to expand Notch"
       }
     >
       {playing ? (
@@ -1064,13 +1079,29 @@ function CompactNotch({
               />
             ))}
           </button>
-          <span className="cnotch__time cnotch__time--media" title="Open Notch (last tab)">
+          <span
+            className="cnotch__time cnotch__time--media"
+            title="Open Full Notch"
+            onClick={(e) => {
+              e.stopPropagation();
+              onExpand();
+            }}
+          >
             {timeText}
           </span>
         </>
       ) : (
         <>
-          <span className="cnotch__time">{timeText}</span>
+          <span
+            className="cnotch__time"
+            title="Open Full Notch"
+            onClick={(e) => {
+              e.stopPropagation();
+              onExpand();
+            }}
+          >
+            {timeText}
+          </span>
           <span className="cnotch__sep" aria-hidden="true">
             ·
           </span>
@@ -1172,8 +1203,24 @@ function CompactLyrics({
   );
 }
 
+type PillView =
+  | "compact"
+  | "lyrics"
+  | "bar"
+  | "full"
+  | "overlay"
+  | "overview"
+  | "launcher"
+  | "switcher"
+  | "activities";
+
+type NotchSurfaceMode = "hidden" | "ws" | "toast" | PillView;
+
 export default function Notch() {
   const visible = useEdgeVisible("notch");
+  const cfg = useConfig();
+  const pillMode = cfg?.shell_mode === "pill";
+
   const [opening, setOpening] = useState(false);
   const [compact, setCompact] = useState(false);
   const [compactLyrics, setCompactLyrics] = useState(false);
@@ -1184,24 +1231,60 @@ export default function Notch() {
   const [osdOpen, setOsdOpen] = useState(false);
   const osdTimer = useRef<number | undefined>(undefined);
 
+  const [pillView, setPillView] = useState<PillView>("compact");
+  const [pillBarWidth, setPillBarWidth] = useState(980);
+  const [pillLauncherWidth, setPillLauncherWidth] = useState(640);
+  const [pillSwitcherWidth, setPillSwitcherWidth] = useState(680);
+  const [pillOverlayWidth, setPillOverlayWidth] = useState(400);
+  const [launcherSub, setLauncherSub] = useState<LauncherView>("list");
+  const [overlayMode, setOverlayMode] = useState<PillOverlayMode>("mixer");
+  const [overlayManual, setOverlayManual] = useState(true);
+  const [overlaySeq, setOverlaySeq] = useState(0);
+  const [overlayFromBar, setOverlayFromBar] = useState(false);
+  const [activitiesWins, setActivitiesWins] = useState<SnapWindow[] | undefined>(undefined);
+  const [swState, setSwState] = useState<SwitcherState>({
+    items: [],
+    layout: null,
+    index: 0,
+    thumbs: {},
+  });
+
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const pillViewRef = useRef(pillView);
+  pillViewRef.current = pillView;
+  const launcherSubRef = useRef(launcherSub);
+  launcherSubRef.current = launcherSub;
+  const overlayModeRef = useRef(overlayMode);
+  overlayModeRef.current = overlayMode;
+
+  const closePill = () => {
+    invoke("pill_open", { open: false, pinned: false, focus: false }).catch(() => {});
+  };
+
   const setLyricsPin = (next: boolean) => {
     setCompactLyrics(next);
     invoke("notch_set_lyrics_pin", { pinned: next }).catch(() => {});
   };
 
-  // Fetch data only while the notch is visible and its tab uses it.
-  const stats = useStats(visible && !compact && (tab === "dashboard" || tab === "system"));
-  const media = useMedia((opening || visible) && (compact || tab === "dashboard" || tab === "media"));
-  const compactMediaPlaying = compact && Boolean(media.info?.playing);
+  const fullShown = pillMode ? visible && pillView === "full" : visible && !compact;
+  const compactShown = pillMode ? visible && pillView === "compact" : visible && compact;
+
+  // Fetch data only while the notch is visible and its view uses it.
+  const stats = useStats(fullShown && (tab === "dashboard" || tab === "system"));
+  const media = useMedia(
+    (opening || visible) &&
+      (compactShown || (fullShown && (tab === "dashboard" || tab === "media"))),
+  );
+  const compactMediaPlaying = compactShown && Boolean(media.info?.playing);
   useVisualizerSource(
     (opening || visible) &&
       ((compactMediaPlaying && !compactLyrics) ||
-        (!compact && (tab === "dashboard" || tab === "media") && Boolean(media.info))),
+        (fullShown && (tab === "dashboard" || tab === "media") && Boolean(media.info))),
   );
-  const procs = useProcesses(visible && !compact && tab === "system");
-  const gpu = useGpu(visible && !compact && (tab === "dashboard" || tab === "system"));
-  const wifi = useWifi(visible && !compact && tab === "settings");
-  const cfg = useConfig();
+  const procs = useProcesses(fullShown && tab === "system");
+  const gpu = useGpu(fullShown && (tab === "dashboard" || tab === "system"));
+  const wifi = useWifi(fullShown && tab === "settings");
   const weather = useWeather(cfg?.weather_city ?? "Bandung");
   const notifsEnabled = cfg?.notifications_enabled ?? true;
   const notifsPopup = cfg?.notifications_popup ?? true;
@@ -1238,19 +1321,23 @@ export default function Notch() {
   }, [stats]);
 
   const showMini = Boolean(media.info);
-  const mode: "hidden" | "ws" | "toast" | "compact" | "lyrics" | "full" = visible
-    ? compact && compactLyrics
-      ? "lyrics"
-      : compact
-        ? "compact"
-        : "full"
+  const mode: NotchSurfaceMode = visible
+    ? pillMode
+      ? pillView === "compact" && compactLyrics
+        ? "lyrics"
+        : pillView
+      : compact && compactLyrics
+        ? "lyrics"
+        : compact
+          ? "compact"
+          : "full"
     : osdOpen && wsOsd
       ? "ws"
       : notifs.activeToast && notifs.toastOpen
         ? "toast"
         : "hidden";
 
-  const lastModeRef = useRef<"ws" | "toast" | "compact" | "lyrics" | "full">("compact");
+  const lastModeRef = useRef<Exclude<NotchSurfaceMode, "hidden">>("compact");
   if (mode !== "hidden") lastModeRef.current = mode;
   const activeMode = mode !== "hidden" ? mode : lastModeRef.current;
 
@@ -1268,17 +1355,29 @@ export default function Notch() {
           ? compactMediaPlaying
             ? 272
             : 248
-          : tab === "dashboard"
-            ? showMini
-              ? 740
-              : 550
-            : tab === "media"
-              ? 740
-              : tab === "notification"
-                ? 700
-                : tab === "system"
-                  ? 760
-                  : 820;
+          : activeMode === "bar"
+            ? pillBarWidth
+            : activeMode === "overlay"
+              ? pillOverlayWidth
+              : activeMode === "launcher"
+                ? pillLauncherWidth
+                : activeMode === "switcher"
+                  ? pillSwitcherWidth
+                  : activeMode === "overview"
+                    ? 390
+                    : activeMode === "activities"
+                      ? 1160
+                      : tab === "dashboard"
+                        ? showMini
+                          ? 740
+                          : 550
+                        : tab === "media"
+                          ? 740
+                          : tab === "notification"
+                            ? 700
+                            : tab === "system"
+                              ? 760
+                              : 820;
 
   // Follow content size dynamically (keeps compact tabs slim and centered).
   const innerRef = useRef<HTMLDivElement>(null);
@@ -1296,7 +1395,18 @@ export default function Notch() {
   useLayoutEffect(() => {
     const el = innerRef.current;
     if (el) setHeight(el.offsetHeight);
-  }, [activeMode, tab, quickSubView, showMini, wsOsd, shownToast?.id]);
+  }, [
+    activeMode,
+    tab,
+    quickSubView,
+    showMini,
+    wsOsd,
+    shownToast?.id,
+    pillBarWidth,
+    pillLauncherWidth,
+    pillSwitcherWidth,
+    pillOverlayWidth,
+  ]);
 
   useLayoutEffect(() => {
     if (height === null) return;
@@ -1309,31 +1419,43 @@ export default function Notch() {
     if (!visible) {
       setQuickSubView("grid");
       setCompactLyrics(false);
+      setOverlayFromBar(false);
       invoke("notch_set_lyrics_pin", { pinned: false }).catch(() => {});
       invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+      const id = window.setTimeout(() => {
+        lastModeRef.current = "compact";
+        setPillView("compact");
+      }, 320);
+      return () => window.clearTimeout(id);
     }
   }, [visible]);
 
   useEffect(() => {
-    if (tab !== "settings") {
+    if ((!pillMode || pillView === "full") && tab !== "settings") {
       setQuickSubView("grid");
       invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
     }
-  }, [tab]);
+  }, [pillMode, pillView, tab]);
 
-  // Window lost focus (clicked another app): release the "currently typing" focus hold.
+  // Window lost focus (clicked another app): release focus hold, or close interactive pill view.
   useEffect(() => {
     const onBlur = () => {
       // The native color dialog makes the window lose focus; keep the focus hold during it.
       const el = document.activeElement as HTMLInputElement | null;
       if (el?.tagName === "INPUT" && el.type === "color") return;
       invoke("panel_activation", { label: "notch", enable: false }).catch(() => {});
+      if (
+        visibleRef.current &&
+        (pillViewRef.current === "launcher" || pillViewRef.current === "activities")
+      ) {
+        closePill();
+      }
     };
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
   }, []);
 
-  // Track compact-vs-full open mode and pre-warm media status as soon as Rust signals open.
+  // Track compact-vs-full open mode, Morphing Pill commands, Switcher & Activities payloads.
   useEffect(() => {
     const unlistenCompact = listen<boolean>("notch-compact", (e) => {
       setCompact(e.payload);
@@ -1346,10 +1468,154 @@ export default function Notch() {
       setOpening(e.payload);
       if (!e.payload) setCompactLyrics(false);
     });
+    const unlistenEdgePill = listen<"compact" | "bar">("pill-edge-open", (e) => {
+      setCompactLyrics(false);
+      setOverlayFromBar(false);
+      setPillView(e.payload);
+    });
+    const unlistenPillSw = listen<boolean>("pill-switcher", (e) => {
+      if (e.payload) {
+        setPillView("switcher");
+      } else if (pillViewRef.current === "switcher") {
+        setPillView("compact");
+      }
+    });
+    const unlistenPillCmd = listen<{
+      mode: string;
+      sub?: string;
+      manual?: boolean;
+      toggle?: boolean;
+    }>("pill-command", (e) => {
+      const p = e.payload;
+      if (!p?.mode) return;
+      if (p.mode === "close") {
+        closePill();
+        return;
+      }
+      if (p.mode === "close-activities") {
+        if (pillViewRef.current === "activities") closePill();
+        return;
+      }
+      if (p.mode === "close-overlay") {
+        if (pillViewRef.current === "overlay") closePill();
+        return;
+      }
+      if (p.mode === "activities") {
+        setPillView("activities");
+        return;
+      }
+      if (p.mode === "bar") {
+        if (p.toggle && visibleRef.current && pillViewRef.current === "bar") {
+          closePill();
+          return;
+        }
+        setCompactLyrics(false);
+        setPillView("bar");
+        if (p.toggle) {
+          invoke("pill_open", { open: true, pinned: true, focus: false }).catch(() => {});
+        }
+        return;
+      }
+      if (p.mode === "full") {
+        if (p.toggle && visibleRef.current && pillViewRef.current === "full") {
+          closePill();
+          return;
+        }
+        setCompactLyrics(false);
+        setPillView("full");
+        if (p.toggle) {
+          invoke("pill_open", { open: true, pinned: true, focus: false }).catch(() => {});
+        }
+        return;
+      }
+      if (p.mode === "launcher") {
+        const sub: LauncherView =
+          p.sub === "settings" || p.sub === "cheatsheet" || p.sub === "wallpaper"
+            ? p.sub
+            : "list";
+        if (
+          p.toggle &&
+          visibleRef.current &&
+          pillViewRef.current === "launcher" &&
+          (!p.sub || launcherSubRef.current === sub)
+        ) {
+          closePill();
+          return;
+        }
+        setLauncherSub(sub);
+        setPillView("launcher");
+        invoke("pill_open", { open: true, pinned: true, focus: true }).catch(() => {});
+        return;
+      }
+      if (p.mode === "overview") {
+        if (p.toggle && visibleRef.current && pillViewRef.current === "overview") {
+          closePill();
+          return;
+        }
+        setPillView("overview");
+        invoke("pill_open", { open: true, pinned: true, focus: true }).catch(() => {});
+        return;
+      }
+      if (p.mode === "overlay") {
+        const sub = (p.sub ?? "mixer") as PillOverlayMode;
+        const manual = p.manual ?? true;
+        if (
+          p.toggle &&
+          visibleRef.current &&
+          pillViewRef.current === "overlay" &&
+          overlayModeRef.current === sub
+        ) {
+          closePill();
+          return;
+        }
+        setOverlayMode(sub);
+        setOverlayManual(manual);
+        setOverlaySeq((n) => n + 1);
+        setOverlayFromBar(false);
+        setPillView("overlay");
+        if (manual) {
+          invoke("pill_open", { open: true, pinned: true, focus: false }).catch(() => {});
+        }
+      }
+    });
+    const unlistenSwItems = listen<{
+      items: SwitcherItem[];
+      index: number;
+      layout: SwitcherLayout;
+    }>("switcher-items", (e) => {
+      const thumbs: Record<number, string> = {};
+      for (const it of e.payload.items) if (it.thumb) thumbs[it.hwnd] = it.thumb;
+      setSwState({
+        items: e.payload.items,
+        index: e.payload.index,
+        layout: e.payload.layout,
+        thumbs,
+      });
+    });
+    const unlistenSwSel = listen<number>("switcher-select", (e) => {
+      setSwState((s) => ({ ...s, index: e.payload }));
+    });
+    const unlistenSwThumb = listen<{ hwnd: number; thumb: string }>("switcher-thumb", (e) => {
+      setSwState((s) => ({
+        ...s,
+        thumbs: { ...s.thumbs, [e.payload.hwnd]: e.payload.thumb },
+      }));
+    });
+    const unlistenActOpen = listen<SnapWindow[]>("activities-open", (e) => {
+      setActivitiesWins(e.payload ?? []);
+    });
+
     return () => {
       unlistenCompact.then((fn) => fn());
       unlistenLyricsPin.then((fn) => fn());
       unlistenOpen.then((fn) => fn());
+      unlistenEdgePill.then((fn) => fn());
+      unlistenPillSw.then((fn) => fn());
+      unlistenPillCmd.then((fn) => fn());
+      unlistenSwItems.then((fn) => fn());
+      unlistenSwSel.then((fn) => fn());
+      unlistenSwThumb.then((fn) => fn());
+      unlistenActOpen.then((fn) => fn());
     };
   }, []);
 
@@ -1403,13 +1669,23 @@ export default function Notch() {
     activeMode === "compact" ||
     activeMode === "lyrics" ||
     activeMode === "ws" ||
-    activeMode === "toast";
+    activeMode === "toast" ||
+    activeMode === "bar" ||
+    activeMode === "overlay";
+  const zeroPadInner =
+    isPill ||
+    activeMode === "launcher" ||
+    activeMode === "overview" ||
+    activeMode === "switcher" ||
+    activeMode === "activities";
 
   return (
     <div
       className={`notch ${surfaceOpen && !instantHide ? "notch--visible" : ""} ${
         instantHide ? "notch--instant" : ""
-      } ${isPill ? "notch--compact" : ""} ${activeMode === "ws" ? "notch--passthrough" : ""}`}
+      } ${isPill ? "notch--compact" : ""} ${zeroPadInner ? "notch--flush" : ""} ${
+        activeMode === "ws" ? "notch--passthrough" : ""
+      }`}
       style={{ width, height: height ?? undefined }}
     >
       <div className="notch__clip">
@@ -1442,7 +1718,7 @@ export default function Notch() {
             <div key="lyrics" className="notch__stage">
               <CompactLyrics
                 media={media}
-                active={visible && compact && compactLyrics}
+                active={visible && compactShown && compactLyrics}
                 onExit={() => setLyricsPin(false)}
               />
             </div>
@@ -1450,13 +1726,99 @@ export default function Notch() {
             <div key="compact" className="notch__stage">
               <CompactNotch
                 media={media}
-                active={visible && compact}
+                active={compactShown}
                 onExpand={(targetTab) => {
                   if (targetTab) setTab(targetTab);
                   setLyricsPin(false);
-                  setCompact(false);
+                  if (pillMode) setPillView("full");
+                  else setCompact(false);
                 }}
                 onOpenLyrics={() => setLyricsPin(true)}
+                onOpenBar={pillMode ? () => { setLyricsPin(false); setPillView("bar"); } : undefined}
+              />
+            </div>
+          ) : activeMode === "bar" ? (
+            <div key="bar" className="notch__stage">
+              <PillBar
+                active={visible && pillView === "bar"}
+                cfg={cfg}
+                onCollapseToCompact={() => {
+                  setLyricsPin(false);
+                  setPillView("compact");
+                }}
+                onOpenFullNotch={(targetTab) => {
+                  if (targetTab) setTab(targetTab);
+                  setLyricsPin(false);
+                  setPillView("full");
+                }}
+                onOpenLauncher={() => {
+                  setLauncherSub("list");
+                  setPillView("launcher");
+                  invoke("pill_open", { open: true, pinned: true, focus: true }).catch(() => {});
+                }}
+                onOpenOverview={() => {
+                  setPillView("overview");
+                  invoke("pill_open", { open: true, pinned: true, focus: true }).catch(() => {});
+                }}
+                onOpenOverlay={(m) => {
+                  setOverlayMode(m);
+                  setOverlayManual(true);
+                  setOverlaySeq((n) => n + 1);
+                  setOverlayFromBar(true);
+                  setPillView("overlay");
+                  invoke("pill_open", { open: true, pinned: true, focus: false }).catch(() => {});
+                }}
+                onWidthChange={setPillBarWidth}
+              />
+            </div>
+          ) : activeMode === "overlay" ? (
+            <div key="overlay" className="notch__stage">
+              <PillOverlay
+                active={visible && pillView === "overlay"}
+                mode={overlayMode}
+                manual={overlayManual}
+                openedAtSeq={overlaySeq}
+                onBackToBar={
+                  overlayFromBar
+                    ? () => {
+                        setPillView("bar");
+                        invoke("pill_open", { open: true, pinned: false, focus: false }).catch(
+                          () => {},
+                        );
+                      }
+                    : undefined
+                }
+                onClose={closePill}
+                onWidthChange={setPillOverlayWidth}
+              />
+            </div>
+          ) : activeMode === "launcher" ? (
+            <div key="launcher" className="notch__stage">
+              <Launcher
+                embedded
+                initialView={launcherSub}
+                onWidthChange={setPillLauncherWidth}
+                onRequestClose={closePill}
+              />
+            </div>
+          ) : activeMode === "overview" ? (
+            <div key="overview" className="notch__stage">
+              <WmOverview embedded onClose={closePill} />
+            </div>
+          ) : activeMode === "switcher" ? (
+            <div key="switcher" className="notch__stage">
+              <Switcher
+                embedded
+                externalState={swState}
+                onWidthChange={setPillSwitcherWidth}
+              />
+            </div>
+          ) : activeMode === "activities" ? (
+            <div key="activities" className="notch__stage">
+              <Activities
+                embedded
+                initialWins={activitiesWins}
+                onRequestClose={closePill}
               />
             </div>
           ) : (
@@ -1479,6 +1841,19 @@ export default function Notch() {
                     {t.label}
                   </button>
                 ))}
+                {pillMode && (
+                  <button
+                    type="button"
+                    className="tabs__item tabs__item--bar"
+                    title="Switch to Top Bar"
+                    onClick={() => setPillView("bar")}
+                  >
+                    <span className="tabs__icon-wrap">
+                      <Icon name="arrow_back" size={20} />
+                    </span>
+                    bar
+                  </button>
+                )}
               </div>
 
               <div

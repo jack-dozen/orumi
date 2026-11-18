@@ -458,6 +458,14 @@ pub fn ensure_hook() {
 }
 
 pub fn toggle_cheatsheet_ui(app: &AppHandle) {
+    if crate::edge::is_pill_mode() {
+        let _ = app.emit_to(
+            "notch",
+            "pill-command",
+            serde_json::json!({ "mode": "launcher", "sub": "cheatsheet", "toggle": true }),
+        );
+        return;
+    }
     let panels = app.state::<crate::Panels>();
     if panels.is_open("launcher") && crate::edge::launcher_is_cheatsheet() {
         panels.set("launcher", false);
@@ -469,6 +477,14 @@ pub fn toggle_cheatsheet_ui(app: &AppHandle) {
 }
 
 pub fn toggle_overview_ui(app: &AppHandle, source: &str) {
+    if crate::edge::is_pill_mode() {
+        let _ = app.emit_to(
+            "notch",
+            "pill-command",
+            serde_json::json!({ "mode": "overview", "source": source, "toggle": true }),
+        );
+        return;
+    }
     let panels = app.state::<crate::Panels>();
     if panels.is_open("overview") {
         panels.set("overview", false);
@@ -546,7 +562,8 @@ pub fn wm_overview_state(app: AppHandle) -> Result<OverviewStateData, String> {
                 }
             }
             if !refreshed.is_empty() {
-                let _ = app_bg.emit_to("overview", "overview-thumbs", refreshed);
+                let target = if crate::edge::is_pill_mode() { "notch" } else { "overview" };
+                let _ = app_bg.emit_to(target, "overview-thumbs", refreshed);
             }
         });
     }
@@ -570,13 +587,19 @@ pub fn wm_overview_drop(
     );
     let _ = send_cmd(&cmd)?;
     refresh_snapshot_sync();
-    let _ = app.emit_to("overview", "overview-refresh", ());
+    let target = if crate::edge::is_pill_mode() { "notch" } else { "overview" };
+    let _ = app.emit_to(target, "overview-refresh", ());
     Ok(())
 }
 
 #[tauri::command]
 pub fn wm_overview_pick(app: AppHandle, hwnd: i64) -> Result<(), String> {
-    app.state::<crate::Panels>().set("overview", false);
+    if crate::edge::is_pill_mode() {
+        app.state::<crate::Panels>().set("notch", false);
+        let _ = app.emit_to("notch", "pill-command", serde_json::json!({ "mode": "close" }));
+    } else {
+        app.state::<crate::Panels>().set("overview", false);
+    }
     let _ = send_cmd(&format!("overview_pick {hwnd}"))?;
     refresh_snapshot_sync();
     Ok(())

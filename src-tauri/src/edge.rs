@@ -155,6 +155,23 @@ const CHEATSHEET_VIEW_SIZE: (f64, f64) = (1120.0, 620.0);
 static LAUNCHER_CHEATSHEET: AtomicBool = AtomicBool::new(false);
 /// true = the launcher was opened by bottom-edge hover (no initial focus, auto-closes on leave).
 static LAUNCHER_HOVER: AtomicBool = AtomicBool::new(false);
+/// true = Unified Top-Edge Morphing Pill mode (`shell_mode == "pill"`).
+static PILL_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn is_pill_mode() -> bool {
+    PILL_MODE.load(Ordering::Relaxed)
+}
+
+pub fn set_pill_mode(app: &AppHandle, on: bool) {
+    PILL_MODE.store(on, Ordering::Relaxed);
+    let panels = app.state::<Panels>();
+    for label in ["bar", "launcher", "overlay", "preview", "overview"] {
+        if panels.is_open(label) {
+            panels.set(label, false);
+        }
+    }
+    wake();
+}
 
 pub fn launcher_is_cheatsheet() -> bool {
     LAUNCHER_CHEATSHEET.load(Ordering::Relaxed)
@@ -314,6 +331,19 @@ impl Panels {
         }
     }
 
+    pub fn toggle_routed(&self, app: &AppHandle, label: &str) {
+        if is_pill_mode() && matches!(label, "bar" | "notch" | "launcher") {
+            let mode = if label == "notch" { "full" } else { label };
+            let _ = app.emit_to(
+                "notch",
+                "pill-command",
+                serde_json::json!({ "mode": mode, "toggle": true }),
+            );
+            return;
+        }
+        self.toggle(label);
+    }
+
     pub fn set(&self, label: &str, open: bool) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
             if open && is_locked_by_fullscreen(key) {
@@ -376,7 +406,11 @@ impl Panels {
 
 /// Called from a bar button: open temporarily, or close if already open.
 #[tauri::command]
-pub fn toggle_panel(label: String, panels: State<'_, Panels>) {
+pub fn toggle_panel(label: String, app: AppHandle, panels: State<'_, Panels>) {
+    if is_pill_mode() && matches!(label.as_str(), "bar" | "notch" | "launcher") {
+        panels.toggle_routed(&app, &label);
+        return;
+    }
     if panels.is_open(&label) {
         panels.set(&label, false);
     } else if !panels.recently_closed(&label, Duration::from_millis(350)) {
@@ -385,6 +419,43 @@ pub fn toggle_panel(label: String, panels: State<'_, Panels>) {
         } else {
             panels.set_transient(&label);
         }
+    }
+}
+
+/// Morphing Pill helper: explicitly open/pin/focus or dismiss the unified notch window.
+#[tauri::command]
+pub fn pill_open(
+    open: bool,
+    pinned: bool,
+    focus: bool,
+    app: AppHandle,
+    panels: State<'_, Panels>,
+) {
+    if let Some((_, flag)) = panels.0.get_key_value("notch") {
+        if open {
+            flag_set(&DISMISSED, "notch", false);
+            flag_set(&TRANSIENT, "notch", !pinned);
+            flag_set(&HELD, "notch", focus);
+            flag.store(true, Ordering::Relaxed);
+            if let Some(w) = app.get_webview_window("notch") {
+                set_activatable(&w, focus);
+                if focus {
+                    mask_alt_if_down();
+                    let _ = w.set_focus();
+                    mask_alt_if_down();
+                }
+            }
+        } else {
+            flag_set(&TRANSIENT, "notch", false);
+            flag_set(&HELD, "notch", false);
+            flag_set(&DISMISSED, "notch", true);
+            flag.store(false, Ordering::Relaxed);
+            if let Some(w) = app.get_webview_window("notch") {
+                set_activatable(&w, false);
+            }
+            crate::activities::mark_closed();
+        }
+        wake();
     }
 }
 
@@ -460,8 +531,13 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
             (win, trig)
         }
         Edge::Top => {
-            let w = size.0 * u;
-            let h = size.1 * u;
+            let (sw, sh) = if spec.label == "notch" && is_pill_mode() {
+                (1360.0, 820.0)
+            } else {
+                size
+            };
+            let w = (sw * u).min(mw);
+            let h = (sh * u).min(mh);
             let win = Rect { x: mx + (mw - w) / 2.0, y: my, w, h };
             let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
             let trig = Rect {
@@ -764,6 +840,10 @@ struct Runtime {
     was_lyrics_pin: bool,
     /// Notch only: true while cursor is over the pinned compact live-lyrics pill.
     lyrics_hit: bool,
+    /// Notch only (pill mode): true while cursor is inside the active `.notch` rect.
+    pill_hit: bool,
+    /// Timestamp when this panel became pinned (grace before outside click unpins).
+    pinned_at: Option<Instant>,
 }
 
 /// One thread for all panels.
@@ -787,6 +867,8 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 toast_hit: false,
                 was_lyrics_pin: false,
                 lyrics_hit: false,
+                pill_hit: false,
+                pinned_at: None,
             })
             .collect();
         if panels.is_empty() {
@@ -800,9 +882,13 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
         let mut last_fs_check = Instant::now() - Duration::from_secs(1);
         let mut fullscreen = false;
         let mut interval = POLL_FAST;
+        let mut was_left_down = false;
 
         loop {
             thread::park_timeout(interval);
+            let left_down = left_mouse_down();
+            let fresh_left_click = left_down && !was_left_down;
+            was_left_down = left_down;
 
             if last_refresh.elapsed() >= METRICS_REFRESH {
                 metrics = monitor_metrics(&probe).or(metrics);
@@ -863,6 +949,8 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         NOTCH_LYRICS_PIN.store(false, Ordering::Relaxed);
                         p.was_lyrics_pin = false;
                         p.lyrics_hit = false;
+                        p.pill_hit = false;
+                        p.pinned_at = None;
                         if p.toast_hit {
                             p.toast_hit = false;
                             set_toast_passthrough(&app, &p.window, true);
@@ -895,9 +983,9 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 let mut pinned = p.pinned.load(Ordering::Relaxed);
 
                 // Panel without hover: follow the flag only. The launcher and overlay may also be
-                // opened by dwelling at their screen edge.
+                // opened by dwelling at their screen edge (disabled in Morphing Pill mode).
                 if !p.spec.hover {
-                    if matches!(p.spec.label, "overlay" | "launcher") {
+                    if !is_pill_mode() && matches!(p.spec.label, "overlay" | "launcher") {
                         let (win_rect, trigger_rect) = layout(&p.spec, m);
                         if !pinned && !p.visible {
                             if trigger_rect.contains(cursor.x, cursor.y) {
@@ -973,22 +1061,53 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         p.toast_hit = false;
                         p.was_lyrics_pin = false;
                         p.lyrics_hit = false;
+                        p.pill_hit = true;
                         p.pin_entered = false;
+                        p.pinned_at = Some(Instant::now());
                         p.outside_since = None;
                         set_visible(&app, &p.window, &p.event, true, &p.spec, false);
                     } else if p.spec.label == "notch" && !p.was_pinned {
+                        p.pinned_at = Some(Instant::now());
+                        p.pill_hit = true;
                         if p.was_lyrics_pin {
                             p.was_lyrics_pin = false;
                             p.lyrics_hit = false;
                             set_toast_passthrough(&app, &p.window, false);
                         }
-                        let w = p.window.clone();
-                        let _ = app.run_on_main_thread(move || {
-                            let _ = w.emit("notch-lyrics-pin", false);
-                            let _ = w.emit("notch-compact", false);
-                        });
+                        if !is_pill_mode() {
+                            let w = p.window.clone();
+                            let _ = app.run_on_main_thread(move || {
+                                let _ = w.emit("notch-lyrics-pin", false);
+                                let _ = w.emit("notch-compact", false);
+                            });
+                        }
                     }
                     p.was_pinned = true;
+
+                    if p.spec.label == "notch" && is_pill_mode() {
+                        let (win_rect, _) = layout(&p.spec, m);
+                        let hit = panel_hit_rect("notch", win_rect, m.4);
+                        let over = hit.contains(cursor.x, cursor.y);
+                        if over != p.pill_hit {
+                            p.pill_hit = over;
+                            set_toast_passthrough(&app, &p.window, !over);
+                        }
+                        if !over
+                            && fresh_left_click
+                            && p.pinned_at.is_some_and(|t| t.elapsed() >= Duration::from_millis(300))
+                            && !crate::altswitch::is_active()
+                        {
+                            p.pinned.store(false, Ordering::Relaxed);
+                            flag_set(&TRANSIENT, "notch", false);
+                            flag_set(&HELD, "notch", false);
+                            flag_set(&DISMISSED, "notch", true);
+                            let w = p.window.clone();
+                            let _ = app.run_on_main_thread(move || set_activatable(&w, false));
+                            crate::activities::mark_closed();
+                            continue;
+                        }
+                    }
+
                     if flag_has(&TRANSIENT, p.spec.label) && !flag_has(&HELD, p.spec.label) {
                         let (win_rect, _) = layout(&p.spec, m);
                         let hit = panel_hit_rect(p.spec.label, win_rect, m.4);
@@ -1013,6 +1132,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     continue;
                 }
                 p.was_pinned = false;
+                p.pinned_at = None;
 
                 if flag_has(&DISMISSED, p.spec.label) {
                     flag_set(&DISMISSED, p.spec.label, false);
@@ -1023,6 +1143,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         NOTCH_LYRICS_PIN.store(false, Ordering::Relaxed);
                         p.was_lyrics_pin = false;
                         p.lyrics_hit = false;
+                        p.pill_hit = false;
                     }
                     if p.visible {
                         p.visible = false;
@@ -1035,6 +1156,10 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 let win_rect = panel_hit_rect(p.spec.label, win_rect, m.4);
 
                 if !p.visible {
+                    if p.spec.label == "bar" && is_pill_mode() {
+                        p.inside_since = None;
+                        continue;
+                    }
                     if p.spec.label == "notch" {
                         let over_toast = toast_rect
                             .as_ref()
@@ -1045,9 +1170,9 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         }
                     }
                     if !p.armed {
-                        if !win_rect.contains(cursor.x, cursor.y)
-                            && !trigger_rect.contains(cursor.x, cursor.y)
-                        {
+                        let clear_of_win =
+                            (p.spec.label == "notch" && is_pill_mode()) || !win_rect.contains(cursor.x, cursor.y);
+                        if clear_of_win && !trigger_rect.contains(cursor.x, cursor.y) {
                             p.armed = true;
                         }
                         p.inside_since = None;
@@ -1070,8 +1195,19 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                             };
                             p.visible = true;
                             p.toast_hit = false;
+                            p.pill_hit = true;
                             p.inside_since = None;
                             p.outside_since = None;
+                            if p.spec.label == "notch" && is_pill_mode() {
+                                let has_win = !crate::winlist::collect_windows().is_empty();
+                                let w = p.window.clone();
+                                let _ = app.run_on_main_thread(move || {
+                                    let _ = w.emit(
+                                        "pill-edge-open",
+                                        if has_win { "compact" } else { "bar" },
+                                    );
+                                });
+                            }
                             set_visible(&app, &p.window, &p.event, true, &p.spec, notch_compact);
                         }
                     } else {
@@ -1091,6 +1227,13 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         p.lyrics_hit = false;
                         set_toast_passthrough(&app, &p.window, false);
                     }
+                    if p.spec.label == "notch" && is_pill_mode() {
+                        let over = win_rect.contains(cursor.x, cursor.y);
+                        if over != p.pill_hit {
+                            p.pill_hit = over;
+                            set_toast_passthrough(&app, &p.window, !over);
+                        }
+                    }
                     if win_rect.contains(cursor.x, cursor.y)
                         || flag_has(&HELD, p.spec.label)
                         || (p.spec.label == "bar" && over_preview)
@@ -1101,6 +1244,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                         let since = *p.outside_since.get_or_insert_with(Instant::now);
                         if since.elapsed() >= HIDE_DELAY {
                             p.visible = false;
+                            p.pill_hit = false;
                             p.outside_since = None;
                             set_visible(&app, &p.window, &p.event, false, &p.spec, false);
                         }

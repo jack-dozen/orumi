@@ -6,7 +6,7 @@ import { windowIconTarget } from "../useWindows";
 import AppIcon from "./AppIcon";
 import Thumb from "./Thumb";
 
-type Item = {
+export type SwitcherItem = {
   hwnd: number;
   title: string;
   exe: string;
@@ -19,7 +19,14 @@ type Item = {
 };
 
 /** Grid geometry in CSS px. Rust computes it and sizes the window to fit. */
-type Layout = { cols: number; rows: number; card_w: number; card_h: number; gap: number; pad: number };
+export type SwitcherLayout = {
+  cols: number;
+  rows: number;
+  card_w: number;
+  card_h: number;
+  gap: number;
+  pad: number;
+};
 
 // Dev aid: opening animation. "slide" = slides up from the bottom edge, "fade" = short fade with
 // a small rise, "none" = appears instantly. Edit and save: the dev server reloads it right away.
@@ -29,46 +36,79 @@ const SWITCHER_ANIM: "slide" | "fade" | "none" = "slide";
 // Set to false when no longer needed.
 const FRAME_PROBE = true;
 
+export type SwitcherState = {
+  items: SwitcherItem[];
+  layout: SwitcherLayout | null;
+  index: number;
+  thumbs: Record<number, string>;
+};
+
 /**
  * Alt+Tab display: a grid of window previews (several rows when there are many windows).
  * All logic (ordering, keys, selection) is in Rust; this component only renders the received
  * list, the selected index, and thumbnails as they arrive.
  */
-export default function Switcher() {
-  const visible = useEdgeVisible("switcher");
-  const [items, setItems] = useState<Item[]>([]);
-  const [layout, setLayout] = useState<Layout | null>(null);
-  const [index, setIndex] = useState(0);
+export default function Switcher({
+  embedded = false,
+  externalState,
+  onWidthChange,
+}: {
+  embedded?: boolean;
+  externalState?: SwitcherState;
+  onWidthChange?: (w: number) => void;
+} = {}) {
+  const edgeVisible = useEdgeVisible("switcher");
+  const visible = embedded ? true : edgeVisible;
+  const [localItems, setLocalItems] = useState<SwitcherItem[]>([]);
+  const [localLayout, setLocalLayout] = useState<SwitcherLayout | null>(null);
+  const [localIndex, setLocalIndex] = useState(0);
   // Newest thumbnail file per window: set by the opening payload, refreshed by "switcher-thumb".
-  const [thumbs, setThumbs] = useState<Record<number, string>>({});
+  const [localThumbs, setLocalThumbs] = useState<Record<number, string>>({});
   const panelRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
   // Probe: when Rust first asked to show the panel in this session (see FRAME_PROBE).
   const shownAtRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const a = listen<{ items: Item[]; index: number; layout: Layout }>("switcher-items", (e) => {
-      shownAtRef.current = null;
-      setItems(e.payload.items);
-      setIndex(e.payload.index);
-      setLayout(e.payload.layout);
-      const t: Record<number, string> = {};
-      for (const it of e.payload.items) if (it.thumb) t[it.hwnd] = it.thumb;
-      setThumbs(t);
-    });
+    if (embedded) return;
+    const a = listen<{ items: SwitcherItem[]; index: number; layout: SwitcherLayout }>(
+      "switcher-items",
+      (e) => {
+        shownAtRef.current = null;
+        setLocalItems(e.payload.items);
+        setLocalIndex(e.payload.index);
+        setLocalLayout(e.payload.layout);
+        const t: Record<number, string> = {};
+        for (const it of e.payload.items) if (it.thumb) t[it.hwnd] = it.thumb;
+        setLocalThumbs(t);
+      },
+    );
     const b = listen<number>("switcher-select", (e) => {
       if (shownAtRef.current === null) shownAtRef.current = performance.now();
-      setIndex(e.payload);
+      setLocalIndex(e.payload);
     });
     const c = listen<{ hwnd: number; thumb: string }>("switcher-thumb", (e) =>
-      setThumbs((m) => ({ ...m, [e.payload.hwnd]: e.payload.thumb })),
+      setLocalThumbs((m) => ({ ...m, [e.payload.hwnd]: e.payload.thumb })),
     );
     return () => {
       a.then((fn) => fn());
       b.then((fn) => fn());
       c.then((fn) => fn());
     };
-  }, []);
+  }, [embedded]);
+
+  const items = embedded && externalState ? externalState.items : localItems;
+  const layout = embedded && externalState ? externalState.layout : localLayout;
+  const index = embedded && externalState ? externalState.index : localIndex;
+  const thumbs = embedded && externalState ? externalState.thumbs : localThumbs;
+
+  useEffect(() => {
+    if (!embedded) return;
+    const w = layout
+      ? layout.cols * layout.card_w + Math.max(0, layout.cols - 1) * layout.gap + 2 * layout.pad
+      : 680;
+    onWidthChange?.(w);
+  }, [embedded, layout, onWidthChange]);
 
   useEffect(() => {
     if (!FRAME_PROBE || !visible) return;
@@ -123,49 +163,50 @@ export default function Switcher() {
       }
     : undefined;
 
-  return (
-    <div className="swroot">
-      <div
-        ref={panelRef}
-        className={`swpanel swpanel--${SWITCHER_ANIM} ${visible ? "swpanel--visible" : ""}`}
-      >
-        <div className="swgrid" style={gridStyle}>
-          {items.map((it, i) => {
-            const name = it.exe || it.title;
-            const thumb = thumbs[it.hwnd];
-            return (
-              <div
-                key={it.hwnd}
-                ref={i === index ? activeRef : undefined}
-                className={`swcard ${i === index ? "swcard--active" : ""} ${
-                  it.minimized ? "swcard--min" : ""
-                }`}
-                onClick={() => invoke("switcher_pick", { index: i })}
-              >
-                <div className="swthumb">
-                  {thumb ? (
-                    <Thumb src={convertFileSrc(thumb)} />
-                  ) : (
-                    <AppIcon
-                      target={windowIconTarget(it)}
-                      fallback={name.charAt(0).toUpperCase()}
-                      size={48}
-                    />
-                  )}
-                </div>
-                <div className="swlabel">
+  const panel = (
+    <div
+      ref={panelRef}
+      className={`swpanel ${embedded ? "swpanel--pill swpanel--visible" : `swpanel--${SWITCHER_ANIM} ${visible ? "swpanel--visible" : ""}`}`}
+    >
+      <div className="swgrid" style={gridStyle}>
+        {items.map((it, i) => {
+          const name = it.exe || it.title;
+          const thumb = thumbs[it.hwnd];
+          return (
+            <div
+              key={it.hwnd}
+              ref={i === index ? activeRef : undefined}
+              className={`swcard ${i === index ? "swcard--active" : ""} ${
+                it.minimized ? "swcard--min" : ""
+              }`}
+              onClick={() => invoke("switcher_pick", { index: i })}
+            >
+              <div className="swthumb">
+                {thumb ? (
+                  <Thumb src={convertFileSrc(thumb)} />
+                ) : (
                   <AppIcon
                     target={windowIconTarget(it)}
                     fallback={name.charAt(0).toUpperCase()}
-                    size={16}
+                    size={48}
                   />
-                  <span>{it.title}</span>
-                </div>
+                )}
               </div>
-            );
-          })}
-        </div>
+              <div className="swlabel">
+                <AppIcon
+                  target={windowIconTarget(it)}
+                  fallback={name.charAt(0).toUpperCase()}
+                  size={16}
+                />
+                <span>{it.title}</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
+
+  if (embedded) return panel;
+  return <div className="swroot">{panel}</div>;
 }

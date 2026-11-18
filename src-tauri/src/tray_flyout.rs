@@ -103,25 +103,31 @@ unsafe fn find_chevron(automation: &IUIAutomation) -> Result<IUIAutomationElemen
     })
 }
 
-/// Move the flyout beside the bar (best effort; if it fails, leave it where it is).
-unsafe fn place_near(hwnd: HWND, anchor: (i32, i32)) {
+/// Move the flyout beside the bar or below the top pill (best effort; if it fails, leave it where it is).
+unsafe fn place_near(hwnd: HWND, anchor: (i32, i32), top_anchor: bool) {
     let mut r = RECT::default();
     if GetWindowRect(hwnd, &mut r).is_err() {
         return;
     }
+    let width = r.right - r.left;
     let height = r.bottom - r.top;
+    let (x, y) = if top_anchor {
+        ((anchor.0 - width / 2).max(0), anchor.1.max(0))
+    } else {
+        (anchor.0, (anchor.1 - height).max(0))
+    };
     let _ = SetWindowPos(
         hwnd,
         None,
-        anchor.0,
-        (anchor.1 - height).max(0),
+        x,
+        y,
         0,
         0,
         SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER,
     );
 }
 
-fn toggle_overflow(anchor: Option<(i32, i32)>) -> Result<(), String> {
+fn toggle_overflow(anchor: Option<(i32, i32)>, top_anchor: bool) -> Result<(), String> {
     unsafe {
         let _com = ComGuard::new();
         let automation: IUIAutomation =
@@ -149,7 +155,7 @@ fn toggle_overflow(anchor: Option<(i32, i32)>) -> Result<(), String> {
                 if let Some(hwnd) = overflow_visible() {
                     if MOVE_FLYOUT {
                         if let Some(a) = anchor {
-                            place_near(hwnd, a);
+                            place_near(hwnd, a, top_anchor);
                         }
                     }
                     return Ok(());
@@ -164,8 +170,28 @@ fn toggle_overflow(anchor: Option<(i32, i32)>) -> Result<(), String> {
     }
 }
 
-/// Point to the right of the bar (x) and near its bottom (y), in physical pixels.
-fn bar_anchor(app: &AppHandle) -> Option<(i32, i32)> {
+/// Point beside the bar (x, bottom y) or top pill (center x, y), in physical pixels.
+fn bar_anchor(
+    app: &AppHandle,
+    pill_mode: bool,
+    anchor_x: Option<f64>,
+    anchor_y: Option<f64>,
+) -> Option<(i32, i32)> {
+    if pill_mode {
+        let notch = app.get_webview_window("notch")?;
+        let pos = notch.outer_position().ok()?;
+        let size = notch.outer_size().ok()?;
+        let scale = notch.scale_factor().ok()? * crate::edge::ui_scale();
+        let x = match anchor_x {
+            Some(ax) => pos.x + (ax * scale).round() as i32,
+            None => pos.x + size.width as i32 / 2,
+        };
+        let y = match anchor_y {
+            Some(ay) => pos.y + (ay * scale).round() as i32,
+            None => pos.y + (58.0 * scale).round() as i32,
+        };
+        return Some((x, y));
+    }
     let bar = app.get_webview_window("bar")?;
     let pos = bar.outer_position().ok()?;
     let size = bar.outer_size().ok()?;
@@ -177,13 +203,18 @@ fn bar_anchor(app: &AppHandle) -> Option<(i32, i32)> {
 }
 
 #[tauri::command]
-pub async fn tray_toggle(app: AppHandle) -> Result<(), String> {
-    let anchor = bar_anchor(&app);
+pub async fn tray_toggle(
+    anchor_x: Option<f64>,
+    anchor_y: Option<f64>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let pill_mode = crate::edge::is_pill_mode();
+    let anchor = bar_anchor(&app, pill_mode, anchor_x, anchor_y);
     // A fully hidden taskbar has no UI Automation tree: reveal it invisibly for the click.
     let revealed = tauri::async_runtime::spawn_blocking(crate::taskbar::reveal_for_tray)
         .await
         .map_err(|e| e.to_string())?;
-    let result = tauri::async_runtime::spawn_blocking(move || toggle_overflow(anchor))
+    let result = tauri::async_runtime::spawn_blocking(move || toggle_overflow(anchor, pill_mode))
         .await
         .map_err(|e| e.to_string())?;
     if revealed {

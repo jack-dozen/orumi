@@ -274,3 +274,47 @@ pub fn preview_close_soon(app: AppHandle) {
 pub fn preview_close(app: AppHandle) {
     close_now(&app);
 }
+
+fn allow_preview_thumbs(app: &AppHandle, items: &[PreviewItem]) {
+    let scope = app.asset_protocol_scope();
+    for it in items {
+        if let Some(t) = &it.thumb {
+            let _ = scope.allow_file(t);
+        }
+    }
+}
+
+/// Morphing Pill: capture/reuse cached thumbnails and emit `"pill-preview-data"` straight to `notch`.
+#[tauri::command]
+pub async fn pill_preview_open(items: Vec<PreviewReq>, app: AppHandle) -> Result<(), String> {
+    let open_seq = OPEN_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    let reqs: Vec<PreviewReq> = items.into_iter().take(MAX_ITEMS).collect();
+    if reqs.is_empty() {
+        let _ = app.emit_to("notch", "pill-preview-data", Vec::<PreviewItem>::new());
+        return Ok(());
+    }
+    let Some(dir) = capture::cache_dir(&app) else { return Ok(()) };
+    let _ = fs::create_dir_all(&dir);
+
+    let first = cached_items(&dir, &reqs);
+    allow_preview_thumbs(&app, &first);
+    let _ = app.emit_to("notch", "pill-preview-data", &first);
+
+    let dir_bg = dir.clone();
+    let built = tauri::async_runtime::spawn_blocking(move || build_items(&dir_bg, reqs))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if OPEN_SEQ.load(Ordering::SeqCst) != open_seq {
+        return Ok(());
+    }
+    let changed = built
+        .iter()
+        .zip(&first)
+        .any(|(a, b)| a.thumb != b.thumb || a.minimized != b.minimized);
+    if changed {
+        allow_preview_thumbs(&app, &built);
+        let _ = app.emit_to("notch", "pill-preview-data", &built);
+    }
+    Ok(())
+}

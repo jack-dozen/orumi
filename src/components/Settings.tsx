@@ -314,6 +314,22 @@ export default function AppSettings() {
             </button>
           </div>
         </Row>
+        <Row label="Shell mode">
+          <div className="segmented segmented--small">
+            <button
+              className={(cfg.shell_mode ?? "panels") !== "pill" ? "segmented__on" : ""}
+              onClick={() => save({ shell_mode: "panels" })}
+            >
+              Edge Panels
+            </button>
+            <button
+              className={cfg.shell_mode === "pill" ? "segmented__on" : ""}
+              onClick={() => save({ shell_mode: "pill" })}
+            >
+              Morphing Pill
+            </button>
+          </div>
+        </Row>
         <Row label="UI style">
           <div className="segmented segmented--small">
             <button

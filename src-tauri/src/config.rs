@@ -93,6 +93,8 @@ pub struct Config {
     pub bar_app_style: String,
     /// "material" (Material You + Material Symbols Rounded) or "fluent" (Windows 11 Fluent + Segoe Fluent Icons).
     pub ui_style: String,
+    /// "panels" (classic multi-edge panels) or "pill" (unified top-edge morphing pill).
+    pub shell_mode: String,
     /// Enable blurred wallpaper Mica backdrop behind ORUMI panels (works with both UI styles).
     pub mica: bool,
     /// Custom search bar placeholder for Launcher & Activities. Empty = built-in default.
@@ -128,6 +130,7 @@ impl Default for Config {
             taskbar_hidden: false,
             bar_app_style: "icons".into(),
             ui_style: "material".into(),
+            shell_mode: "panels".into(),
             mica: true,
             search_placeholder: String::new(),
             windows_theme_mode: "manual".into(),
@@ -190,6 +193,9 @@ fn sanitize(mut c: Config) -> Config {
     }
     if c.ui_style != "fluent" {
         c.ui_style = "material".into();
+    }
+    if c.shell_mode != "pill" {
+        c.shell_mode = "panels".into();
     }
     c.search_placeholder = c.search_placeholder.trim().to_string();
     if c.windows_theme_mode != "auto" {
@@ -341,7 +347,7 @@ pub fn init_hotkeys(app: &AppHandle, hk: &Hotkeys) -> tauri::Result<()> {
                     .ok()
                     .and_then(|m| m.iter().find(|(s, _)| s == shortcut).map(|(_, l)| *l));
                 if let Some(label) = label {
-                    app.state::<Panels>().toggle(label);
+                    app.state::<crate::edge::Panels>().toggle_routed(app, label);
                 }
             })
             .build(),
@@ -488,6 +494,25 @@ pub fn set_config(
     if (new.ui_scale - old.ui_scale).abs() > f64::EPSILON {
         crate::edge::set_ui_scale(new.ui_scale);
         crate::apply_layout(&app);
+    }
+
+    if new.shell_mode != old.shell_mode {
+        let to_pill = new.shell_mode == "pill";
+        crate::edge::set_pill_mode(&app, to_pill);
+        crate::apply_layout(&app);
+        let panels = app.state::<Panels>();
+        if to_pill {
+            let _ = app.emit_to(
+                "notch",
+                "pill-command",
+                serde_json::json!({ "mode": "launcher", "sub": "settings" }),
+            );
+            panels.set("notch", true);
+        } else {
+            panels.set("notch", false);
+            let _ = app.emit_to("launcher", "launcher-view", "settings");
+            panels.set("launcher", true);
+        }
     }
 
     if new.windows_theme_mode == "auto" && new.windows_theme_mode != old.windows_theme_mode {

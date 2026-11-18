@@ -103,8 +103,19 @@ function LazyAppIcon({
   );
 }
 
-export default function Activities() {
-  const { visible, openCount, wins, workspaces, apps, refreshWorkspaces } = useActivities();
+export default function Activities({
+  embedded = false,
+  initialWins,
+  onRequestClose,
+}: {
+  embedded?: boolean;
+  initialWins?: SnapWindow[];
+  onRequestClose?: () => void;
+} = {}) {
+  const { visible, openCount, wins, workspaces, apps, refreshWorkspaces } = useActivities(
+    initialWins,
+    embedded,
+  );
   const cfg = useConfig();
 
   const [view, setView] = useState<View>("ws");
@@ -112,9 +123,14 @@ export default function Activities() {
   const [sel, setSel] = useState(0);
   const [pickedWs, setPickedWs] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const [cols, setCols] = useState(() => colsFor(window.innerWidth));
+  const [cols, setCols] = useState(() => colsFor(embedded ? 1120 : window.innerWidth));
   const [activeLetter, setActiveLetter] = useState("#");
   const [splash, setSplash] = useState(false);
+
+  const dismissAct = useCallback(() => {
+    if (embedded) onRequestClose?.();
+    closeActivities();
+  }, [embedded, onRequestClose]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -134,6 +150,7 @@ export default function Activities() {
 
   // Trigger the one-shot fullscreen water-drop splash once theme tokens are ready.
   useEffect(() => {
+    if (embedded) return;
     let cancelled = false;
     let started = false;
 
@@ -172,7 +189,7 @@ export default function Activities() {
       unAbort.then((fn) => fn());
       unTheme.then((fn) => fn());
     };
-  }, []);
+  }, [embedded]);
 
   const finishSplash = useCallback(() => {
     setSplash(false);
@@ -180,20 +197,21 @@ export default function Activities() {
   }, []);
 
   useEffect(() => {
+    if (embedded) return;
     const onResize = () => setCols(colsFor(window.innerWidth));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
+  }, [embedded]);
 
   // Outside click / window loses focus = close.
   useEffect(() => {
-    if (!visible) return;
+    if (embedded || !visible) return;
     const onBlur = () => {
       if (Date.now() - openedAt.current > BLUR_GRACE_MS) closeActivities();
     };
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
-  }, [visible]);
+  }, [embedded, visible]);
 
   // Focus the search box when entering the app view.
   useEffect(() => {
@@ -214,7 +232,7 @@ export default function Activities() {
         } else if (view === "apps") {
           setView("ws");
         } else {
-          closeActivities();
+          dismissAct();
         }
         return;
       }
@@ -227,7 +245,7 @@ export default function Activities() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [visible, view, query]);
+  }, [visible, view, query, dismissAct]);
 
   // ---------- Data turunan ----------
 
@@ -315,13 +333,13 @@ export default function Activities() {
 
   const openWindow = (w: SnapWindow) => {
     invoke("focus_window", { hwnd: w.hwnd }).catch(() => {});
-    closeActivities();
+    dismissAct();
   };
 
   const launch = (a?: AppEntry) => {
     if (!a) return;
     invoke("launch_app", { id: a.id }).catch(() => {});
-    closeActivities();
+    dismissAct();
   };
 
   const pickWorkspace = (id: string) => {
@@ -409,9 +427,9 @@ export default function Activities() {
 
   return (
     <div
-      className={`act ${visible ? "act--visible" : ""} act--${view}`}
+      className={`act ${embedded ? "act--pill" : ""} ${visible ? "act--visible" : ""} act--${view}`}
       data-bg
-      onPointerDown={(e) => isBg(e) && closeActivities()}
+      onPointerDown={(e) => isBg(e) && dismissAct()}
       onWheel={onWheel}
     >
       <div className="act__top" data-bg inert={view !== "ws"}>

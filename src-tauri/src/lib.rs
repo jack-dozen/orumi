@@ -151,6 +151,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             edge::toggle_panel,
+            edge::pill_open,
             edge::set_panel,
             edge::panel_activation,
             edge::launcher_view,
@@ -177,6 +178,7 @@ pub fn run() {
             tray_flyout::tray_toggle,
             icons::app_icon,
             previews::preview_open,
+            previews::pill_preview_open,
             previews::preview_keep,
             previews::preview_close_soon,
             previews::preview_close,
@@ -247,6 +249,7 @@ pub fn run() {
         .setup(|app| {
             let cfg = config::current(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
+            edge::set_pill_mode(app.handle(), cfg.shell_mode == "pill");
             capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
             taskbar::apply(app.handle(), cfg.taskbar_autohide, cfg.taskbar_hidden);
@@ -346,13 +349,22 @@ pub fn run() {
                 .tooltip("edgeshell")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "toggle_bar" => app.state::<Panels>().toggle("bar"),
-                    "toggle_notch" => app.state::<Panels>().toggle("notch"),
-                    "toggle_launcher" => app.state::<Panels>().toggle("launcher"),
+                    "toggle_bar" => app.state::<Panels>().toggle_routed(app, "bar"),
+                    "toggle_notch" => app.state::<Panels>().toggle_routed(app, "notch"),
+                    "toggle_launcher" => app.state::<Panels>().toggle_routed(app, "launcher"),
                     "settings" => {
-                        // App settings now live in the launcher (the notch settings tab is quick settings).
-                        let _ = app.emit_to("launcher", "launcher-view", "settings");
-                        app.state::<Panels>().set_transient("launcher");
+                        if edge::is_pill_mode() {
+                            let _ = app.emit_to(
+                                "notch",
+                                "pill-command",
+                                serde_json::json!({ "mode": "launcher", "sub": "settings" }),
+                            );
+                            app.state::<Panels>().set("notch", true);
+                        } else {
+                            // App settings now live in the launcher (the notch settings tab is quick settings).
+                            let _ = app.emit_to("launcher", "launcher-view", "settings");
+                            app.state::<Panels>().set_transient("launcher");
+                        }
                     }
                     "toggle_alt_tab" => config::toggle_alt_tab(app),
                     "wm_toggle_pause" => wm_ipc::toggle_pause(),

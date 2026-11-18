@@ -67,10 +67,23 @@ function score(name: string, q: string): number {
   return 0;
 }
 
-const close = () => invoke("set_panel", { label: "launcher", open: false });
+const closeWindow = () => invoke("set_panel", { label: "launcher", open: false });
 
-export default function Launcher() {
-  const visible = useEdgeVisible("launcher");
+export type LauncherView = "list" | "wallpaper" | "settings" | "cheatsheet";
+
+export default function Launcher({
+  embedded = false,
+  initialView,
+  onWidthChange,
+  onRequestClose,
+}: {
+  embedded?: boolean;
+  initialView?: LauncherView;
+  onWidthChange?: (w: number) => void;
+  onRequestClose?: () => void;
+} = {}) {
+  const edgeVisible = useEdgeVisible("launcher");
+  const visible = embedded ? true : edgeVisible;
   const cfg = useConfig();
   const [apps, setApps] = useState<AppEntry[]>([]);
   const [query, setQuery] = useState("");
@@ -78,13 +91,13 @@ export default function Launcher() {
   const [compact, setCompact] = useState(false);
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
-  const [view, setView] = useState<"list" | "wallpaper" | "settings" | "cheatsheet">("list");
+  const [view, setView] = useState<LauncherView>(initialView ?? "list");
   /** A view requested from outside (tray menu / hotkey) before the launcher finished opening. */
   const pendingView = useRef<"settings" | "cheatsheet" | null>(null);
   const [csFromLauncher, setCsFromLauncher] = useState(false);
   const visibleRef = useRef(false);
   visibleRef.current = visible;
-  const openRef = useRef(false);
+  const openRef = useRef(embedded);
   const viewRef = useRef(view);
   viewRef.current = view;
   const [pickerWidth, setPickerWidth] = useState<number | null>(null);
@@ -94,12 +107,19 @@ export default function Launcher() {
   const activatedAt = useRef(0);
   const focusOnOpen = useRef(true);
 
+  const close = useCallback(() => {
+    if (embedded) onRequestClose?.();
+    else closeWindow();
+  }, [embedded, onRequestClose]);
+  const closeRef = useRef(close);
+  closeRef.current = close;
+
   const activateLauncher = useCallback(() => {
     focusOnOpen.current = true;
     activatedAt.current = Date.now();
-    invoke("panel_activation", { label: "launcher", enable: true }).catch(() => {});
+    invoke("panel_activation", { label: embedded ? "notch" : "launcher", enable: true }).catch(() => {});
     window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 20);
-  }, []);
+  }, [embedded]);
 
   // The panel fits its contents: height is measured from content; width is set by the view.
   const innerRef = useRef<HTMLDivElement>(null);
@@ -154,6 +174,18 @@ export default function Launcher() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  useEffect(() => {
+    if (!embedded) return;
+    openedAt.current = Date.now();
+    openRef.current = true;
+    const nextView = initialView ?? "list";
+    viewRef.current = nextView;
+    setView(nextView);
+    if (nextView === "list") {
+      activateLauncher();
+    }
+  }, [embedded, initialView, activateLauncher]);
 
   // Suppress WebView2's Alt menu-bar beep/mnemonic handling and capture keystrokes typed while
   // Alt from an Alt+Space hotkey is still held or before DOM focus settles on the input.
@@ -239,7 +271,7 @@ export default function Launcher() {
   // Keep Rust's launcher window size override synced when switching to expanded views.
   const prevView = useRef(view);
   useEffect(() => {
-    if (!visible) {
+    if (embedded || !visible) {
       prevView.current = view;
       return;
     }
@@ -247,7 +279,7 @@ export default function Launcher() {
       invoke("launcher_view", { view }).catch(() => {});
     }
     prevView.current = view;
-  }, [visible, view]);
+  }, [embedded, visible, view]);
 
   // Tray menu / WM hotkey can request settings or cheatsheet before or after the panel opens.
   useEffect(() => {
@@ -279,17 +311,17 @@ export default function Launcher() {
 
   // Outside click on the launcher (window loses focus) = close.
   useEffect(() => {
-    if (!visible) return;
+    if (embedded || !visible) return;
     const onBlur = () => {
       // The native color dialog makes the window lose focus; keep the launcher open during it.
       const el = document.activeElement as HTMLInputElement | null;
       if (el?.tagName === "INPUT" && el.type === "color") return;
       const since = Date.now() - Math.max(openedAt.current, activatedAt.current);
-      if (since > 250) close();
+      if (since > 250) closeRef.current();
     };
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
-  }, [visible]);
+  }, [embedded, visible]);
 
   // Cancel confirmation if the selection, mode, or text changes.
   useEffect(() => {
@@ -392,12 +424,16 @@ export default function Launcher() {
       setMode("apps");
       setIndex(0);
     } else if (e.key === "ArrowUp") {
-      // The list is displayed in reverse: moving up selects less relevant results.
+      // Classic bottom panel displays list in reverse; embedded top pill uses natural top-down order.
       e.preventDefault();
-      if (showList) setIndex((i) => Math.min(i + 1, results.length - 1));
+      if (showList) {
+        setIndex((i) => (embedded ? Math.max(i - 1, 0) : Math.min(i + 1, results.length - 1)));
+      }
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (showList) setIndex((i) => Math.max(i - 1, 0));
+      if (showList) {
+        setIndex((i) => (embedded ? Math.min(i + 1, results.length - 1) : Math.max(i - 1, 0)));
+      }
     } else if (e.key === "Enter") {
       if (showList) activate(results[index]);
     } else if (e.key === "Escape") {
@@ -421,10 +457,128 @@ export default function Launcher() {
           ? 1040
           : LIST_WIDTH;
 
+  useEffect(() => {
+    if (embedded) onWidthChange?.(width);
+  }, [embedded, width, onWidthChange]);
+
   useLayoutEffect(() => {
-    if (height === null) return;
+    if (embedded || height === null) return;
     invoke("launcher_set_size", { width, height }).catch(() => {});
-  }, [width, height]);
+  }, [embedded, width, height]);
+
+  const searchBarEl = (
+    <div className="lsearchbar" onPointerDown={activateLauncher}>
+      <button
+        type="button"
+        className={`lsearch__mode ${mode === "actions" ? "lsearch__mode--actions" : ""}`}
+        title={mode === "actions" ? "Back to application list" : "System actions (>)"}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          setMode((m) => (m === "apps" ? "actions" : "apps"));
+          setIndex(0);
+          inputRef.current?.focus();
+        }}
+      >
+        {mode === "actions" ? (
+          <Icon name="chevron_right" size={22} />
+        ) : (
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="20" y1="20" x2="16.2" y2="16.2" />
+          </svg>
+        )}
+      </button>
+      <input
+        ref={inputRef}
+        className="lsearch"
+        placeholder={
+          mode === "actions"
+            ? "Search system actions…"
+            : cfg?.search_placeholder || "Search apps…  (> system actions)"
+        }
+        value={query}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v.startsWith(">")) {
+            setMode((m) => (m === "apps" ? "actions" : "apps"));
+            setQuery(v.slice(1));
+          } else {
+            setQuery(v);
+          }
+          setIndex(0);
+        }}
+        onKeyDown={onKeyDown}
+        spellCheck={false}
+      />
+    </div>
+  );
+
+  const stageEl = (
+    <div key={view} className={`lpanel__stage ${embedded ? "lpanel__stage--pill" : ""}`}>
+      {view === "settings" ? (
+        <LauncherSettings onBack={() => setView("list")} onWidth={setSettingsWidth} />
+      ) : view === "cheatsheet" ? (
+        <WmCheatsheet
+          visible={visible}
+          fromLauncher={csFromLauncher}
+          onBack={() => setView("list")}
+          onClose={close}
+        />
+      ) : view === "wallpaper" ? (
+        <WallpaperPicker
+          onBack={() => setView("list")}
+          onDone={close}
+          onWidth={setPickerWidth}
+        />
+      ) : (
+        <>
+          {embedded && searchBarEl}
+          {showList && (
+            <div className="launcher__list">
+              {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
+              {results.map((item, i) => (
+                <div
+                  key={item.key}
+                  className={`litem ${i === index ? "litem--active" : ""}`}
+                  onMouseMove={() => setIndex(i)}
+                  onClick={() => activate(item)}
+                >
+                  {item.icon ? (
+                    <AppIcon target={item.icon} fallback={item.glyph} size={36} />
+                  ) : (
+                    <div className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}>
+                      {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
+                    </div>
+                  )}
+                  <div className="litem__text">
+                    <span className="litem__name">{item.name}</span>
+                    {(item.hint || armed === item.key) && (
+                      <span className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}>
+                        {armed === item.key ? "Press Enter again to confirm" : item.hint}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!embedded && searchBarEl}
+        </>
+      )}
+    </div>
+  );
+
+  if (embedded) return stageEl;
 
   return (
     <div
@@ -440,115 +594,7 @@ export default function Launcher() {
       >
         <div className="lpanel__clip">
           <div className="lpanel__inner" ref={innerRef}>
-            <div key={view} className="lpanel__stage">
-              {view === "settings" ? (
-            <LauncherSettings onBack={() => setView("list")} onWidth={setSettingsWidth} />
-          ) : view === "cheatsheet" ? (
-            <WmCheatsheet
-              visible={visible}
-              fromLauncher={csFromLauncher}
-              onBack={() => setView("list")}
-              onClose={close}
-            />
-          ) : view === "wallpaper" ? (
-            <WallpaperPicker
-              onBack={() => setView("list")}
-              onDone={close}
-              onWidth={setPickerWidth}
-            />
-          ) : (
-            <>
-              {showList && (
-                <div className="launcher__list">
-                  {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
-                  {results.map((item, i) => (
-                    <div
-                      key={item.key}
-                      className={`litem ${i === index ? "litem--active" : ""}`}
-                      onMouseMove={() => setIndex(i)}
-                      onClick={() => activate(item)}
-                    >
-                      {item.icon ? (
-                        <AppIcon target={item.icon} fallback={item.glyph} size={36} />
-                      ) : (
-                        <div
-                          className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}
-                        >
-                          {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
-                        </div>
-                      )}
-                      <div className="litem__text">
-                        <span className="litem__name">{item.name}</span>
-                        {(item.hint || armed === item.key) && (
-                          <span
-                            className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}
-                          >
-                            {armed === item.key ? "Press Enter again to confirm" : item.hint}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="lsearchbar" onPointerDown={activateLauncher}>
-                <button
-                  type="button"
-                  className={`lsearch__mode ${mode === "actions" ? "lsearch__mode--actions" : ""}`}
-                  title={mode === "actions" ? "Back to application list" : "System actions (>)"}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    setMode((m) => (m === "apps" ? "actions" : "apps"));
-                    setIndex(0);
-                    inputRef.current?.focus();
-                  }}
-                >
-                  {mode === "actions" ? (
-                    <Icon name="chevron_right" size={22} />
-                  ) : (
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <circle cx="11" cy="11" r="7" />
-                      <line x1="20" y1="20" x2="16.2" y2="16.2" />
-                    </svg>
-                  )}
-                </button>
-                <input
-                  ref={inputRef}
-                  className="lsearch"
-                  placeholder={
-                    mode === "actions"
-                      ? "Search system actions…"
-                      : cfg?.search_placeholder || "Search apps…  (> system actions)"
-                  }
-                  value={query}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v.startsWith(">")) {
-                      setMode((m) => (m === "apps" ? "actions" : "apps"));
-                      setQuery(v.slice(1));
-                    } else {
-                      setQuery(v);
-                    }
-                    setIndex(0);
-                  }}
-                  onKeyDown={onKeyDown}
-                  spellCheck={false}
-                />
-              </div>
-            </>
-          )}
-            </div>
+            {stageEl}
           </div>
         </div>
       </div>
