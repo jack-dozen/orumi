@@ -53,32 +53,34 @@ export default function Preview() {
         onMouseEnter={() => invoke("preview_keep").catch(() => {})}
         onMouseLeave={() => invoke("preview_close_soon").catch(() => {})}
       >
-        <div key={swap} className={swap > 0 ? "pvitems pvitems--swap" : "pvitems"}>
-          {items.map((it) => (
-            <div
-              key={it.hwnd}
-              className="pvitem"
-              onClick={() => {
-                invoke("focus_window", { hwnd: it.hwnd }).catch(() => {});
-                invoke("preview_close").catch(() => {});
-              }}
-            >
-              <div className="pvthumb">
-                {it.thumb ? (
-                  <Thumb src={convertFileSrc(it.thumb)} />
-                ) : (
-                  <div className="pvthumb__empty">
-                    <AppIcon target={it.icon} fallback="?" size={48} />
-                  </div>
-                )}
-                {it.minimized && <span className="pvbadge">minimized</span>}
+        <div className="pvcard__clip">
+          <div key={swap} className={swap > 0 ? "pvitems pvitems--swap" : "pvitems"}>
+            {items.map((it) => (
+              <div
+                key={it.hwnd}
+                className="pvitem"
+                onClick={() => {
+                  invoke("focus_window", { hwnd: it.hwnd }).catch(() => {});
+                  invoke("preview_close").catch(() => {});
+                }}
+              >
+                <div className="pvthumb">
+                  {it.thumb ? (
+                    <Thumb src={convertFileSrc(it.thumb)} />
+                  ) : (
+                    <div className="pvthumb__empty">
+                      <AppIcon target={it.icon} fallback="?" size={48} />
+                    </div>
+                  )}
+                  {it.minimized && <span className="pvbadge">minimized</span>}
+                </div>
+                <div className="pvtitle">
+                  <AppIcon target={it.icon} fallback="•" size={16} />
+                  <span>{it.title}</span>
+                </div>
               </div>
-              <div className="pvtitle">
-                <AppIcon target={it.icon} fallback="•" size={16} />
-                <span>{it.title}</span>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>

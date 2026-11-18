@@ -314,6 +314,38 @@ export default function AppSettings() {
             </button>
           </div>
         </Row>
+        <Row label="UI style">
+          <div className="segmented segmented--small">
+            <button
+              className={(cfg.ui_style ?? "material") !== "fluent" ? "segmented__on" : ""}
+              onClick={() => save({ ui_style: "material" })}
+            >
+              Material You
+            </button>
+            <button
+              className={cfg.ui_style === "fluent" ? "segmented__on" : ""}
+              onClick={() => save({ ui_style: "fluent" })}
+            >
+              Windows 11 Fluent
+            </button>
+          </div>
+        </Row>
+        <Row label="Mica backdrop">
+          <div className="segmented segmented--small">
+            <button
+              className={(cfg.mica ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ mica: true })}
+            >
+              On
+            </button>
+            <button
+              className={!(cfg.mica ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ mica: false })}
+            >
+              Off
+            </button>
+          </div>
+        </Row>
         <Row label="Windows theme">
           <div className="segmented segmented--small">
             <button

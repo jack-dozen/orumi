@@ -1238,23 +1238,47 @@ export default function Notch() {
   }, [stats]);
 
   const showMini = Boolean(media.info);
-  const width = compact
-    ? compactLyrics
-      ? 390
-      : compactMediaPlaying
-        ? 272
-        : 248
-    : tab === "dashboard"
-      ? showMini
-        ? 740
-        : 550
-      : tab === "media"
-        ? 740
-        : tab === "notification"
-          ? 700
-          : tab === "system"
-            ? 760
-            : 820;
+  const mode: "hidden" | "ws" | "toast" | "compact" | "lyrics" | "full" = visible
+    ? compact && compactLyrics
+      ? "lyrics"
+      : compact
+        ? "compact"
+        : "full"
+    : osdOpen && wsOsd
+      ? "ws"
+      : notifs.activeToast && notifs.toastOpen
+        ? "toast"
+        : "hidden";
+
+  const lastModeRef = useRef<"ws" | "toast" | "compact" | "lyrics" | "full">("compact");
+  if (mode !== "hidden") lastModeRef.current = mode;
+  const activeMode = mode !== "hidden" ? mode : lastModeRef.current;
+
+  const lastToastRef = useRef(notifs.activeToast);
+  if (notifs.activeToast) lastToastRef.current = notifs.activeToast;
+  const shownToast = notifs.activeToast ?? lastToastRef.current;
+
+  const wsWidth = wsOsd ? Math.min(520, Math.max(236, 178 + wsOsd.total * 18)) : 248;
+  const width =
+    activeMode === "ws"
+      ? wsWidth
+      : activeMode === "toast" || activeMode === "lyrics"
+        ? 390
+        : activeMode === "compact"
+          ? compactMediaPlaying
+            ? 272
+            : 248
+          : tab === "dashboard"
+            ? showMini
+              ? 740
+              : 550
+            : tab === "media"
+              ? 740
+              : tab === "notification"
+                ? 700
+                : tab === "system"
+                  ? 760
+                  : 820;
 
   // Follow content size dynamically (keeps compact tabs slim and centered).
   const innerRef = useRef<HTMLDivElement>(null);
@@ -1272,7 +1296,7 @@ export default function Notch() {
   useLayoutEffect(() => {
     const el = innerRef.current;
     if (el) setHeight(el.offsetHeight);
-  }, [compact, compactLyrics, tab, quickSubView, showMini]);
+  }, [activeMode, tab, quickSubView, showMini, wsOsd, shownToast?.id]);
 
   useLayoutEffect(() => {
     if (height === null) return;
@@ -1374,113 +1398,124 @@ export default function Notch() {
     }
   }, [visible]);
 
-  return (
-    <>
-      {wsOsd && (
-        <div
-          className={`wsosd ${osdOpen && !visible ? "wsosd--visible" : ""}`}
-          aria-hidden="true"
-        >
-          <span className="wsosd__label">Workspace {wsOsd.active + 1}</span>
-          <span className="wsosd__dots">
-            {Array.from({ length: wsOsd.total }, (_, i) => (
-              <span
-                key={i}
-                className={`wsosd__dot ${i === wsOsd.active ? "wsosd__dot--active" : ""}`}
-              />
-            ))}
-          </span>
-        </div>
-      )}
-      {notifs.activeToast && !osdOpen && (
-        <NotificationPopup
-          item={notifs.activeToast}
-          open={notifs.toastOpen && !visible}
-          onHover={notifs.setToastHovered}
-          onOpen={notifs.openNotif}
-          onDismiss={() => notifs.dismissToast(true)}
-        />
-      )}
-      <div
-        className={`notch ${visible && !instantHide ? "notch--visible" : ""} ${
-          instantHide ? "notch--instant" : ""
-        } ${compact ? "notch--compact" : ""}`}
-        style={{ width, height: height ?? undefined }}
-      >
-      <div className="notch__inner" ref={innerRef}>
-        {compact ? (
-          compactLyrics ? (
-            <CompactLyrics
-              media={media}
-              active={visible && compact && compactLyrics}
-              onExit={() => setLyricsPin(false)}
-            />
-          ) : (
-            <CompactNotch
-              media={media}
-              active={visible && compact}
-              onExpand={(targetTab) => {
-                if (targetTab) setTab(targetTab);
-                setLyricsPin(false);
-                setCompact(false);
-              }}
-              onOpenLyrics={() => setLyricsPin(true)}
-            />
-          )
-        ) : (
-          <>
-            <div className="tabs">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  className={`tabs__item ${tab === t.id ? "tabs__item--active" : ""}`}
-                  onClick={() => setTab(t.id)}
-                >
-                  <span className="tabs__icon-wrap">
-                    <Icon name={t.icon} size={22} fill={tab === t.id} />
-                    {t.id === "notification" && notifs.unreadCount > 0 && (
-                      <span className="tabs__badge">
-                        {notifs.unreadCount > 99 ? "99+" : notifs.unreadCount}
-                      </span>
-                    )}
-                  </span>
-                  {t.label}
-                </button>
-              ))}
-            </div>
+  const surfaceOpen = mode !== "hidden";
+  const isPill =
+    activeMode === "compact" ||
+    activeMode === "lyrics" ||
+    activeMode === "ws" ||
+    activeMode === "toast";
 
-            <div className="notch__body">
-              {tab === "dashboard" && (
-                <Dashboard stats={stats} media={media} gpu={gpu} weather={weather} visible={visible} />
-              )}
-              {tab === "media" && <MediaTab media={media} active={visible} />}
-              {tab === "notification" && (
-                <NotificationsTab
-                  items={notifs.items}
-                  enabled={notifsEnabled}
-                  onOpen={notifs.openNotif}
-                  onMarkRead={notifs.markRead}
-                  onClearAll={notifs.clearAll}
-                />
-              )}
-              {tab === "system" && (
-                <SystemTab stats={stats} procs={procs} gpu={gpu} hist={sysHist} />
-              )}
-              {tab === "settings" && (
-                <QuickSettings
-                  wifi={wifi}
-                  visible={visible}
-                  cfg={cfg}
-                  subView={quickSubView}
-                  onSubView={setQuickSubView}
-                  onInstantHide={() => setInstantHide(true)}
-                />
-              )}
+  return (
+    <div
+      className={`notch ${surfaceOpen && !instantHide ? "notch--visible" : ""} ${
+        instantHide ? "notch--instant" : ""
+      } ${isPill ? "notch--compact" : ""} ${activeMode === "ws" ? "notch--passthrough" : ""}`}
+      style={{ width, height: height ?? undefined }}
+    >
+      <div className="notch__clip">
+        <div className="notch__inner" ref={innerRef}>
+          {activeMode === "ws" && wsOsd ? (
+            <div key="ws" className="notch__stage">
+              <div className="wsosd" aria-hidden="true">
+                <span className="wsosd__label">Workspace {wsOsd.active + 1}</span>
+                <span className="wsosd__dots">
+                  {Array.from({ length: wsOsd.total }, (_, i) => (
+                    <span
+                      key={i}
+                      className={`wsosd__dot ${i === wsOsd.active ? "wsosd__dot--active" : ""}`}
+                    />
+                  ))}
+                </span>
+              </div>
             </div>
-          </>
-        )}
+          ) : activeMode === "toast" && shownToast ? (
+            <div key={`toast-${shownToast.id}`} className="notch__stage">
+              <NotificationPopup
+                item={shownToast}
+                open={mode === "toast"}
+                onHover={notifs.setToastHovered}
+                onOpen={notifs.openNotif}
+                onDismiss={() => notifs.dismissToast(true)}
+              />
+            </div>
+          ) : activeMode === "lyrics" ? (
+            <div key="lyrics" className="notch__stage">
+              <CompactLyrics
+                media={media}
+                active={visible && compact && compactLyrics}
+                onExit={() => setLyricsPin(false)}
+              />
+            </div>
+          ) : activeMode === "compact" ? (
+            <div key="compact" className="notch__stage">
+              <CompactNotch
+                media={media}
+                active={visible && compact}
+                onExpand={(targetTab) => {
+                  if (targetTab) setTab(targetTab);
+                  setLyricsPin(false);
+                  setCompact(false);
+                }}
+                onOpenLyrics={() => setLyricsPin(true)}
+              />
+            </div>
+          ) : (
+            <div key="full" className="notch__stage">
+              <div className="tabs">
+                {TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    className={`tabs__item ${tab === t.id ? "tabs__item--active" : ""}`}
+                    onClick={() => setTab(t.id)}
+                  >
+                    <span className="tabs__icon-wrap">
+                      <Icon name={t.icon} size={22} fill={tab === t.id} />
+                      {t.id === "notification" && notifs.unreadCount > 0 && (
+                        <span className="tabs__badge">
+                          {notifs.unreadCount > 99 ? "99+" : notifs.unreadCount}
+                        </span>
+                      )}
+                    </span>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              <div
+                key={`${tab}:${tab === "settings" ? quickSubView : ""}`}
+                className="notch__body notch__stage"
+              >
+                {tab === "dashboard" && (
+                  <Dashboard stats={stats} media={media} gpu={gpu} weather={weather} visible={visible} />
+                )}
+                {tab === "media" && <MediaTab media={media} active={visible} />}
+                {tab === "notification" && (
+                  <NotificationsTab
+                    items={notifs.items}
+                    enabled={notifsEnabled}
+                    onOpen={notifs.openNotif}
+                    onMarkRead={notifs.markRead}
+                    onClearAll={notifs.clearAll}
+                  />
+                )}
+                {tab === "system" && (
+                  <SystemTab stats={stats} procs={procs} gpu={gpu} hist={sysHist} />
+                )}
+                {tab === "settings" && (
+                  <QuickSettings
+                    wifi={wifi}
+                    visible={visible}
+                    cfg={cfg}
+                    subView={quickSubView}
+                    onSubView={setQuickSubView}
+                    onInstantHide={() => setInstantHide(true)}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-      </div>
-    </>
+    </div>
   );
 }

@@ -26,6 +26,8 @@ export type Config = {
   taskbar_autohide: boolean;
   taskbar_hidden: boolean;
   bar_app_style: "icons" | "dots";
+  ui_style: "material" | "fluent";
+  mica: boolean;
   search_placeholder: string;
   windows_theme_mode: "manual" | "auto";
   autostart: boolean;

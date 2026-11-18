@@ -24,9 +24,14 @@ export type Workspace = {
   windows: number[];
 };
 
-/** Icon address for a window, in the format understood by `AppIcon`. */
-export const iconTarget = (w: { aumid: string; path: string }) =>
-  w.aumid ? `aumid:${w.aumid}` : w.path ? `path:${w.path}` : null;
+/** Icon address for a window with fallback chain, in the format understood by `AppIcon`. */
+export const iconTarget = (w: { aumid: string; path: string; hwnd?: number }) => {
+  const parts: string[] = [];
+  if (w.aumid) parts.push(`aumid:${w.aumid}`);
+  if (w.path) parts.push(`path:${w.path}`);
+  if (w.hwnd) parts.push(`hwnd:${w.hwnd}`);
+  return parts.length > 0 ? parts.join("\n") : null;
+};
 
 export const closeActivities = () => invoke("activities_close").catch(() => {});
 

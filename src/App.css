@@ -45,6 +45,8 @@
   --error: #ffb4ab;
   --error-container: #93000a;
   --on-error-container: #ffdad6;
+  --morph-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --morph-spring: cubic-bezier(0.22, 1.08, 0.36, 1);
 }
 
 /* ---------- Base styles ---------- */
@@ -88,21 +90,46 @@ button {
 
 .bar {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 16px;
+  bottom: 16px;
   left: 0;
   width: 64px;
   box-sizing: border-box;
   padding: 16px 0;
   background: var(--surface);
   border-radius: 0 28px 28px 0;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
 
   transform: translateX(-100%);
-  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 320ms var(--morph-ease);
+}
+
+/* Left-edge meniscus ears connecting the bar smoothly into x=0 */
+.bar::before,
+.bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 15px;
+  height: 15px;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.bar::before {
+  bottom: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+.bar::after {
+  top: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
 }
 
 .bar--visible {
@@ -234,27 +261,61 @@ button {
   left: 0;
   right: 0;
   margin: 0 auto;
-  max-width: 100%;
+  max-width: calc(100% - 36px);
   box-sizing: border-box;
   background: var(--surface);
   border-radius: 0 0 28px 28px;
-  overflow: hidden;
+  overflow: visible;
+  transform-origin: top center;
 
-  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-100%) scaleX(0.92) scaleY(0.86);
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.28));
   transition:
-    transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    width 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    height 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-radius 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform 340ms var(--morph-ease),
+    opacity 190ms ease,
+    width 340ms var(--morph-spring),
+    height 340ms var(--morph-spring),
+    border-radius 280ms var(--morph-ease);
 }
 
 .notch--visible {
-  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scaleX(1) scaleY(1);
+}
+
+.notch--passthrough {
+  pointer-events: none;
 }
 
 .notch--compact {
-  border-radius: 0 0 20px 20px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  border-radius: 0 0 22px 22px;
+}
+
+/* Top-edge meniscus ears connecting the pill seamlessly into y=0 */
+.notch::before,
+.notch::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 15px;
+  height: 15px;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.notch::before {
+  right: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+}
+
+.notch::after {
+  left: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
 }
 
 .notch--instant {
@@ -264,12 +325,34 @@ button {
   pointer-events: none !important;
 }
 
+.notch__clip {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
 .notch__inner {
   box-sizing: border-box;
   padding: 8px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.notch__stage {
+  animation: edgeStageIn 220ms var(--morph-ease);
+}
+
+@keyframes edgeStageIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .notch--compact .notch__inner {
@@ -1723,23 +1806,47 @@ button {
   flex-direction: row;
   align-items: stretch;
   gap: 0;
+  background: var(--surface);
+  border-radius: 28px 0 0 28px;
+  overflow: visible;
 
   transform: translate(100%, -50%);
-  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 320ms var(--morph-ease);
 }
 
 .overlay--visible {
   transform: translate(0, -50%);
 }
 
-.overlay--visible.overlay--collapsed {
-  transform: translate(84px, -50%);
+/* Stationary right-edge meniscus ears anchored at right: 0 so growing power pill never shifts them */
+.overlay::before,
+.overlay::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  width: 15px;
+  height: 15px;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.overlay::before {
+  bottom: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+}
+
+.overlay::after {
+  top: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
 }
 
 .opill {
+  position: relative;
   box-sizing: border-box;
-  background: var(--surface);
-  border-radius: 28px 0 0 28px;
+  background: transparent;
+  border-radius: 0;
 }
 
 .opill--power {
@@ -1772,12 +1879,15 @@ button {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  align-items: flex-end;
   width: 84px;
+  overflow: hidden;
   flex-shrink: 0;
+  transition: width 320ms var(--morph-spring);
 }
 
 .overlay--collapsed .opower {
+  width: 0;
   pointer-events: none;
 }
 
@@ -1798,7 +1908,7 @@ button {
   position: absolute;
   top: 100%;
   right: 0;
-  margin-top: 8px;
+  margin-top: 18px;
   white-space: nowrap;
 }
 
@@ -2318,39 +2428,95 @@ button {
 }
 
 .lpanel {
+  position: relative;
   flex: none;
+  max-width: calc(100% - 36px);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: flex-end; /* Keep content bottom-aligned while the panel height animates. */
   background: var(--surface);
   border-radius: 28px 28px 0 0;
-  overflow: hidden;
+  overflow: visible;
   visibility: hidden;
+  transform-origin: bottom center;
 
-  transform: translateY(100%);
+  opacity: 0;
+  transform: translateY(100%) scaleX(0.94) scaleY(0.9);
   transition:
-    transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    visibility 0s linear 300ms;
+    transform 320ms var(--morph-ease),
+    opacity 180ms ease,
+    visibility 0s linear 320ms;
 }
 
 .lpanel--visible {
   visibility: visible;
-  transform: translateY(0);
+  opacity: 1;
+  transform: translateY(0) scaleX(1) scaleY(1);
   transition:
-    transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    width 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    height 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 340ms var(--morph-ease),
+    opacity 180ms ease,
+    width 340ms var(--morph-spring),
+    height 340ms var(--morph-spring),
     visibility 0s linear 0s;
+}
+
+/* Bottom-edge meniscus ears connecting launcher smoothly into screen bottom */
+.lpanel::before,
+.lpanel::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 15px;
+  height: 15px;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.lpanel::before {
+  right: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+}
+
+.lpanel::after {
+  left: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+.lpanel__clip {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .lpanel__inner {
   flex: none;
   box-sizing: border-box;
   padding: 16px;
+}
+
+.lpanel__stage {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  animation: bottomStageIn 220ms var(--morph-ease);
+}
+
+@keyframes bottomStageIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---------- Alt+Tab ---------- */
@@ -2555,7 +2721,7 @@ button {
   pointer-events: none; /* The window is larger than the card; only the card takes mouse events. */
 }
 
-/* The matching color and flush left edge make it read as an extension of the bar. */
+/* The matching color, flush left edge, and concave ears make it ooze out of the bar. */
 .pvcard {
   /* top, width and height are set inline from the Rust payload. */
   position: absolute;
@@ -2563,27 +2729,59 @@ button {
   top: 0;
   width: 0;
   height: 0;
-  overflow: hidden;
+  overflow: visible;
   pointer-events: auto;
   box-sizing: border-box;
-  padding: 12px;
   display: flex;
   background: var(--surface);
   border-radius: 0 24px 24px 0;
 
   /* Closed: clipped to nothing at the card's vertical center, flush with the bar edge. */
-  clip-path: inset(50% 100% 50% 0 round 0 24px 24px 0);
-  transition: clip-path 200ms cubic-bezier(0.4, 0, 0.6, 1);
+  clip-path: inset(50% 100% 50% 0);
+  transition: clip-path 220ms cubic-bezier(0.4, 0, 0.6, 1);
 }
 
 .pvcard--visible {
-  /* Open: the visible area grows from the bar edge to the full card. */
-  clip-path: inset(0 0 0 0 round 0 24px 24px 0);
+  /* Open: includes 16px top/bottom margin so concave meniscus ears render unclipped. */
+  clip-path: inset(-16px 0 -16px 0);
   /* top and width stay animated here so moving between icons keeps morphing. */
   transition:
-    clip-path 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    top 300ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    width 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    clip-path 320ms var(--morph-ease),
+    top 320ms var(--morph-spring),
+    width 320ms var(--morph-spring);
+}
+
+.pvcard::before,
+.pvcard::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 15px;
+  height: 15px;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.pvcard::before {
+  bottom: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+.pvcard::after {
+  top: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+}
+
+.pvcard__clip {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  overflow: hidden;
+  border-radius: inherit;
+  display: flex;
 }
 
 .pvitems { display: flex; gap: 10px; flex: none; }
@@ -3521,30 +3719,15 @@ button.vb__icon:hover {
   transform: none;
 }
 
-/* --- Top-notch workspace OSD --- */
+/* --- Top-notch workspace OSD (rendered inside unified .notch capsule) --- */
 .wsosd {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 14px;
-  padding: 12px 24px 14px;
-  background: var(--surface);
+  padding: 11px 22px 13px;
   color: var(--on-surface);
-  border-radius: 0 0 22px 22px;
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32);
   pointer-events: none;
-  opacity: 0;
-  transform: translate(-50%, -100%);
-  transition:
-    transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 180ms ease;
-}
-
-.wsosd--visible {
-  opacity: 1;
-  transform: translate(-50%, 0);
 }
 
 .wsosd__label {
@@ -3679,26 +3862,60 @@ button.vb__icon:hover {
 /* --- Left-edge Workspace Overview drawer --- */
 .wmov {
   position: absolute;
-  inset: 0;
+  top: 16px;
+  bottom: 16px;
+  left: 0;
+  right: 0;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: row;
   background: var(--surface);
   color: var(--on-surface);
   border-radius: 0 28px 28px 0;
-  overflow: hidden;
+  overflow: visible;
   user-select: none;
   opacity: 0;
   transform: translateX(-100%);
   transition:
-    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    clip-path 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 320ms var(--morph-ease),
+    clip-path 340ms var(--morph-ease),
     opacity 180ms ease;
+}
+
+.wmov__clip {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.wmov::before,
+.wmov::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 15px;
+  height: 15px;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.wmov::before {
+  bottom: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+.wmov::after {
+  top: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
 }
 
 .wmov--from-bar {
   transform: translateX(0);
-  clip-path: inset(0 calc(100% - 64px) 0 0 round 0 28px 28px 0);
+  clip-path: inset(-16px calc(100% - 64px) -16px 0);
 }
 
 .wmov--visible {
@@ -3707,7 +3924,7 @@ button.vb__icon:hover {
 }
 
 .wmov--from-bar.wmov--visible {
-  clip-path: inset(0 0 0 0 round 0 28px 28px 0);
+  clip-path: inset(-16px 0 -16px 0);
 }
 
 .wmov__rail {
@@ -4114,33 +4331,14 @@ button.vb__icon:hover {
 }
 
 .notifosd {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: 390px;
-  max-width: calc(100% - 24px);
+  width: 100%;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 10px 12px 12px 14px;
-  background: var(--surface);
+  padding: 10px 14px 12px;
   color: var(--on-surface);
-  border-radius: 0 0 22px 22px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
   cursor: pointer;
-  pointer-events: none;
-  opacity: 0;
-  transform: translate(-50%, -100%);
-  transition:
-    transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 180ms ease;
-}
-
-.notifosd--visible {
-  pointer-events: auto;
-  opacity: 1;
-  transform: translate(-50%, 0);
 }
 
 .notifosd__avatar,
@@ -4324,4 +4522,327 @@ button.vb__icon:hover {
 
 .notifcard:hover {
   background: var(--surface-container-highest);
+}
+
+/* =========================================================
+   Windows 11 Fluent style override (`data-style="fluent"`)
+   ========================================================= */
+
+.fluent-icon {
+  font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-variation-settings: normal;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root[data-style="fluent"] {
+  --fluent-card: color-mix(in srgb, var(--surface-container-high) 58%, transparent);
+  --fluent-card-soft: color-mix(in srgb, var(--surface-container) 64%, transparent);
+  --fluent-stroke: color-mix(in srgb, var(--on-surface) 11%, transparent);
+  --fluent-stroke-strong: color-mix(in srgb, var(--on-surface) 18%, transparent);
+  --fluent-highlight: inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent);
+}
+
+[data-style="fluent"] body {
+  font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Shared pixel-aligned Mica wallpaper backdrop (works in Material You & Windows 11 Fluent) */
+:root[data-mica="on"] {
+  --mica-surface: color-mix(in srgb, var(--surface) 92%, transparent);
+  --mica-tint: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+
+[data-mica="on"] .bar,
+[data-mica="on"] .notch,
+[data-mica="on"] .launcher,
+[data-mica="on"] .lpanel,
+[data-mica="on"] .swpanel,
+[data-mica="on"] .overlay,
+[data-mica="on"] .pvcard,
+[data-mica="on"] .wmov {
+  background-color: var(--mica-surface);
+  background-image:
+    linear-gradient(var(--mica-tint), var(--mica-tint)),
+    var(--mica-image, none);
+  background-size:
+    100% 100%,
+    var(--mica-screen-w, 100vw) var(--mica-screen-h, 100vh);
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px)));
+  background-repeat: no-repeat;
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .notch::before,
+[data-mica="on"]:not([data-style="fluent"]) .notch::after,
+[data-mica="on"]:not([data-style="fluent"]) .lpanel::before,
+[data-mica="on"]:not([data-style="fluent"]) .lpanel::after,
+[data-mica="on"]:not([data-style="fluent"]) .bar::before,
+[data-mica="on"]:not([data-style="fluent"]) .bar::after,
+[data-mica="on"]:not([data-style="fluent"]) .wmov::before,
+[data-mica="on"]:not([data-style="fluent"]) .wmov::after,
+[data-mica="on"]:not([data-style="fluent"]) .overlay::before,
+[data-mica="on"]:not([data-style="fluent"]) .overlay::after,
+[data-mica="on"]:not([data-style="fluent"]) .pvcard::before,
+[data-mica="on"]:not([data-style="fluent"]) .pvcard::after {
+  background-color: var(--mica-surface);
+  background-image:
+    linear-gradient(var(--mica-tint), var(--mica-tint)),
+    var(--mica-image, none);
+  background-size:
+    100% 100%,
+    var(--mica-screen-w, 100vw) var(--mica-screen-h, 100vh);
+  background-repeat: no-repeat;
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .notch::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) - 15px))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px)));
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .notch::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px)));
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .lpanel::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) - 15px))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px) - 15px));
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .lpanel::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px) - 15px));
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .bar::before,
+[data-mica="on"]:not([data-style="fluent"]) .wmov::before,
+[data-mica="on"]:not([data-style="fluent"]) .pvcard::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) - 15px));
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .bar::after,
+[data-mica="on"]:not([data-style="fluent"]) .wmov::after,
+[data-mica="on"]:not([data-style="fluent"]) .pvcard::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px)));
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .overlay::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px) - 15px))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) - 15px));
+}
+
+[data-mica="on"]:not([data-style="fluent"]) .overlay::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px) - 15px))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px)));
+}
+
+/* Main edge panels: Windows 11 Mica surface, 12px corners, 1px hairline stroke */
+[data-style="fluent"] .bar {
+  border-radius: 0 12px 12px 0;
+  border-right: 1px solid var(--fluent-stroke);
+  box-shadow: var(--fluent-highlight);
+}
+
+[data-style="fluent"] .notch {
+  border-radius: 0 0 12px 12px;
+  border: 1px solid var(--fluent-stroke);
+  border-top: none;
+  filter: none;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.36);
+}
+
+[data-style="fluent"] .notch::before,
+[data-style="fluent"] .notch::after,
+[data-style="fluent"] .lpanel::before,
+[data-style="fluent"] .lpanel::after,
+[data-style="fluent"] .bar::before,
+[data-style="fluent"] .bar::after,
+[data-style="fluent"] .wmov::before,
+[data-style="fluent"] .wmov::after,
+[data-style="fluent"] .overlay::before,
+[data-style="fluent"] .overlay::after,
+[data-style="fluent"] .pvcard::before,
+[data-style="fluent"] .pvcard::after {
+  display: none;
+}
+
+[data-style="fluent"] .notch--compact {
+  border-radius: 0 0 10px 10px;
+}
+
+[data-style="fluent"] .launcher,
+[data-style="fluent"] .lpanel,
+[data-style="fluent"] .swpanel {
+  border-radius: 12px 12px 0 0;
+  border: 1px solid var(--fluent-stroke);
+  border-bottom: none;
+  box-shadow: var(--fluent-highlight), 0 -8px 28px rgba(0, 0, 0, 0.32);
+}
+
+[data-style="fluent"] .overlay {
+  border-radius: 12px 0 0 12px;
+  border: 1px solid var(--fluent-stroke);
+  border-right: none;
+  box-shadow: var(--fluent-highlight);
+}
+
+[data-style="fluent"] .opill--mixer + .opower {
+  border-left: 1px solid var(--fluent-stroke);
+}
+
+[data-style="fluent"] .pvcard {
+  border-radius: 0 12px 12px 0;
+  border: 1px solid var(--fluent-stroke);
+  border-left: none;
+  clip-path: inset(50% 100% 50% 0 round 0 12px 12px 0);
+}
+
+[data-style="fluent"] .pvcard--visible {
+  clip-path: inset(0 0 0 0 round 0 12px 12px 0);
+}
+
+[data-style="fluent"] .wmov {
+  border-radius: 0 12px 12px 0;
+  border-right: 1px solid var(--fluent-stroke);
+  box-shadow: var(--fluent-highlight);
+}
+
+[data-style="fluent"] .wmov--from-bar {
+  clip-path: inset(0 calc(100% - 64px) 0 0 round 0 12px 12px 0);
+}
+
+[data-style="fluent"] .wmov--from-bar.wmov--visible {
+  clip-path: inset(0 0 0 0 round 0 12px 12px 0);
+}
+
+/* Cards, tiles & inner containers: 8px radius + crisp 1px border */
+[data-style="fluent"] .card,
+[data-style="fluent"] .notifcard,
+[data-style="fluent"] .wmov__tile {
+  background: var(--fluent-card);
+  border-radius: 8px;
+  border: 1px solid var(--fluent-stroke);
+}
+
+[data-style="fluent"] .qtile {
+  background: var(--fluent-card);
+  border-radius: 6px;
+  border: 1px solid var(--fluent-stroke);
+}
+
+[data-style="fluent"] .qtile:hover:not(:disabled),
+[data-style="fluent"] .qtile--split:hover:not(:disabled) {
+  background: var(--surface-container-highest);
+  border-color: var(--fluent-stroke-strong);
+}
+
+[data-style="fluent"] .qtile--on,
+[data-style="fluent"] .qtile--on:hover:not(:disabled),
+[data-style="fluent"] .qtile--split.qtile--on:hover:not(:disabled) {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: color-mix(in srgb, var(--primary) 80%, #ffffff);
+}
+
+/* Bar items & pills */
+[data-style="fluent"] .bar__item,
+[data-style="fluent"] .bar__status,
+[data-style="fluent"] .bar__ws {
+  border-radius: 8px;
+}
+
+[data-style="fluent"] .bar__status {
+  background: var(--fluent-card);
+  border: 1px solid var(--fluent-stroke);
+}
+
+/* Launcher, Switcher, Preview items & controls */
+[data-style="fluent"] .lsearchbar {
+  border-radius: 8px;
+  background: var(--fluent-card);
+  border: 1px solid var(--fluent-stroke);
+  border-bottom: 2px solid color-mix(in srgb, var(--primary) 72%, var(--fluent-stroke));
+}
+
+[data-style="fluent"] .lsearch__mode {
+  border-radius: 6px;
+}
+
+[data-style="fluent"] .litem {
+  border-radius: 6px;
+}
+
+[data-style="fluent"] .litem__tile {
+  border-radius: 6px;
+}
+
+[data-style="fluent"] .switem,
+[data-style="fluent"] .pvthumb {
+  border-radius: 8px;
+}
+
+[data-style="fluent"] .hslider {
+  border-radius: 10px;
+  border: 1px solid var(--fluent-stroke);
+}
+
+/* Segmented controls, inputs, buttons */
+[data-style="fluent"] .segmented {
+  border-radius: 6px;
+  background: var(--fluent-card);
+  border: 1px solid var(--fluent-stroke);
+}
+
+[data-style="fluent"] .segmented button {
+  border-radius: 4px;
+}
+
+[data-style="fluent"] .segmented__on {
+  background: var(--primary);
+  color: var(--on-primary) !important;
+}
+
+[data-style="fluent"] .sinput,
+[data-style="fluent"] .wmset__btn,
+[data-style="fluent"] .notifs__clear {
+  border-radius: 6px;
+}
+
+[data-style="fluent"] .wmset__badge {
+  border-radius: 5px;
+}
+
+[data-style="fluent"] .wsosd__dot {
+  border-radius: 4px;
+}
+
+[data-style="fluent"] .wsosd__dot--active {
+  width: 18px;
 }

@@ -504,15 +504,16 @@ pub fn wm_overview_state(app: AppHandle) -> Result<OverviewStateData, String> {
 
     let icons: HashMap<i64, String> = crate::winlist::collect_all_windows()
         .into_iter()
-        .filter_map(|w| {
-            let target = if !w.aumid.is_empty() {
-                format!("aumid:{}", w.aumid)
-            } else if !w.path.is_empty() {
-                format!("path:{}", w.path)
-            } else {
-                return None;
-            };
-            Some((w.hwnd, target))
+        .map(|w| {
+            let mut parts = Vec::new();
+            if !w.aumid.is_empty() {
+                parts.push(format!("aumid:{}", w.aumid));
+            }
+            if !w.path.is_empty() {
+                parts.push(format!("path:{}", w.path));
+            }
+            parts.push(format!("hwnd:{}", w.hwnd));
+            (w.hwnd, parts.join("\n"))
         })
         .collect();
 

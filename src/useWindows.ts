@@ -12,11 +12,13 @@ export type WinEntry = {
   aumid: string;
 };
 
-/** Icon address for a window: AppUserModelID (Store app) or program path. */
-export function windowIconTarget(w: { aumid: string; path: string }): string | null {
-  if (w.aumid) return `aumid:${w.aumid}`;
-  if (w.path) return `path:${w.path}`;
-  return null;
+/** Icon address for a window with fallback chain: AUMID, program path, and HWND icon. */
+export function windowIconTarget(w: { aumid: string; path: string; hwnd?: number }): string | null {
+  const parts: string[] = [];
+  if (w.aumid) parts.push(`aumid:${w.aumid}`);
+  if (w.path) parts.push(`path:${w.path}`);
+  if (w.hwnd) parts.push(`hwnd:${w.hwnd}`);
+  return parts.length > 0 ? parts.join("\n") : null;
 }
 
 /** One app = one dot in the bar, regardless of the number of windows. */

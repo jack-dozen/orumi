@@ -59,7 +59,7 @@ const PANELS: [PanelSpec; 7] = [
     PanelSpec {
         label: "notch",
         edge: Edge::Top,
-        size: (820.0, 460.0),
+        size: (860.0, 460.0),
         trigger_len: Some(240.0),
         hover: true,
         focus: false,
@@ -67,7 +67,7 @@ const PANELS: [PanelSpec; 7] = [
     PanelSpec {
         label: "launcher",
         edge: Edge::Bottom,
-        size: (1040.0, 520.0),
+        size: (1080.0, 520.0),
         trigger_len: Some(360.0),
         hover: false,
         focus: true,
@@ -208,6 +208,8 @@ pub fn run() {
             theme::wallpaper_pixels,
             theme::set_theme,
             theme::get_theme,
+            theme::mica_backdrop,
+            theme::get_mica,
             wallpaper::list_wallpapers,
             wallpaper::set_wallpaper,
             wallpaper::run_wallpaper_command,

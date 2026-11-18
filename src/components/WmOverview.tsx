@@ -660,7 +660,8 @@ export default function WmOverview() {
     <div
       className={`wmov ${visible ? "wmov--visible" : ""} ${fromBar ? "wmov--from-bar" : ""}`}
     >
-      {/* Left vertical workspace dots rail */}
+      <div className="wmov__clip">
+        {/* Left vertical workspace dots rail */}
       <div className="wmov__rail" ref={railRef} onWheel={onRailWheel}>
         <div className="wmov__dots">
           {(data?.workspaces ?? []).map((ws) => {
@@ -812,6 +813,7 @@ export default function WmOverview() {
         <div className="wmov__footer">
           <span>Click window to switch · Drag tile to rearrange or onto a dot</span>
         </div>
+      </div>
       </div>
 
       {drag?.active && (

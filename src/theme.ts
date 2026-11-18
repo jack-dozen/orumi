@@ -1,6 +1,7 @@
-import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, primaryMonitor } from "@tauri-apps/api/window";
 import {
   argbFromRgb,
   blueFromArgb,
@@ -125,9 +126,88 @@ function buildTokens(cfg: Pick<Config, "colors" | "bg_tint">, seed: number): Tok
   };
 }
 
+export type UiStyle = "material" | "fluent";
+
+let currentUiStyle: UiStyle = "material";
+let currentMica = false;
+const styleListeners = new Set<(style: UiStyle) => void>();
+
+function normalizeUiStyle(raw: unknown): UiStyle {
+  return raw === "fluent" ? "fluent" : "material";
+}
+
+function applyUiStyle(style: UiStyle) {
+  currentUiStyle = style;
+  document.documentElement.dataset.style = style;
+  for (const fn of styleListeners) fn(style);
+}
+
+function applyMicaEnabled(enabled: boolean) {
+  currentMica = enabled;
+  document.documentElement.dataset.mica = enabled ? "on" : "off";
+}
+
+/** Reactive UI style ("material" | "fluent") kept in sync across all windows by useTheme. */
+export function useUiStyle(): UiStyle {
+  const [style, setStyle] = useState<UiStyle>(currentUiStyle);
+  useEffect(() => {
+    setStyle(currentUiStyle);
+    styleListeners.add(setStyle);
+    return () => {
+      styleListeners.delete(setStyle);
+    };
+  }, []);
+  return style;
+}
+
 function applyTokens(tokens: Tokens) {
   const root = document.documentElement.style;
   for (const [name, value] of Object.entries(tokens)) root.setProperty(name, value);
+}
+
+function applyMicaImage(path: string | null) {
+  const root = document.documentElement.style;
+  if (path) {
+    const url = convertFileSrc(path);
+    root.setProperty("--mica-image", `url("${url.replace(/"/g, '\\"')}")`);
+  } else {
+    root.removeProperty("--mica-image");
+  }
+}
+
+const MICA_SUBPANELS = ".bar, .wmov, .notch, .lpanel, .swpanel, .overlay, .pvcard";
+
+function syncMicaOffsets() {
+  if (!currentMica) return;
+  for (const el of document.querySelectorAll<HTMLElement>(MICA_SUBPANELS)) {
+    let x = el.offsetLeft;
+    let y = el.offsetTop;
+    if (el.classList.contains("overlay")) {
+      y -= el.offsetHeight / 2;
+    }
+    el.style.setProperty("--mica-el-x", `${x}px`);
+    el.style.setProperty("--mica-el-y", `${y}px`);
+    el.style.setProperty("--mica-el-w", `${el.offsetWidth}px`);
+    el.style.setProperty("--mica-el-h", `${el.offsetHeight}px`);
+  }
+}
+
+async function syncWindowMica(uiScale: number) {
+  if (!currentMica) return;
+  try {
+    const win = getCurrentWindow();
+    const [mon, pos] = await Promise.all([primaryMonitor(), win.outerPosition()]);
+    if (!mon) return;
+    const factor = (mon.scaleFactor || 1) * (uiScale || 1);
+    const root = document.documentElement.style;
+    root.setProperty("--mica-screen-w", `${mon.size.width / factor}px`);
+    root.setProperty("--mica-screen-h", `${mon.size.height / factor}px`);
+    root.setProperty("--mica-win-x", `${(pos.x - mon.position.x) / factor}px`);
+    root.setProperty("--mica-win-y", `${(pos.y - mon.position.y) / factor}px`);
+    syncMicaOffsets();
+  } catch {
+    /* ignore transient window metric errors */
+  }
 }
 
 /**
@@ -223,18 +303,98 @@ export function useTheme(isSource: boolean) {
   useEffect(() => {
     let cancelled = false;
     let lastSig = "";
+    let lastMicaStamp: string | null | undefined = undefined;
     let cfgSig = "";
     let lastCheck = 0;
+    let currentScale = 0.8;
     let seedCache: { stamp: string | null; seed: number } | null = null;
     const unlistens: Promise<() => void>[] = [];
+    const win = getCurrentWindow();
+    const label = win.label;
 
-    // All windows: use the existing theme, then follow its updates.
+    const ro = new ResizeObserver(() => syncMicaOffsets());
+    const mo = new MutationObserver(() => {
+      if (!currentMica) return;
+      for (const el of document.querySelectorAll<HTMLElement>(MICA_SUBPANELS)) {
+        ro.observe(el);
+      }
+      syncMicaOffsets();
+    });
+    if (document.body) {
+      mo.observe(document.body, { childList: true, subtree: true });
+      for (const el of document.querySelectorAll<HTMLElement>(MICA_SUBPANELS)) {
+        ro.observe(el);
+      }
+    }
+
+    // All windows: use the existing theme, UI style, and Mica backdrop, then follow updates.
     invoke<string | null>("get_theme")
       .then((json) => {
         if (json && !cancelled) applyTokens(JSON.parse(json));
       })
       .catch(() => {});
+    invoke<string | null>("get_mica")
+      .then((path) => {
+        if (!cancelled) applyMicaImage(path);
+      })
+      .catch(() => {});
+    invoke<Config>("get_config")
+      .then((cfg) => {
+        if (cancelled) return;
+        currentScale = cfg.ui_scale || 0.8;
+        const nextMica = cfg.mica !== false;
+        applyUiStyle(normalizeUiStyle(cfg.ui_style));
+        applyMicaEnabled(nextMica);
+        if (nextMica) {
+          void syncWindowMica(currentScale);
+          if (isSource) {
+            invoke<string | null>("mica_backdrop")
+              .then((p) => {
+                if (!cancelled) applyMicaImage(p);
+              })
+              .catch(() => {});
+          }
+        }
+      })
+      .catch(() => {});
+
     unlistens.push(listen<string>("theme-changed", (e) => applyTokens(JSON.parse(e.payload))));
+    unlistens.push(listen<string | null>("mica-changed", (e) => applyMicaImage(e.payload)));
+    unlistens.push(
+      listen<Config>("config-changed", (e) => {
+        currentScale = e.payload.ui_scale || 0.8;
+        const nextStyle = normalizeUiStyle(e.payload.ui_style);
+        const nextMica = e.payload.mica !== false;
+        applyUiStyle(nextStyle);
+        applyMicaEnabled(nextMica);
+        if (nextMica) {
+          void syncWindowMica(currentScale);
+          if (isSource) {
+            invoke<string | null>("mica_backdrop")
+              .then((p) => {
+                if (!cancelled) applyMicaImage(p);
+              })
+              .catch(() => {});
+          }
+        } else {
+          lastMicaStamp = undefined;
+        }
+      }),
+    );
+    unlistens.push(win.onMoved(() => void syncWindowMica(currentScale)));
+    unlistens.push(win.onResized(() => void syncWindowMica(currentScale)));
+    unlistens.push(
+      listen<boolean>(`edge-visible:${label}`, (e) => {
+        if (e.payload && currentMica) void syncWindowMica(currentScale);
+      }),
+    );
+    if (label === "activities") {
+      unlistens.push(
+        listen("activities-open", () => {
+          if (currentMica) void syncWindowMica(currentScale);
+        }),
+      );
+    }
 
     /** force: recalculate even if nothing changed. rewall: reread the wallpaper image. */
     const check = async (force: boolean, rewall = false) => {
@@ -244,7 +404,20 @@ export function useTheme(isSource: boolean) {
         const cfg = await invoke<Config>("get_config");
         cfgSig = JSON.stringify([cfg.colors, cfg.bg_tint]);
         const needsWallpaper = Object.values(cfg.colors).some((s) => s.mode === "auto");
-        const stamp = needsWallpaper ? await invoke<string | null>("wallpaper_stamp") : null;
+        const needsMica = cfg.mica !== false;
+        const stamp =
+          needsWallpaper || needsMica ? await invoke<string | null>("wallpaper_stamp") : null;
+
+        if (!needsMica) {
+          lastMicaStamp = undefined;
+        } else if (rewall || stamp !== lastMicaStamp) {
+          lastMicaStamp = stamp;
+          invoke<string | null>("mica_backdrop")
+            .then((p) => {
+              if (!cancelled) applyMicaImage(p);
+            })
+            .catch(() => {});
+        }
 
         const sig = `${cfgSig}|${stamp}`;
         if (!force && sig === lastSig) return;
@@ -288,6 +461,8 @@ export function useTheme(isSource: boolean) {
 
     return () => {
       cancelled = true;
+      ro.disconnect();
+      mo.disconnect();
       unlistens.forEach((u) => u.then((fn) => fn()));
     };
   }, [isSource]);

@@ -48,7 +48,7 @@
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site",
         "label": "notch",
         "title": "edgeshell-notch",
-        "width": 820,
+        "width": 860,
         "height": 460,
         "x": 0,
         "y": 0,
