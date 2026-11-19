@@ -103,25 +103,39 @@ unsafe fn find_chevron(automation: &IUIAutomation) -> Result<IUIAutomationElemen
     })
 }
 
+#[derive(Clone, Copy)]
+struct BarAnchor {
+    x: i32,
+    y: i32,
+    edge: crate::edge::Edge,
+}
+
 /// Move the flyout beside the bar (best effort; if it fails, leave it where it is).
-unsafe fn place_near(hwnd: HWND, anchor: (i32, i32)) {
+unsafe fn place_near(hwnd: HWND, anchor: BarAnchor) {
     let mut r = RECT::default();
     if GetWindowRect(hwnd, &mut r).is_err() {
         return;
     }
+    let width = r.right - r.left;
     let height = r.bottom - r.top;
+    let (x, y) = match anchor.edge {
+        crate::edge::Edge::Right => ((anchor.x - width).max(0), (anchor.y - height).max(0)),
+        crate::edge::Edge::Top => ((anchor.x - width).max(0), anchor.y.max(0)),
+        crate::edge::Edge::Bottom => ((anchor.x - width).max(0), (anchor.y - height).max(0)),
+        _ => (anchor.x.max(0), (anchor.y - height).max(0)),
+    };
     let _ = SetWindowPos(
         hwnd,
         None,
-        anchor.0,
-        (anchor.1 - height).max(0),
+        x,
+        y,
         0,
         0,
         SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER,
     );
 }
 
-fn toggle_overflow(anchor: Option<(i32, i32)>) -> Result<(), String> {
+fn toggle_overflow(anchor: Option<BarAnchor>) -> Result<(), String> {
     unsafe {
         let _com = ComGuard::new();
         let automation: IUIAutomation =
@@ -164,16 +178,22 @@ fn toggle_overflow(anchor: Option<(i32, i32)>) -> Result<(), String> {
     }
 }
 
-/// Point to the right of the bar (x) and near its bottom (y), in physical pixels.
-fn bar_anchor(app: &AppHandle) -> Option<(i32, i32)> {
+/// Anchor point beside the bar in physical pixels, adapting to whichever edge the bar sits on.
+fn bar_anchor(app: &AppHandle) -> Option<BarAnchor> {
     let bar = app.get_webview_window("bar")?;
     let pos = bar.outer_position().ok()?;
     let size = bar.outer_size().ok()?;
     let scale = bar.scale_factor().ok()?;
-    Some((
-        pos.x + size.width as i32 + (8.0 * scale) as i32,
-        pos.y + size.height as i32 - (16.0 * scale) as i32,
-    ))
+    let edge = crate::edge::effective_edge("bar", crate::edge::Edge::Left);
+    let pad = (8.0 * scale) as i32;
+    let inset = (16.0 * scale) as i32;
+    let (x, y) = match edge {
+        crate::edge::Edge::Right => (pos.x - pad, pos.y + size.height as i32 - inset),
+        crate::edge::Edge::Top => (pos.x + size.width as i32 - inset, pos.y + size.height as i32 + pad),
+        crate::edge::Edge::Bottom => (pos.x + size.width as i32 - inset, pos.y - pad),
+        _ => (pos.x + size.width as i32 + pad, pos.y + size.height as i32 - inset),
+    };
+    Some(BarAnchor { x, y, edge })
 }
 
 #[tauri::command]

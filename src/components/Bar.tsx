@@ -12,6 +12,7 @@ import { useBattery, type BatteryStatus } from "../useBattery";
 import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
 import { useNow } from "../useNow";
+import { usePanelEdge } from "../theme";
 import type { PowerMode, QuickState } from "../useQuick";
 import { useWifi } from "../useWifi";
 import { useWindows, windowIconTarget, type AppGroup } from "../useWindows";
@@ -67,6 +68,8 @@ export default function Bar() {
   const wifi = useWifi(visible);
   const battery = useBattery(visible);
   const groups = useWindows(visible);
+  const edge = usePanelEdge();
+  const isHoriz = edge === "top" || edge === "bottom";
   const asIcons = (cfg?.bar_app_style ?? "icons") === "icons";
   const previewOpen = useEdgeVisible("preview");
   const notchOpen = useEdgeVisible("notch");
@@ -141,6 +144,7 @@ export default function Bar() {
             title: w.title,
             icon: windowIconTarget(w),
           })),
+          anchorX: r.left + r.width / 2,
           anchorY: r.top + r.height / 2,
         }).catch(() => {});
       },
@@ -310,16 +314,22 @@ export default function Bar() {
 
       <div className="bar__group">
         <div
-          className="bar__item"
+          className="bar__item bar__tray-chevron"
           title="Tray icons (hidden icons)"
           onClick={() => invoke("tray_toggle").catch(() => {})}
         >
           <Icon name="chevron_right" size={22} />
         </div>
         <div className="bar__item bar__clock" onClick={() => handleNotchTab("dashboard")}>
-          {pad(now.getHours())}
-          <br />
-          {pad(now.getMinutes())}
+          {isHoriz ? (
+            `${pad(now.getHours())}:${pad(now.getMinutes())}`
+          ) : (
+            <>
+              {pad(now.getHours())}
+              <br />
+              {pad(now.getMinutes())}
+            </>
+          )}
         </div>
         <div className="bar__status">
           <div

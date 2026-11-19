@@ -4846,3 +4846,614 @@ button.vb__icon:hover {
 [data-style="fluent"] .wsosd__dot--active {
   width: 18px;
 }
+
+/* ---------- Custom panel edges (Tahap 1: notch, launcher, overlay) ---------- */
+
+/* Notch on bottom edge */
+[data-edge="bottom"] .notch {
+  top: auto;
+  bottom: 0;
+  border-radius: 28px 28px 0 0;
+  transform-origin: bottom center;
+  transform: translateY(100%) scaleX(0.92) scaleY(0.86);
+  filter: drop-shadow(0 -8px 20px rgba(0, 0, 0, 0.28));
+}
+
+[data-edge="bottom"] .notch--visible {
+  transform: translateY(0) scaleX(1) scaleY(1);
+}
+
+[data-edge="bottom"] .notch--compact {
+  border-radius: 22px 22px 0 0;
+}
+
+[data-edge="bottom"] .notch--instant {
+  transform: translateY(100%) !important;
+}
+
+[data-edge="bottom"] .notch::before,
+[data-edge="bottom"] .notch::after {
+  top: auto;
+  bottom: 0;
+}
+
+[data-edge="bottom"] .notch::before {
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="bottom"] .notch::after {
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-style="fluent"][data-edge="bottom"] .notch {
+  border-radius: 12px 12px 0 0;
+}
+
+/* Launcher on top edge */
+[data-edge="top"] .lroot {
+  align-items: flex-start;
+}
+
+[data-edge="top"] .lpanel {
+  justify-content: flex-start;
+  border-radius: 0 0 28px 28px;
+  transform-origin: top center;
+  transform: translateY(-100%) scaleX(0.94) scaleY(0.9);
+}
+
+[data-edge="top"] .lpanel--visible {
+  transform: translateY(0) scaleX(1) scaleY(1);
+}
+
+[data-edge="top"] .lpanel__clip {
+  justify-content: flex-start;
+}
+
+[data-edge="top"] .lpanel::before,
+[data-edge="top"] .lpanel::after {
+  bottom: auto;
+  top: 0;
+}
+
+[data-edge="top"] .lpanel::before {
+  -webkit-mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="top"] .lpanel::after {
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-style="fluent"][data-edge="top"] .lpanel {
+  border-radius: 0 0 12px 12px;
+}
+
+/* Overlay on left edge */
+[data-edge="left"] .overlay {
+  right: auto;
+  left: 0;
+  flex-direction: row-reverse;
+  border-radius: 0 28px 28px 0;
+  transform: translate(-100%, -50%);
+}
+
+[data-edge="left"] .overlay--visible {
+  transform: translate(0, -50%);
+}
+
+[data-edge="left"] .overlay .opower {
+  align-items: flex-start;
+}
+
+[data-edge="left"] .overlay::before,
+[data-edge="left"] .overlay::after {
+  right: auto;
+  left: 0;
+}
+
+[data-edge="left"] .overlay::before {
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="left"] .overlay::after {
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-style="fluent"][data-edge="left"] .overlay {
+  border-radius: 0 12px 12px 0;
+}
+
+/* ---------- Custom bar edges (Tahap 2: bar 4 sides + preview) ---------- */
+
+/* Bar on right edge */
+[data-edge="right"] .bar {
+  left: auto;
+  right: 0;
+  border-radius: 28px 0 0 28px;
+  transform: translateX(100%);
+}
+
+[data-edge="right"] .bar--visible {
+  transform: translateX(0);
+}
+
+[data-edge="right"] .bar::before,
+[data-edge="right"] .bar::after {
+  left: auto;
+  right: 0;
+}
+
+[data-edge="right"] .bar::before {
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="right"] .bar::after {
+  -webkit-mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="right"] .appicon--focus::before {
+  left: auto;
+  right: -3px;
+}
+
+[data-edge="right"] .bar__tray-chevron .icon {
+  transform: rotate(180deg);
+}
+
+[data-style="fluent"][data-edge="right"] .bar {
+  border-radius: 12px 0 0 12px;
+}
+
+/* Bar horizontal layout shared by top & bottom */
+[data-edge="top"] .bar,
+[data-edge="bottom"] .bar {
+  left: 16px;
+  right: 16px;
+  width: auto;
+  height: 64px;
+  padding: 0 16px;
+  flex-direction: row;
+}
+
+[data-edge="top"] .bar__group,
+[data-edge="bottom"] .bar__group {
+  flex-direction: row;
+}
+
+[data-edge="top"] .bar__apps,
+[data-edge="bottom"] .bar__apps {
+  flex-direction: row;
+  min-width: 0;
+  min-height: auto;
+  padding: 0 12px;
+}
+
+[data-edge="top"] .bar__status,
+[data-edge="bottom"] .bar__status {
+  width: auto;
+  height: 44px;
+  flex-direction: row;
+  padding: 0 8px;
+  gap: 4px;
+}
+
+[data-edge="top"] .bar__status .bar__item,
+[data-edge="bottom"] .bar__status .bar__item {
+  width: auto;
+  min-width: 34px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 6px;
+}
+
+[data-edge="top"] .bar__battery,
+[data-edge="bottom"] .bar__battery {
+  flex-direction: row;
+  gap: 4px;
+}
+
+[data-edge="top"] .bar__clock,
+[data-edge="bottom"] .bar__clock {
+  width: auto;
+  padding: 0 10px;
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+[data-edge="top"] .bar__ws,
+[data-edge="bottom"] .bar__ws {
+  width: auto;
+  height: 44px;
+  flex-direction: row;
+  padding: 0 11px;
+}
+
+[data-edge="top"] .bar__ws-dots,
+[data-edge="bottom"] .bar__ws-dots {
+  flex-direction: row;
+}
+
+[data-edge="top"] .bar__ws-dot,
+[data-edge="bottom"] .bar__ws-dot {
+  transition:
+    width 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 150ms ease,
+    background 180ms,
+    opacity 180ms;
+}
+
+[data-edge="top"] .bar__ws-dot--active,
+[data-edge="bottom"] .bar__ws-dot--active {
+  width: 22px;
+  height: 9px;
+}
+
+[data-edge="top"] .appdot,
+[data-edge="bottom"] .appdot {
+  transition:
+    width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 200ms,
+    opacity 200ms;
+}
+
+[data-edge="top"] .appdot--focus,
+[data-edge="bottom"] .appdot--focus {
+  width: 46px;
+  height: 24px;
+}
+
+/* Bar on top edge */
+[data-edge="top"] .bar {
+  top: 0;
+  bottom: auto;
+  border-radius: 0 0 28px 28px;
+  transform: translateY(-100%);
+}
+
+[data-edge="top"] .bar--visible {
+  transform: translateY(0);
+}
+
+[data-edge="top"] .bar::before,
+[data-edge="top"] .bar::after {
+  top: 0;
+  bottom: auto;
+}
+
+[data-edge="top"] .bar::before {
+  left: auto;
+  right: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="top"] .bar::after {
+  left: 100%;
+  right: auto;
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="top"] .appicon--focus::before {
+  left: 11px;
+  right: 11px;
+  top: -3px;
+  bottom: auto;
+  width: auto;
+  height: 3px;
+}
+
+[data-edge="top"] .bar__tray-chevron .icon {
+  transform: rotate(90deg);
+}
+
+[data-style="fluent"][data-edge="top"] .bar {
+  border-radius: 0 0 12px 12px;
+}
+
+/* Bar on bottom edge */
+[data-edge="bottom"] .bar {
+  top: auto;
+  bottom: 0;
+  border-radius: 28px 28px 0 0;
+  transform: translateY(100%);
+}
+
+[data-edge="bottom"] .bar--visible {
+  transform: translateY(0);
+}
+
+[data-edge="bottom"] .bar::before,
+[data-edge="bottom"] .bar::after {
+  top: auto;
+  bottom: 0;
+}
+
+[data-edge="bottom"] .bar::before {
+  left: auto;
+  right: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="bottom"] .bar::after {
+  left: 100%;
+  right: auto;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="bottom"] .appicon--focus::before {
+  left: 11px;
+  right: 11px;
+  top: auto;
+  bottom: -3px;
+  width: auto;
+  height: 3px;
+}
+
+[data-edge="bottom"] .bar__tray-chevron .icon {
+  transform: rotate(-90deg);
+}
+
+[data-style="fluent"][data-edge="bottom"] .bar {
+  border-radius: 12px 12px 0 0;
+}
+
+/* Preview card following bar edge */
+[data-edge="right"] .pvcard {
+  border-radius: 24px 0 0 24px;
+  clip-path: inset(50% 0 50% 100%);
+}
+
+[data-edge="right"] .pvcard--visible {
+  clip-path: inset(-16px 0 -16px 0);
+  transition:
+    clip-path 320ms var(--morph-ease),
+    top 320ms var(--morph-spring),
+    left 320ms var(--morph-spring),
+    width 320ms var(--morph-spring);
+}
+
+[data-edge="right"] .pvcard::before,
+[data-edge="right"] .pvcard::after {
+  left: auto;
+  right: 0;
+}
+
+[data-edge="right"] .pvcard::before {
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="right"] .pvcard::after {
+  -webkit-mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-style="fluent"][data-edge="right"] .pvcard {
+  border-radius: 12px 0 0 12px;
+}
+
+[data-edge="top"] .pvcard {
+  border-radius: 0 0 24px 24px;
+  clip-path: inset(0 50% 100% 50%);
+}
+
+[data-edge="top"] .pvcard--visible {
+  clip-path: inset(0 -16px 0 -16px);
+  transition:
+    clip-path 320ms var(--morph-ease),
+    left 320ms var(--morph-spring),
+    width 320ms var(--morph-spring);
+}
+
+[data-edge="top"] .pvcard::before,
+[data-edge="top"] .pvcard::after {
+  top: 0;
+  bottom: auto;
+}
+
+[data-edge="top"] .pvcard::before {
+  left: auto;
+  right: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="top"] .pvcard::after {
+  left: 100%;
+  right: auto;
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 100%, transparent 14.2px, #000 14.8px);
+}
+
+[data-style="fluent"][data-edge="top"] .pvcard {
+  border-radius: 0 0 12px 12px;
+}
+
+[data-edge="bottom"] .pvcard {
+  border-radius: 24px 24px 0 0;
+  clip-path: inset(100% 50% 0 50%);
+}
+
+[data-edge="bottom"] .pvcard--visible {
+  clip-path: inset(0 -16px 0 -16px);
+  transition:
+    clip-path 320ms var(--morph-ease),
+    left 320ms var(--morph-spring),
+    width 320ms var(--morph-spring);
+}
+
+[data-edge="bottom"] .pvcard::before,
+[data-edge="bottom"] .pvcard::after {
+  top: auto;
+  bottom: 0;
+}
+
+[data-edge="bottom"] .pvcard::before {
+  left: auto;
+  right: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-edge="bottom"] .pvcard::after {
+  left: 100%;
+  right: auto;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+[data-style="fluent"][data-edge="bottom"] .pvcard {
+  border-radius: 12px 12px 0 0;
+}
+
+/* ---------- Panel Settings (Tahap 3) ---------- */
+
+.pset__main {
+  flex: 1.4;
+}
+
+.pset__side {
+  flex: 0.9;
+}
+
+.pset__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pset__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--surface-container-high);
+  transition: opacity 160ms ease;
+}
+
+.pset__card--off {
+  opacity: 0.55;
+}
+
+.pset__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pset__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.pset__desc {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+}
+
+.pset__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pset__hot {
+  border: none;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--surface-container-highest);
+  color: var(--on-surface-variant);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 150ms,
+    color 150ms;
+}
+
+.pset__hot:hover:not(:disabled) {
+  color: var(--on-surface);
+}
+
+.pset__hot--on {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.pset__hot--on:hover:not(:disabled) {
+  color: var(--on-primary);
+}
+
+.pset__hot:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.pset__map {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.pset__map-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--surface-container-high);
+  font-size: 12px;
+}
+
+.pset__map-edge {
+  color: var(--on-surface-variant);
+}
+
+.pset__map-owner {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.pset__map-none {
+  color: var(--on-surface-variant);
+  opacity: 0.6;
+}
+
+.pset__actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+[data-style="fluent"] .pset__card {
+  border-radius: 8px;
+  background: var(--fluent-card);
+  border: 1px solid var(--fluent-stroke);
+}
+
+[data-style="fluent"] .pset__map-row {
+  border-radius: 6px;
+  background: var(--fluent-card);
+  border: 1px solid var(--fluent-stroke);
+}
+
+[data-style="fluent"] .pset__hot {
+  border-radius: 6px;
+}

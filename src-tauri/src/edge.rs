@@ -94,9 +94,83 @@ pub fn set_ui_scale(v: f64) {
     UI_SCALE_BITS.store(v.to_bits(), Ordering::Relaxed);
 }
 
+// ---------- Runtime panel preferences ----------
+
+static PANEL_PREFS: Mutex<Option<crate::config::PanelsConfig>> = Mutex::new(None);
+
+pub fn set_panel_prefs(prefs: crate::config::PanelsConfig) {
+    if let Ok(mut p) = PANEL_PREFS.lock() {
+        *p = Some(prefs);
+    }
+    wake();
+}
+
+pub fn panel_prefs() -> crate::config::PanelsConfig {
+    PANEL_PREFS
+        .lock()
+        .ok()
+        .and_then(|p| p.clone())
+        .unwrap_or_default()
+}
+
+fn parse_edge(s: &str, fallback: Edge) -> Edge {
+    match s {
+        "left" => Edge::Left,
+        "right" => Edge::Right,
+        "top" => Edge::Top,
+        "bottom" => Edge::Bottom,
+        _ => fallback,
+    }
+}
+
+fn default_edge_for(label: &str) -> Edge {
+    match label {
+        "bar" | "overview" => Edge::Left,
+        "notch" => Edge::Top,
+        "launcher" | "switcher" => Edge::Bottom,
+        "overlay" => Edge::Right,
+        _ => Edge::Free,
+    }
+}
+
+pub fn effective_edge(label: &str, fallback: Edge) -> Edge {
+    let p = panel_prefs();
+    match label {
+        "bar" => parse_edge(&p.bar.edge, fallback),
+        "notch" => parse_edge(&p.notch.edge, fallback),
+        "launcher" => parse_edge(&p.launcher.edge, fallback),
+        "overlay" => parse_edge(&p.overlay.edge, fallback),
+        _ => fallback,
+    }
+}
+
+pub fn is_panel_enabled(label: &str) -> bool {
+    let p = panel_prefs();
+    match label {
+        "bar" | "preview" => p.bar.enabled,
+        "notch" => p.notch.enabled,
+        "launcher" => true,
+        "overlay" => p.overlay.enabled,
+        "overview" => p.overview,
+        "switcher" => p.switcher,
+        _ => true,
+    }
+}
+
+pub fn is_panel_hotedge(label: &str) -> bool {
+    let p = panel_prefs();
+    match label {
+        "bar" => p.bar.enabled && p.bar.hotedge,
+        "notch" => p.notch.enabled && p.notch.hotedge,
+        "launcher" => p.launcher.hotedge,
+        "overlay" => p.overlay.enabled && p.overlay.hotedge,
+        _ => false,
+    }
+}
+
 // ---------- Panels ----------
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Left,
     Top,
@@ -294,11 +368,40 @@ fn is_locked_by_fullscreen(label: &str) -> bool {
 pub struct Panels(pub HashMap<&'static str, Arc<AtomicBool>>);
 
 impl Panels {
+    /// Dismiss any other open panel sharing the same screen edge (except bar + preview).
+    fn dismiss_same_edge(&self, opening: &str) {
+        let edge = effective_edge(opening, default_edge_for(opening));
+        if edge == Edge::Free {
+            return;
+        }
+        for (&other, flag) in &self.0 {
+            if other == opening {
+                continue;
+            }
+            if matches!((opening, other), ("bar", "preview") | ("preview", "bar")) {
+                continue;
+            }
+            if effective_edge(other, default_edge_for(other)) == edge
+                && flag.load(Ordering::Relaxed)
+            {
+                flag_set(&TRANSIENT, other, false);
+                flag_set(&HELD, other, false);
+                flag_set(&DISMISSED, other, true);
+                reset_launcher_override(other);
+                flag.store(false, Ordering::Relaxed);
+            }
+        }
+    }
+
     /// Hotkey and tray: stays open until closed again.
     pub fn toggle(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
-            if !flag.load(Ordering::Relaxed) && is_locked_by_fullscreen(key) {
+            let opening = !flag.load(Ordering::Relaxed);
+            if opening && (!is_panel_enabled(key) || is_locked_by_fullscreen(key)) {
                 return;
+            }
+            if opening {
+                self.dismiss_same_edge(key);
             }
             if *key == "launcher" {
                 LAUNCHER_HOVER.store(false, Ordering::Relaxed);
@@ -316,8 +419,11 @@ impl Panels {
 
     pub fn set(&self, label: &str, open: bool) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
-            if open && is_locked_by_fullscreen(key) {
+            if open && (!is_panel_enabled(key) || is_locked_by_fullscreen(key)) {
                 return;
+            }
+            if open {
+                self.dismiss_same_edge(key);
             }
             if *key == "launcher" {
                 LAUNCHER_HOVER.store(false, Ordering::Relaxed);
@@ -356,9 +462,10 @@ impl Panels {
     /// UI click: opens, then hides when the cursor moves away.
     pub fn set_transient(&self, label: &str) {
         if let Some((key, flag)) = self.0.get_key_value(label) {
-            if is_locked_by_fullscreen(key) {
+            if !is_panel_enabled(key) || is_locked_by_fullscreen(key) {
                 return;
             }
+            self.dismiss_same_edge(key);
             flag_set(&TRANSIENT, key, true);
             flag_set(&DISMISSED, key, false);
             flag.store(true, Ordering::Relaxed);
@@ -451,51 +558,97 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
     // 1 design unit = u physical pixels (monitor DPI scale multiplied by UI scale).
     let u = scale * ui_scale();
     let size = size_override(spec.label).unwrap_or(spec.size);
+    let edge = effective_edge(spec.label, spec.edge);
+    let full_span = matches!(spec.label, "bar" | "overview");
 
-    match spec.edge {
+    match edge {
         Edge::Left => {
-            // Span full monitor height so top/bottom 16 DIP margin hosts concave edge ears.
-            let win = Rect { x: mx, y: my, w: size.0 * u, h: mh };
-            let trig = Rect { x: mx, y: my, w: EDGE_TRIGGER_DIP * scale, h: mh };
-            (win, trig)
+            if full_span {
+                // Span full monitor height so top/bottom 16 DIP margin hosts concave edge ears.
+                let win = Rect { x: mx, y: my, w: size.0 * u, h: mh };
+                let trig = Rect { x: mx, y: my, w: EDGE_TRIGGER_DIP * scale, h: mh };
+                (win, trig)
+            } else {
+                let w = size.0 * u;
+                let h = size.1 * u;
+                let win = Rect { x: mx, y: my + (mh - h) / 2.0, w, h };
+                let trig = Rect {
+                    x: mx,
+                    y: win.y,
+                    w: EDGE_TRIGGER_DIP * scale,
+                    h,
+                };
+                (win, trig)
+            }
         }
         Edge::Top => {
-            let w = size.0 * u;
-            let h = size.1 * u;
-            let win = Rect { x: mx + (mw - w) / 2.0, y: my, w, h };
-            let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
-            let trig = Rect {
-                x: mx + (mw - tw) / 2.0,
-                y: my,
-                w: tw,
-                h: EDGE_TRIGGER_DIP * scale,
-            };
-            (win, trig)
+            if full_span {
+                let h = size.0 * u;
+                let win = Rect { x: mx, y: my, w: mw, h };
+                let trig = Rect { x: mx, y: my, w: mw, h: EDGE_TRIGGER_DIP * scale };
+                (win, trig)
+            } else {
+                let w = (size.0 * u).min(mw);
+                let h = (size.1 * u).min(mh);
+                let win = Rect { x: mx + (mw - w) / 2.0, y: my, w, h };
+                let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
+                let trig = Rect {
+                    x: mx + (mw - tw) / 2.0,
+                    y: my,
+                    w: tw,
+                    h: EDGE_TRIGGER_DIP * scale,
+                };
+                (win, trig)
+            }
         }
         Edge::Bottom => {
-            let w = (size.0 * u).min(mw);
-            let h = (size.1 * u).min(mh);
-            let win = Rect { x: mx + (mw - w) / 2.0, y: my + mh - h, w, h };
-            let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
-            let trig = Rect {
-                x: mx + (mw - tw) / 2.0,
-                y: my + mh - EDGE_TRIGGER_DIP * scale,
-                w: tw,
-                h: EDGE_TRIGGER_DIP * scale,
-            };
-            (win, trig)
+            if full_span {
+                let h = size.0 * u;
+                let win = Rect { x: mx, y: my + mh - h, w: mw, h };
+                let trig = Rect {
+                    x: mx,
+                    y: my + mh - EDGE_TRIGGER_DIP * scale,
+                    w: mw,
+                    h: EDGE_TRIGGER_DIP * scale,
+                };
+                (win, trig)
+            } else {
+                let w = (size.0 * u).min(mw);
+                let h = (size.1 * u).min(mh);
+                let win = Rect { x: mx + (mw - w) / 2.0, y: my + mh - h, w, h };
+                let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
+                let trig = Rect {
+                    x: mx + (mw - tw) / 2.0,
+                    y: my + mh - EDGE_TRIGGER_DIP * scale,
+                    w: tw,
+                    h: EDGE_TRIGGER_DIP * scale,
+                };
+                (win, trig)
+            }
         }
         Edge::Right => {
-            let w = size.0 * u;
-            let h = size.1 * u;
-            let win = Rect { x: mx + mw - w, y: my + (mh - h) / 2.0, w, h };
-            let trig = Rect {
-                x: mx + mw - EDGE_TRIGGER_DIP * scale,
-                y: win.y,
-                w: EDGE_TRIGGER_DIP * scale,
-                h,
-            };
-            (win, trig)
+            if full_span {
+                let w = size.0 * u;
+                let win = Rect { x: mx + mw - w, y: my, w, h: mh };
+                let trig = Rect {
+                    x: mx + mw - EDGE_TRIGGER_DIP * scale,
+                    y: my,
+                    w: EDGE_TRIGGER_DIP * scale,
+                    h: mh,
+                };
+                (win, trig)
+            } else {
+                let w = size.0 * u;
+                let h = size.1 * u;
+                let win = Rect { x: mx + mw - w, y: my + (mh - h) / 2.0, w, h };
+                let trig = Rect {
+                    x: mx + mw - EDGE_TRIGGER_DIP * scale,
+                    y: win.y,
+                    w: EDGE_TRIGGER_DIP * scale,
+                    h,
+                };
+                (win, trig)
+            }
         }
         Edge::Free => {
             let (x, y, w, h) = free_rect(spec.label).unwrap_or((mx, my, 300.0 * u, 176.0 * u));
@@ -688,8 +841,13 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
     }
     if matches!(label, "bar" | "overview") {
         let inset = BAR_INSET_DIP * scale * ui_scale();
-        win.y += inset;
-        win.h = (win.h - 2.0 * inset).max(0.0);
+        if matches!(effective_edge(label, Edge::Left), Edge::Top | Edge::Bottom) {
+            win.x += inset;
+            win.w = (win.w - 2.0 * inset).max(0.0);
+        } else {
+            win.y += inset;
+            win.h = (win.h - 2.0 * inset).max(0.0);
+        }
     }
     if label == "launcher" {
         if let Ok(ls) = LAUNCHER_SIZE.lock() {
@@ -698,7 +856,9 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
                 let actual_w = (cw * u).min(win.w);
                 let actual_h = (ch * u).min(win.h);
                 win.x += (win.w - actual_w) / 2.0;
-                win.y += win.h - actual_h;
+                if effective_edge("launcher", Edge::Bottom) == Edge::Bottom {
+                    win.y += win.h - actual_h;
+                }
                 win.w = actual_w;
                 win.h = actual_h;
             }
@@ -714,7 +874,11 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
                     win.w = actual_w;
                 }
                 if let Some(h) = ch {
-                    win.h = (h * u).min(win.h);
+                    let actual_h = (h * u).min(win.h);
+                    if effective_edge("notch", Edge::Top) == Edge::Bottom {
+                        win.y += win.h - actual_h;
+                    }
+                    win.h = actual_h;
                 }
             }
         }
@@ -723,15 +887,23 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
 }
 
 fn toast_hit_rect(m: Metrics) -> Option<Rect> {
+    if !is_panel_enabled("notch") {
+        return None;
+    }
     let (w_dip, h_dip) = TOAST_RECT.lock().ok().and_then(|r| *r)?;
-    let (mx, my, mw, _, scale) = m;
+    let (mx, my, mw, mh, scale) = m;
     let u = scale * ui_scale();
     let w = w_dip * u;
     let trig_h = EDGE_TRIGGER_DIP * scale;
     let h = (h_dip * u - trig_h).max(0.0);
+    let y = if effective_edge("notch", Edge::Top) == Edge::Bottom {
+        my + mh - trig_h - h
+    } else {
+        my + trig_h
+    };
     Some(Rect {
         x: mx + (mw - w) / 2.0,
-        y: my + trig_h,
+        y,
         w,
         h,
     })
@@ -852,6 +1024,30 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 .any(|q| q.spec.label == "overview" && (q.visible || q.pinned.load(Ordering::Relaxed)));
 
             for p in panels.iter_mut() {
+                if !is_panel_enabled(p.spec.label) {
+                    p.pinned.store(false, Ordering::Relaxed);
+                    flag_set(&TRANSIENT, p.spec.label, false);
+                    flag_set(&HELD, p.spec.label, false);
+                    flag_set(&DISMISSED, p.spec.label, false);
+                    if p.spec.label == "notch" {
+                        NOTCH_LYRICS_PIN.store(false, Ordering::Relaxed);
+                        p.was_lyrics_pin = false;
+                        p.lyrics_hit = false;
+                        if p.toast_hit {
+                            p.toast_hit = false;
+                            set_toast_passthrough(&app, &p.window, true);
+                        }
+                    }
+                    p.armed = false;
+                    p.was_pinned = false;
+                    p.inside_since = None;
+                    p.outside_since = None;
+                    if p.visible {
+                        p.visible = false;
+                        set_visible(&app, &p.window, &p.event, false, &p.spec, false);
+                    }
+                    continue;
+                }
                 if fullscreen && matches!(p.spec.label, "bar" | "launcher" | "notch") {
                     p.pinned.store(false, Ordering::Relaxed);
                     flag_set(&TRANSIENT, p.spec.label, false);
@@ -878,7 +1074,10 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                     }
                     continue;
                 }
-                if p.spec.label == "bar" && overview_open {
+                if p.spec.label == "bar"
+                    && overview_open
+                    && effective_edge("bar", Edge::Left) == Edge::Left
+                {
                     p.pinned.store(false, Ordering::Relaxed);
                     flag_set(&TRANSIENT, "bar", false);
                     flag_set(&HELD, "bar", false);
@@ -899,7 +1098,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 if !p.spec.hover {
                     if matches!(p.spec.label, "overlay" | "launcher") {
                         let (win_rect, trigger_rect) = layout(&p.spec, m);
-                        if !pinned && !p.visible {
+                        if !pinned && !p.visible && is_panel_hotedge(p.spec.label) {
                             if trigger_rect.contains(cursor.x, cursor.y) {
                                 if p.armed {
                                     let since = *p.inside_since.get_or_insert_with(Instant::now);
@@ -926,6 +1125,8 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                                 p.armed = true;
                                 p.inside_since = None;
                             }
+                        } else if !is_panel_hotedge(p.spec.label) {
+                            p.inside_since = None;
                         }
                         // Hover-opened overlay/launcher hides again once the cursor leaves it (unless held).
                         if pinned
@@ -1051,14 +1252,17 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                             p.armed = true;
                         }
                         p.inside_since = None;
-                    } else if left_mouse_down() {
+                    } else if left_mouse_down() || !is_panel_hotedge(p.spec.label) {
                         // Do not pop open notch/bar while dragging a window near the edge
-                        // (lets vscroll-wm Snap Layouts capture top-edge drops unobstructed).
+                        // (lets vscroll-wm Snap Layouts capture top-edge drops unobstructed),
+                        // or when hotedge is disabled for this panel.
                         p.inside_since = None;
                     } else if trigger_rect.contains(cursor.x, cursor.y) {
                         let since = *p.inside_since.get_or_insert_with(Instant::now);
                         if since.elapsed() >= EDGE_DWELL {
-                            let notch_compact = if p.spec.label == "notch" {
+                            let notch_compact = if p.spec.label == "notch"
+                                && effective_edge("notch", Edge::Top) == Edge::Top
+                            {
                                 crate::winlist::has_window_near_notch(
                                     m.0,
                                     m.1,

@@ -68,6 +68,47 @@ impl Default for Colors {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(default)]
+pub struct PanelPref {
+    pub enabled: bool,
+    /// "left" | "right" | "top" | "bottom"
+    pub edge: String,
+    pub hotedge: bool,
+}
+
+impl Default for PanelPref {
+    fn default() -> Self {
+        Self { enabled: true, edge: "left".into(), hotedge: false }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(default)]
+pub struct PanelsConfig {
+    pub bar: PanelPref,
+    pub notch: PanelPref,
+    pub launcher: PanelPref,
+    pub overlay: PanelPref,
+    pub overview: bool,
+    pub switcher: bool,
+    pub activities: bool,
+}
+
+impl Default for PanelsConfig {
+    fn default() -> Self {
+        Self {
+            bar: PanelPref { enabled: true, edge: "left".into(), hotedge: true },
+            notch: PanelPref { enabled: true, edge: "top".into(), hotedge: true },
+            launcher: PanelPref { enabled: true, edge: "bottom".into(), hotedge: true },
+            overlay: PanelPref { enabled: true, edge: "right".into(), hotedge: true },
+            overview: true,
+            switcher: true,
+            activities: true,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
@@ -109,6 +150,7 @@ pub struct Config {
     pub notifications_popup: bool,
     /// Suppress Windows' native bottom-right toast banners while ORUMI runs (restored on exit/crash).
     pub notifications_suppress_native: bool,
+    pub panels: PanelsConfig,
     pub hotkeys: Hotkeys,
 }
 
@@ -136,6 +178,7 @@ impl Default for Config {
             notifications_enabled: true,
             notifications_popup: true,
             notifications_suppress_native: true,
+            panels: PanelsConfig::default(),
             hotkeys: Hotkeys::default(),
         }
     }
@@ -176,6 +219,46 @@ fn sanitize_slot(s: &mut ColorSlot, default: &ColorSlot) {
     }
 }
 
+fn sanitize_panels(p: &mut PanelsConfig) {
+    // Launcher cannot be disabled because it hosts core commands (>settings, >switch, etc.).
+    p.launcher.enabled = true;
+
+    if !matches!(p.bar.edge.as_str(), "left" | "right" | "top" | "bottom") {
+        p.bar.edge = "left".into();
+    }
+    if !matches!(p.notch.edge.as_str(), "top" | "bottom") {
+        p.notch.edge = "top".into();
+    }
+    if !matches!(p.launcher.edge.as_str(), "top" | "bottom") {
+        p.launcher.edge = "bottom".into();
+    }
+    if !matches!(p.overlay.edge.as_str(), "left" | "right") {
+        p.overlay.edge = "right".into();
+    }
+
+    if !p.bar.enabled {
+        p.bar.hotedge = false;
+    }
+    if !p.notch.enabled {
+        p.notch.hotedge = false;
+    }
+    if !p.overlay.enabled {
+        p.overlay.hotedge = false;
+    }
+
+    // At most one active panel may own the hotedge on any given screen edge.
+    let mut used: Vec<String> = Vec::new();
+    for pref in [&mut p.bar, &mut p.notch, &mut p.launcher, &mut p.overlay] {
+        if pref.hotedge {
+            if used.iter().any(|e| e == &pref.edge) {
+                pref.hotedge = false;
+            } else {
+                used.push(pref.edge.clone());
+            }
+        }
+    }
+}
+
 /// Normalize values so they are always valid, regardless of file contents or UI input.
 fn sanitize(mut c: Config) -> Config {
     let d = Config::default();
@@ -204,6 +287,7 @@ fn sanitize(mut c: Config) -> Config {
     sanitize_slot(&mut c.colors.bg1, &d.colors.bg1);
     sanitize_slot(&mut c.colors.fg, &d.colors.fg);
     sanitize_slot(&mut c.colors.accent, &d.colors.accent);
+    sanitize_panels(&mut c.panels);
     c
 }
 
@@ -420,7 +504,7 @@ pub fn toggle_alt_tab(app: &AppHandle) {
         c.alt_tab = !c.alt_tab;
         c.clone()
     };
-    crate::altswitch::set_enabled(snapshot.alt_tab);
+    crate::altswitch::set_enabled(snapshot.alt_tab && snapshot.panels.switcher);
     crate::wm_ipc::sync_shell_relay(app);
     let _ = save(app, &snapshot);
     let _ = app.emit("config-changed", &snapshot);
@@ -472,9 +556,37 @@ pub fn set_config(
     save(&app, &new)?;
     *state.0.lock().map_err(|e| e.to_string())? = new.clone();
 
-    crate::altswitch::set_enabled(new.alt_tab);
-    if new.alt_tab != old.alt_tab {
+    crate::altswitch::set_enabled(new.alt_tab && new.panels.switcher);
+    crate::activities::set_win_key_enabled(new.panels.activities);
+    if new.alt_tab != old.alt_tab
+        || new.panels.switcher != old.panels.switcher
+        || new.panels.activities != old.panels.activities
+    {
         crate::wm_ipc::sync_shell_relay(&app);
+    }
+    if new.panels != old.panels {
+        crate::edge::set_panel_prefs(new.panels.clone());
+        let panels = app.state::<Panels>();
+        if !new.panels.bar.enabled {
+            panels.set("bar", false);
+            panels.set("preview", false);
+        }
+        if !new.panels.notch.enabled {
+            panels.set("notch", false);
+        }
+        if !new.panels.overlay.enabled {
+            panels.set("overlay", false);
+        }
+        if !new.panels.overview {
+            panels.set("overview", false);
+        }
+        if !new.panels.switcher {
+            panels.set("switcher", false);
+        }
+        if !new.panels.activities && crate::activities::is_open() {
+            crate::activities::dismiss(&app);
+        }
+        crate::apply_layout(&app);
     }
     if new.taskbar_autohide != old.taskbar_autohide || new.taskbar_hidden != old.taskbar_hidden {
         crate::taskbar::apply(&app, new.taskbar_autohide, new.taskbar_hidden);
@@ -498,12 +610,14 @@ pub fn set_config(
     if new.notifications_enabled != old.notifications_enabled
         || new.notifications_popup != old.notifications_popup
         || new.notifications_suppress_native != old.notifications_suppress_native
+        || new.panels.notch.enabled != old.panels.notch.enabled
     {
+        let notch_on = new.panels.notch.enabled;
         crate::notifications::apply_config(
             &app,
-            new.notifications_enabled,
-            new.notifications_popup,
-            new.notifications_suppress_native,
+            new.notifications_enabled && notch_on,
+            new.notifications_popup && notch_on,
+            new.notifications_suppress_native && notch_on,
         );
     }
 

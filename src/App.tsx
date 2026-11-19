@@ -13,8 +13,8 @@ import Activities from "./activities/Activities";
 /** All windows load the same frontend; the label determines their contents. */
 export default function App() {
   const label = getCurrentWindow().label;
-  // The notch window reads the wallpaper and calculates the palette; the others only follow.
-  useTheme(label === "notch");
+  // The launcher window (always enabled) reads the wallpaper and calculates the palette; the others only follow.
+  useTheme(label === "launcher");
 
   if (label === "notch") return <Notch />;
   if (label === "launcher") return <Launcher />;

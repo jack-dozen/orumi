@@ -247,6 +247,7 @@ pub fn run() {
         .setup(|app| {
             let cfg = config::current(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
+            edge::set_panel_prefs(cfg.panels.clone());
             capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
             taskbar::apply(app.handle(), cfg.taskbar_autohide, cfg.taskbar_hidden);
@@ -282,8 +283,9 @@ pub fn run() {
             wallpaper::warm(app.handle().clone());
             wm_ipc::start(app.handle().clone());
             activities::init(app.handle())?;
+            activities::set_win_key_enabled(cfg.panels.activities);
             // Install the swallowing Alt+Tab hook last so it is first in the low-level hook chain.
-            altswitch::set_enabled(cfg.alt_tab);
+            altswitch::set_enabled(cfg.alt_tab && cfg.panels.switcher);
             altswitch::start(app.handle().clone());
 
             // --- Global hotkeys (from config) ---

@@ -13,7 +13,7 @@ import {
   sanitizeDegreesInt,
   TonalPalette,
 } from "@material/material-color-utilities";
-import type { ColorSlot, Config } from "./useConfig";
+import type { ColorSlot, Config, PanelEdge, PanelsConfig } from "./useConfig";
 
 /** Base colors when the wallpaper cannot be read (plain, grayscale, or missing). */
 const FALLBACK_SEED = argbFromRgb(128, 128, 128);
@@ -145,6 +145,38 @@ function applyUiStyle(style: UiStyle) {
 function applyMicaEnabled(enabled: boolean) {
   currentMica = enabled;
   document.documentElement.dataset.mica = enabled ? "on" : "off";
+}
+
+let currentPanelEdge: PanelEdge = "left";
+const edgeListeners = new Set<(e: PanelEdge) => void>();
+
+function resolvePanelEdge(label: string, panels?: PanelsConfig): PanelEdge {
+  if (label === "bar" || label === "preview") return panels?.bar?.edge ?? "left";
+  if (label === "notch") return panels?.notch?.edge ?? "top";
+  if (label === "launcher") return panels?.launcher?.edge ?? "bottom";
+  if (label === "overlay") return panels?.overlay?.edge ?? "right";
+  if (label === "overview") return "left";
+  return "bottom";
+}
+
+function applyPanelEdge(label: string, panels?: PanelsConfig) {
+  const edge = resolvePanelEdge(label, panels);
+  currentPanelEdge = edge;
+  document.documentElement.dataset.edge = edge;
+  for (const fn of edgeListeners) fn(edge);
+}
+
+/** Reactive screen edge for the current window, synced from config.panels by useTheme. */
+export function usePanelEdge(): PanelEdge {
+  const [edge, setEdge] = useState<PanelEdge>(currentPanelEdge);
+  useEffect(() => {
+    setEdge(currentPanelEdge);
+    edgeListeners.add(setEdge);
+    return () => {
+      edgeListeners.delete(setEdge);
+    };
+  }, []);
+  return edge;
 }
 
 /** Reactive UI style ("material" | "fluent") kept in sync across all windows by useTheme. */
@@ -345,6 +377,7 @@ export function useTheme(isSource: boolean) {
         const nextMica = cfg.mica !== false;
         applyUiStyle(normalizeUiStyle(cfg.ui_style));
         applyMicaEnabled(nextMica);
+        applyPanelEdge(label, cfg.panels);
         if (nextMica) {
           void syncWindowMica(currentScale);
           if (isSource) {
@@ -367,6 +400,7 @@ export function useTheme(isSource: boolean) {
         const nextMica = e.payload.mica !== false;
         applyUiStyle(nextStyle);
         applyMicaEnabled(nextMica);
+        applyPanelEdge(label, e.payload.panels);
         if (nextMica) {
           void syncWindowMica(currentScale);
           if (isSource) {
