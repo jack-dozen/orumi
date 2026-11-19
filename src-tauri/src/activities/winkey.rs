@@ -30,7 +30,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use windows::{
     core::w,
     Win32::{
@@ -73,6 +73,9 @@ const MASK_DEDUPE_MS: u32 = 60;
 const DEBUG: bool = false;
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
+/// false = Win key toggles Activities; true = Win key toggles Launcher (full list).
+static TARGET_LAUNCHER: AtomicBool = AtomicBool::new(false);
+static APP: OnceLock<AppHandle> = OnceLock::new();
 /// The hook saw another key (or another event) pressed while Win was held. Cleared by the poller
 /// each time a Win press ends.
 static COMBO: AtomicBool = AtomicBool::new(false);
@@ -121,6 +124,20 @@ pub fn is_enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
 
+pub fn set_target_launcher(launcher: bool) {
+    TARGET_LAUNCHER.store(launcher, Ordering::Relaxed);
+}
+
+fn is_target_open() -> bool {
+    if TARGET_LAUNCHER.load(Ordering::Relaxed) {
+        APP.get()
+            .map(|app| app.state::<crate::edge::Panels>().is_open("launcher"))
+            .unwrap_or(false)
+    } else {
+        super::is_open()
+    }
+}
+
 static ELEVATED_DISMISSED: AtomicBool = AtomicBool::new(false);
 /// Set while `vscroll-wm`'s hook saw a Win+key combo during the current physical Win hold, and
 /// cleared only when `vscroll-wm` sees Win released. Prevents Admin<->Normal focus changes
@@ -134,7 +151,7 @@ pub fn on_elevated_event(kind: &str, combo: bool) {
     }
     match kind {
         "win_down" => {
-            let open = super::is_open();
+            let open = is_target_open();
             ELEVATED_DISMISSED.store(open, Ordering::Relaxed);
             if open {
                 send(Msg::Dismiss);
@@ -237,7 +254,7 @@ fn poller() {
                 base[vk as usize] = unsafe { async_down(vk) };
             }
             polled_combo = REMOTE_COMBO_HELD.load(Ordering::Relaxed);
-            dismissed = super::is_open();
+            dismissed = is_target_open();
             send(Msg::Mask);
             if dismissed {
                 send(Msg::Dismiss);
@@ -341,6 +358,7 @@ unsafe fn foreground_desc() -> String {
 
 /// Install the hook and start the poller and worker thread.
 pub fn start(app: AppHandle) {
+    let _ = APP.set(app.clone());
     let (tx, rx) = mpsc::channel::<Msg>();
     let _ = TX.set(tx);
     let _ = T0.get_or_init(Instant::now);
@@ -351,9 +369,19 @@ pub fn start(app: AppHandle) {
             let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match msg {
                 Msg::Log(line) => eprintln!("[winkey] {line}"),
                 Msg::Mask => unsafe { inject_mask() },
-                Msg::Dismiss => super::dismiss(&app),
+                Msg::Dismiss => {
+                    if TARGET_LAUNCHER.load(Ordering::Relaxed) {
+                        app.state::<crate::edge::Panels>().set("launcher", false);
+                    } else {
+                        super::dismiss(&app);
+                    }
+                }
                 Msg::Tap => {
-                    super::toggle(&app);
+                    if TARGET_LAUNCHER.load(Ordering::Relaxed) {
+                        app.state::<crate::edge::Panels>().toggle_launcher_full();
+                    } else {
+                        super::toggle(&app);
+                    }
                     if DEBUG {
                         // If the Start menu slips through, the foreground window after the tap belongs to it.
                         thread::spawn(|| {

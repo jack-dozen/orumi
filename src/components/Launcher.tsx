@@ -48,7 +48,6 @@ const ACTIONS: ActionDef[] = [
   { id: "reload_apps", name: "Reload apps", hint: "Reload the application list", glyph: "refresh" },
 ];
 
-const MAX_SHOWN = 8;
 /** Panel width when displaying the list (design units). */
 const LIST_WIDTH = 640;
 
@@ -90,6 +89,8 @@ export default function Launcher() {
   const [pickerWidth, setPickerWidth] = useState<number | null>(null);
   const [settingsWidth, setSettingsWidth] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const scrollOnIndex = useRef(false);
   const openedAt = useRef(0);
   const activatedAt = useRef(0);
   const focusOnOpen = useRef(true);
@@ -305,7 +306,7 @@ export default function Launcher() {
             .sort((x, y) => y.s - x.s)
             .map((x) => x.a)
         : ACTIONS;
-      return list.slice(0, MAX_SHOWN).map((a) => ({
+      return list.map((a) => ({
         key: a.id,
         name: a.name,
         hint: a.hint,
@@ -333,10 +334,16 @@ export default function Launcher() {
       ? apps
           .map((a) => ({ a, s: score(a.name, q) }))
           .filter((x) => x.s > 0)
-          .sort((x, y) => y.s - x.s || x.a.name.localeCompare(y.a.name))
+          .sort(
+            (x, y) =>
+              y.s - x.s ||
+              x.a.name.localeCompare(y.a.name, undefined, { sensitivity: "base" }),
+          )
           .map((x) => x.a)
-      : apps;
-    return list.slice(0, MAX_SHOWN).map((a) => ({
+      : [...apps].sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+        );
+    return list.map((a) => ({
       key: a.id,
       name: a.name,
       glyph: a.name.charAt(0).toUpperCase(),
@@ -380,6 +387,21 @@ export default function Launcher() {
   };
 
   const showList = !compact || mode === "actions" || query.trim().length > 0;
+  // Browsing all apps shows A-Z top-to-bottom; searching & actions keep best match closest to the search box.
+  const reversed = mode === "actions" || query.trim().length > 0;
+
+  // Reset scroll position when opening or switching query/mode.
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [visible, query, mode]);
+
+  // Keep keyboard-selected item visible inside the scrollable list.
+  useEffect(() => {
+    if (!scrollOnIndex.current) return;
+    scrollOnIndex.current = false;
+    const active = listRef.current?.querySelector<HTMLElement>(".litem--active");
+    active?.scrollIntoView({ block: "nearest" });
+  }, [index]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === ">") {
@@ -392,12 +414,17 @@ export default function Launcher() {
       setMode("apps");
       setIndex(0);
     } else if (e.key === "ArrowUp") {
-      // The list is displayed in reverse: moving up selects less relevant results.
       e.preventDefault();
-      if (showList) setIndex((i) => Math.min(i + 1, results.length - 1));
+      if (showList && results.length > 0) {
+        scrollOnIndex.current = true;
+        setIndex((i) => (reversed ? Math.min(i + 1, results.length - 1) : Math.max(i - 1, 0)));
+      }
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (showList) setIndex((i) => Math.max(i - 1, 0));
+      if (showList && results.length > 0) {
+        scrollOnIndex.current = true;
+        setIndex((i) => (reversed ? Math.max(i - 1, 0) : Math.min(i + 1, results.length - 1)));
+      }
     } else if (e.key === "Enter") {
       if (showList) activate(results[index]);
     } else if (e.key === "Escape") {
@@ -459,7 +486,10 @@ export default function Launcher() {
           ) : (
             <>
               {showList && (
-                <div className="launcher__list">
+                <div
+                  ref={listRef}
+                  className={`launcher__list ${reversed ? "launcher__list--reverse" : ""}`}
+                >
                   {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
                   {results.map((item, i) => (
                     <div
@@ -469,7 +499,7 @@ export default function Launcher() {
                       onClick={() => activate(item)}
                     >
                       {item.icon ? (
-                        <AppIcon target={item.icon} fallback={item.glyph} size={36} />
+                        <AppIcon target={item.icon} fallback={item.glyph} size={36} lazy />
                       ) : (
                         <div
                           className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}

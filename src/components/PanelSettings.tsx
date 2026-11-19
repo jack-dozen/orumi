@@ -252,7 +252,9 @@ export default function PanelSettings() {
           </div>
         </div>
         <div className="srow">
-          <div className="srow__label">Activities (Win key)</div>
+          <div className="srow__label">
+            {cfg.win_key_action === "launcher" ? "Activities" : "Activities (Win key)"}
+          </div>
           <div className="srow__ctl">
             <div className="segmented segmented--small">
               <button

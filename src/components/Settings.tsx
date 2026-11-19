@@ -421,6 +421,24 @@ export default function AppSettings() {
             onChange={setHotkey("launcher")}
           />
         </Row>
+        <Row label="Win key">
+          <div className="segmented segmented--small">
+            <button
+              type="button"
+              className={(cfg.win_key_action ?? "activities") !== "launcher" ? "segmented__on" : ""}
+              onClick={() => save({ win_key_action: "activities" })}
+            >
+              Activities
+            </button>
+            <button
+              type="button"
+              className={cfg.win_key_action === "launcher" ? "segmented__on" : ""}
+              onClick={() => save({ win_key_action: "launcher" })}
+            >
+              Launcher
+            </button>
+          </div>
+        </Row>
         {note && <div className="settings__warn">{note}</div>}
         {ok && <div className="hotkeynote hotkeynote--ok">{ok}</div>}
         <div className="hotkeynote">

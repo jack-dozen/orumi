@@ -229,6 +229,8 @@ const CHEATSHEET_VIEW_SIZE: (f64, f64) = (1120.0, 620.0);
 static LAUNCHER_CHEATSHEET: AtomicBool = AtomicBool::new(false);
 /// true = the launcher was opened by bottom-edge hover (no initial focus, auto-closes on leave).
 static LAUNCHER_HOVER: AtomicBool = AtomicBool::new(false);
+/// true = the launcher was opened with the full app list forced (e.g. via Win key), bypassing compact mode.
+static LAUNCHER_FORCE_LIST: AtomicBool = AtomicBool::new(false);
 
 pub fn launcher_is_cheatsheet() -> bool {
     LAUNCHER_CHEATSHEET.load(Ordering::Relaxed)
@@ -237,6 +239,7 @@ pub fn launcher_is_cheatsheet() -> bool {
 fn reset_launcher_override(label: &str) {
     if label == "launcher" {
         LAUNCHER_CHEATSHEET.store(false, Ordering::Relaxed);
+        LAUNCHER_FORCE_LIST.store(false, Ordering::Relaxed);
         set_size_override("launcher", None);
     }
 }
@@ -405,7 +408,31 @@ impl Panels {
             }
             if *key == "launcher" {
                 LAUNCHER_HOVER.store(false, Ordering::Relaxed);
+                LAUNCHER_FORCE_LIST.store(false, Ordering::Relaxed);
             }
+            flag_set(&TRANSIENT, key, false);
+            flag_set(&HELD, key, false);
+            flag_set(&DISMISSED, key, false);
+            let was_open = flag.fetch_xor(true, Ordering::Relaxed);
+            if was_open {
+                reset_launcher_override(key);
+            }
+            wake();
+        }
+    }
+
+    /// Win key -> Launcher: toggle launcher and always show the full app list (even over maximized windows).
+    pub fn toggle_launcher_full(&self) {
+        if let Some((key, flag)) = self.0.get_key_value("launcher") {
+            let opening = !flag.load(Ordering::Relaxed);
+            if opening && (!is_panel_enabled(key) || is_locked_by_fullscreen(key)) {
+                return;
+            }
+            if opening {
+                self.dismiss_same_edge(key);
+            }
+            LAUNCHER_HOVER.store(false, Ordering::Relaxed);
+            LAUNCHER_FORCE_LIST.store(opening, Ordering::Relaxed);
             flag_set(&TRANSIENT, key, false);
             flag_set(&HELD, key, false);
             flag_set(&DISMISSED, key, false);
@@ -427,6 +454,7 @@ impl Panels {
             }
             if *key == "launcher" {
                 LAUNCHER_HOVER.store(false, Ordering::Relaxed);
+                LAUNCHER_FORCE_LIST.store(false, Ordering::Relaxed);
             }
             if !open {
                 flag_set(&TRANSIENT, key, false);
@@ -768,7 +796,8 @@ fn set_visible(
             // Always open the launcher at its usual size (the wallpaper view expands it itself).
             if spec.label == "launcher" {
                 set_size_override("launcher", None);
-                let compact = crate::winlist::has_visible_window();
+                let compact = !LAUNCHER_FORCE_LIST.load(Ordering::Relaxed)
+                    && crate::winlist::has_visible_window();
                 let _ = window.emit("launcher-compact", compact);
             }
             if spec.label == "notch" {
@@ -1112,6 +1141,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                                             // Hover-opened launcher starts without focus and auto-closes
                                             // when the cursor leaves unless the user clicks to type.
                                             LAUNCHER_HOVER.store(true, Ordering::Relaxed);
+                                            LAUNCHER_FORCE_LIST.store(false, Ordering::Relaxed);
                                             flag_set(&TRANSIENT, "launcher", true);
                                             flag_set(&DISMISSED, "launcher", false);
                                             p.pinned.store(true, Ordering::Relaxed);

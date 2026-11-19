@@ -1672,6 +1672,13 @@ button {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Max 8 visible rows (8 * 50px + 7 * 2px gap), scrollable for the rest. */
+  max-height: 414px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--outline-variant) transparent;
+  padding-right: 2px;
 }
 
 .launcher__empty {
@@ -1681,6 +1688,7 @@ button {
 }
 
 .litem {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -2708,8 +2716,8 @@ button {
   opacity: 0.5;
 }
 
-/* The most relevant result is closest to the search box. */
-.launcher__list {
+/* The most relevant result is closest to the search box when searching or in actions mode. */
+.launcher__list--reverse {
   flex-direction: column-reverse;
 }
 

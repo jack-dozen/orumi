@@ -150,6 +150,8 @@ pub struct Config {
     pub notifications_popup: bool,
     /// Suppress Windows' native bottom-right toast banners while ORUMI runs (restored on exit/crash).
     pub notifications_suppress_native: bool,
+    /// "activities" or "launcher": what pressing the Win key by itself opens.
+    pub win_key_action: String,
     pub panels: PanelsConfig,
     pub hotkeys: Hotkeys,
 }
@@ -178,6 +180,7 @@ impl Default for Config {
             notifications_enabled: true,
             notifications_popup: true,
             notifications_suppress_native: true,
+            win_key_action: "activities".into(),
             panels: PanelsConfig::default(),
             hotkeys: Hotkeys::default(),
         }
@@ -282,6 +285,9 @@ fn sanitize(mut c: Config) -> Config {
     c.wallpaper_command = c.wallpaper_command.trim().to_string();
     if c.wallpaper_switcher != "external" {
         c.wallpaper_switcher = "builtin".into();
+    }
+    if c.win_key_action != "launcher" {
+        c.win_key_action = "activities".into();
     }
     sanitize_slot(&mut c.colors.bg0, &d.colors.bg0);
     sanitize_slot(&mut c.colors.bg1, &d.colors.bg1);
@@ -510,6 +516,13 @@ pub fn toggle_alt_tab(app: &AppHandle) {
     let _ = app.emit("config-changed", &snapshot);
 }
 
+/// Apply the configured Win-key target and enabled state.
+pub fn sync_win_key(cfg: &Config) {
+    let target_launcher = cfg.win_key_action == "launcher";
+    crate::activities::set_win_key_target_launcher(target_launcher);
+    crate::activities::set_win_key_enabled(target_launcher || cfg.panels.activities);
+}
+
 /// Current config for other Rust modules.
 pub fn current(app: &AppHandle) -> Config {
     app.state::<ConfigState>()
@@ -557,10 +570,11 @@ pub fn set_config(
     *state.0.lock().map_err(|e| e.to_string())? = new.clone();
 
     crate::altswitch::set_enabled(new.alt_tab && new.panels.switcher);
-    crate::activities::set_win_key_enabled(new.panels.activities);
+    sync_win_key(&new);
     if new.alt_tab != old.alt_tab
         || new.panels.switcher != old.panels.switcher
         || new.panels.activities != old.panels.activities
+        || new.win_key_action != old.win_key_action
     {
         crate::wm_ipc::sync_shell_relay(&app);
     }

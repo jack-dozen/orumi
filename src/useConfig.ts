@@ -53,6 +53,7 @@ export type Config = {
   notifications_enabled: boolean;
   notifications_popup: boolean;
   notifications_suppress_native: boolean;
+  win_key_action: "activities" | "launcher";
   panels: PanelsConfig;
   hotkeys: Hotkeys;
 };

@@ -283,7 +283,7 @@ pub fn run() {
             wallpaper::warm(app.handle().clone());
             wm_ipc::start(app.handle().clone());
             activities::init(app.handle())?;
-            activities::set_win_key_enabled(cfg.panels.activities);
+            config::sync_win_key(&cfg);
             // Install the swallowing Alt+Tab hook last so it is first in the low-level hook chain.
             altswitch::set_enabled(cfg.alt_tab && cfg.panels.switcher);
             altswitch::start(app.handle().clone());
