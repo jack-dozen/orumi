@@ -32,13 +32,13 @@ use windows::{
             Shell::{SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN},
             WindowsAndMessaging::{
                 AllowSetForegroundWindow, DispatchMessageW, EnumWindows, GetAncestor,
-                GetClassNameW, GetForegroundWindow, GetMessageW, GetShellWindow, GetSystemMetrics,
-                GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-                GetWindowThreadProcessId, IsHungAppWindow, IsIconic, IsWindowVisible, IsZoomed,
-                SetForegroundWindow, ShowWindow, SwitchToThisWindow, TranslateMessage, ASFW_ANY,
-                GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, MSG, SM_CXSCREEN, SM_CYSCREEN,
-                SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT, WS_CAPTION, WS_EX_APPWINDOW,
-                WS_EX_TOOLWINDOW,
+                GetClassNameW, GetDesktopWindow, GetForegroundWindow, GetMessageW, GetShellWindow,
+                GetSystemMetrics, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
+                GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow, IsIconic,
+                IsWindowVisible, IsZoomed, SetForegroundWindow, ShowWindow, SwitchToThisWindow,
+                TranslateMessage, ASFW_ANY, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, MSG,
+                SM_CXSCREEN, SM_CYSCREEN, SW_MINIMIZE, SW_RESTORE, WINEVENT_OUTOFCONTEXT,
+                WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
             },
         },
     },
@@ -156,6 +156,65 @@ unsafe fn class_name(hwnd: HWND) -> String {
     let mut buf = [0u16; 256];
     let n = GetClassNameW(hwnd, &mut buf);
     String::from_utf16_lossy(&buf[..n.max(0) as usize])
+}
+
+unsafe fn is_cloaked(hwnd: HWND) -> bool {
+    let mut cloaked: u32 = 0;
+    let _ = DwmGetWindowAttribute(
+        hwnd,
+        DWMWA_CLOAKED,
+        &mut cloaked as *mut u32 as *mut c_void,
+        size_of::<u32>() as u32,
+    );
+    cloaked != 0
+}
+
+/// Windows desktop/shell host classes that must never count as a fullscreen app or external focus target.
+fn is_shell_class(class: &str) -> bool {
+    matches!(
+        class,
+        "Progman"
+            | "WorkerW"
+            | "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "Windows.UI.Core.CoreWindow"
+            | "ApplicationManager_ImmersiveShellWindow"
+            | "ForegroundStaging"
+            | "MultitaskingViewFrame"
+            | "XamlExplorerHostIslandWindow"
+            | "Shell_InputSwitchTopLevelWindow"
+            | "NotifyIconOverflowWindow"
+            | "TopLevelWindowForOverflowXamlIsland"
+            | "DummyDWMListenerWindow"
+            | "EdgeUiInputTopWndClass"
+            | "EdgeUiInputWndClass"
+    )
+}
+
+unsafe fn process_exe_lower(pid: u32) -> String {
+    let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+        return String::new();
+    };
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    let name = if QueryFullProcessImageNameW(
+        handle,
+        PROCESS_NAME_WIN32,
+        PWSTR(buf.as_mut_ptr()),
+        &mut len,
+    )
+    .is_ok()
+    {
+        let path = String::from_utf16_lossy(&buf[..len as usize]);
+        Path::new(&path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let _ = CloseHandle(handle);
+    name
 }
 
 /// Other visible windows own it (e.g. "Save As" or "Find" dialogs).
@@ -553,15 +612,29 @@ pub fn is_foreground_fullscreen() -> bool {
                 return false;
             }
             hwnd = HWND(last as *mut c_void);
+            pid = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == 0 || pid == my_pid {
+                return false;
+            }
         }
-        if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+        if hwnd == GetShellWindow() || hwnd == GetDesktopWindow() {
+            return false;
+        }
+        if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || is_cloaked(hwnd) {
+            return false;
+        }
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        if (ex_style & WS_EX_TOOLWINDOW.0) != 0 && (ex_style & WS_EX_APPWINDOW.0) == 0 {
+            return false;
+        }
+        if (ex_style & (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0))
+            == (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0)
+        {
             return false;
         }
         let class = class_name(hwnd);
-        if matches!(
-            class.as_str(),
-            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
-        ) {
+        if is_shell_class(&class) {
             return false;
         }
 
@@ -591,7 +664,30 @@ pub fn is_foreground_fullscreen() -> bool {
         let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
         // Normal maximized windows have IsZoomed == true and WS_CAPTION; F11 / borderless
         // fullscreen clears IsZoomed or strips the window caption.
-        !zoomed || !has_caption
+        if zoomed && has_caption {
+            return false;
+        }
+
+        let proc_lower = process_exe_lower(pid);
+        let is_explorer_window = class == "CabinetWClass" || class == "ExploreWClass";
+        if matches!(
+            proc_lower.as_str(),
+            "shellexperiencehost.exe"
+                | "startmenuexperiencehost.exe"
+                | "searchhost.exe"
+                | "searchapp.exe"
+                | "lockapp.exe"
+                | "textinputhost.exe"
+                | "widgets.exe"
+                | "dwm.exe"
+                | "csrss.exe"
+                | "vscroll-wm.exe"
+        ) || (proc_lower == "explorer.exe" && !is_explorer_window)
+        {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -679,7 +775,13 @@ unsafe extern "system" fn on_event(
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
         if pid != 0 && pid != std::process::id() {
             let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            if ex_style & WS_EX_TOOLWINDOW.0 == 0 && IsWindowVisible(hwnd).as_bool() {
+            if ex_style & WS_EX_TOOLWINDOW.0 == 0
+                && IsWindowVisible(hwnd).as_bool()
+                && !is_cloaked(hwnd)
+                && hwnd != GetShellWindow()
+                && hwnd != GetDesktopWindow()
+                && !is_shell_class(&class_name(hwnd))
+            {
                 LAST_EXTERNAL_FG.store(hwnd.0 as isize, Ordering::Relaxed);
             }
         }
