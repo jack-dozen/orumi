@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 /** target -> image address (null = none). Persists while the app runs. */
@@ -28,15 +28,43 @@ export default function AppIcon({
   fallback,
   size,
   className,
+  lazy = false,
 }: {
   target?: string | null;
   fallback: string;
   size: number;
   className?: string;
+  lazy?: boolean;
 }) {
   const [url, setUrl] = useState<string | null | undefined>(
     target ? cache.get(target) : null,
   );
+  const [inView, setInView] = useState(!lazy || (target ? cache.has(target) : true));
+  const elRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!lazy || !target || cache.has(target)) {
+      setInView(true);
+      return;
+    }
+    const el = elRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setInView(true);
+      return;
+    }
+    setInView(false);
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "160px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [lazy, target]);
 
   useEffect(() => {
     if (!target) {
@@ -48,6 +76,10 @@ export default function AppIcon({
       setUrl(known);
       return;
     }
+    if (!inView) {
+      setUrl(undefined);
+      return;
+    }
     let alive = true;
     load(target).then((u) => {
       if (alive) setUrl(u);
@@ -55,7 +87,7 @@ export default function AppIcon({
     return () => {
       alive = false;
     };
-  }, [target]);
+  }, [target, inView]);
 
   const box = { width: size, height: size };
   if (url) {
@@ -71,6 +103,7 @@ export default function AppIcon({
   }
   return (
     <div
+      ref={elRef}
       className={`appimg appimg--letter ${className ?? ""}`}
       style={{ ...box, fontSize: size * 0.5 }}
     >

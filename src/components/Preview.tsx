@@ -13,7 +13,7 @@ type Item = {
   minimized: boolean;
 };
 
-type Payload = { items: Item[]; top: number; width: number; height: number };
+type Payload = { items: Item[]; left: number; top: number; width: number; height: number };
 
 /** Window preview that grows from the bar edge. Rust sends its data when an icon is hovered. */
 export default function Preview() {
@@ -49,7 +49,9 @@ export default function Preview() {
     <div className="pvroot">
       <div
         className={`pvcard ${visible ? "pvcard--visible" : ""}`}
-        style={data ? { top: data.top, width: data.width, height: data.height } : undefined}
+        style={
+          data ? { left: data.left, top: data.top, width: data.width, height: data.height } : undefined
+        }
         onMouseEnter={() => invoke("preview_keep").catch(() => {})}
         onMouseLeave={() => invoke("preview_close_soon").catch(() => {})}
       >

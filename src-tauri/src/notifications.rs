@@ -1156,15 +1156,19 @@ pub fn start(app: AppHandle) {
         if let Some(state) = app.try_state::<NotifState>() {
             if let Ok(mut g) = state.0.lock() {
                 g.read_ids = saved.read_ids.into_iter().collect();
+                let notch_on = cfg.panels.notch.enabled;
                 g.orumi_dnd = saved.orumi_dnd;
-                g.enabled = cfg.notifications_enabled;
-                g.popup_enabled = cfg.notifications_popup;
-                g.suppress_native = cfg.notifications_suppress_native;
+                g.enabled = cfg.notifications_enabled && notch_on;
+                g.popup_enabled = cfg.notifications_popup && notch_on;
+                g.suppress_native = cfg.notifications_suppress_native && notch_on;
             }
         }
     }
 
-    apply_suppression(&app, cfg.notifications_enabled && cfg.notifications_suppress_native);
+    apply_suppression(
+        &app,
+        cfg.panels.notch.enabled && cfg.notifications_enabled && cfg.notifications_suppress_native,
+    );
 
     thread::spawn(move || {
         sync_once(&app, false);

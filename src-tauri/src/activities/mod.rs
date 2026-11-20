@@ -60,6 +60,10 @@ pub fn set_win_key_enabled(on: bool) {
     crate::wm_ipc::sync_shell_relay_current();
 }
 
+pub fn set_win_key_target_launcher(launcher: bool) {
+    winkey::set_target_launcher(launcher);
+}
+
 pub fn is_win_key_enabled() -> bool {
     winkey::is_enabled()
 }

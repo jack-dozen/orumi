@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import AppSettings, { ColorSettings } from "./Settings";
+import PanelSettings from "./PanelSettings";
 import WmSettings from "./WmSettings";
 
-type Section = "app" | "color" | "wm";
+type Section = "app" | "panels" | "color" | "wm";
 
 const SECTIONS: [Section, string][] = [
   ["app", "General"],
+  ["panels", "Panels"],
   ["color", "Colors"],
   ["wm", "Window Manager"],
 ];
@@ -21,7 +23,9 @@ export default function LauncherSettings({
   const [section, setSection] = useState<Section>("app");
 
   useEffect(() => {
-    onWidth?.(section === "color" ? 720 : section === "wm" ? 860 : 780);
+    onWidth?.(
+      section === "color" ? 720 : section === "wm" ? 860 : section === "panels" ? 840 : 780,
+    );
   }, [section, onWidth]);
   useEffect(() => () => onWidth?.(null), [onWidth]);
 
@@ -54,6 +58,7 @@ export default function LauncherSettings({
       </div>
       <div className="lsettings__body">
         {section === "app" && <AppSettings />}
+        {section === "panels" && <PanelSettings />}
         {section === "color" && <ColorSettings />}
         {section === "wm" && <WmSettings />}
       </div>

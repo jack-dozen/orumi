@@ -55,6 +55,7 @@ struct PreviewItem {
 struct PreviewPayload {
     items: Vec<PreviewItem>,
     /// Card geometry inside the preview window, in CSS px.
+    left: f64,
     top: f64,
     width: f64,
     height: f64,
@@ -62,6 +63,7 @@ struct PreviewPayload {
 
 /// Where the card sits inside the preview window (CSS px).
 struct CardGeom {
+    left: f64,
     top: f64,
     width: f64,
     height: f64,
@@ -107,27 +109,64 @@ fn card_size(n: usize) -> (f64, f64) {
     (2.0 * PV_PAD + n * PV_W + (n - 1.0) * PV_GAP, 2.0 * PV_PAD + PV_H + PV_TITLE)
 }
 
-/// Keeps the preview window fixed (right of the bar, as tall as the bar, wide enough for
-/// MAX_ITEMS cards) and returns where the card should sit inside it. The card is moved with CSS
-/// so it can animate between icons; edge.rs only needs the card rectangle as its hit area.
-fn position(app: &AppHandle, n: usize, anchor_y: f64) -> Option<CardGeom> {
+/// Keeps the preview window anchored flush to the active bar edge (left/right/top/bottom) and
+/// returns where the card should sit inside it. The card is moved with CSS so it can animate
+/// between icons; edge.rs only needs the card rectangle as its hit area.
+fn position(app: &AppHandle, n: usize, anchor_x: f64, anchor_y: f64) -> Option<CardGeom> {
     let bar = app.get_webview_window("bar")?;
     let pos = bar.outer_position().ok()?;
     let size = bar.outer_size().ok()?;
     let scale = bar.scale_factor().ok()?;
     let u = scale * crate::edge::ui_scale();
+    let bar_edge = crate::edge::effective_edge("bar", crate::edge::Edge::Left);
 
     let (card_w, card_h) = card_size(n);
-    let (max_w, _) = card_size(MAX_ITEMS);
-    let win_x = pos.x as f64 + size.width as f64;
-    let win_y = pos.y as f64;
-    let win_w = max_w * u;
-    let win_h = size.height as f64;
+    let (max_w, max_h) = card_size(MAX_ITEMS);
 
-    let win_h_css = win_h / u;
-    let top = (anchor_y - card_h / 2.0).clamp(58.0, (win_h_css - card_h - 58.0).max(58.0));
+    let (win_x, win_y, win_w, win_h, left, top) = match bar_edge {
+        crate::edge::Edge::Right => {
+            let win_w = max_w * u;
+            let win_h = size.height as f64;
+            let win_x = pos.x as f64 - win_w;
+            let win_y = pos.y as f64;
+            let win_h_css = win_h / u;
+            let top = (anchor_y - card_h / 2.0).clamp(58.0, (win_h_css - card_h - 58.0).max(58.0));
+            let left = (max_w - card_w).max(0.0);
+            (win_x, win_y, win_w, win_h, left, top)
+        }
+        crate::edge::Edge::Top => {
+            let win_w = size.width as f64;
+            let win_h = max_h * u;
+            let win_x = pos.x as f64;
+            let win_y = pos.y as f64 + size.height as f64;
+            let win_w_css = win_w / u;
+            let left = (anchor_x - card_w / 2.0).clamp(58.0, (win_w_css - card_w - 58.0).max(58.0));
+            (win_x, win_y, win_w, win_h, left, 0.0)
+        }
+        crate::edge::Edge::Bottom => {
+            let win_w = size.width as f64;
+            let win_h = max_h * u;
+            let win_x = pos.x as f64;
+            let win_y = pos.y as f64 - win_h;
+            let win_w_css = win_w / u;
+            let left = (anchor_x - card_w / 2.0).clamp(58.0, (win_w_css - card_w - 58.0).max(58.0));
+            (win_x, win_y, win_w, win_h, left, 0.0)
+        }
+        _ => {
+            let win_w = max_w * u;
+            let win_h = size.height as f64;
+            let win_x = pos.x as f64 + size.width as f64;
+            let win_y = pos.y as f64;
+            let win_h_css = win_h / u;
+            let top = (anchor_y - card_h / 2.0).clamp(58.0, (win_h_css - card_h - 58.0).max(58.0));
+            (win_x, win_y, win_w, win_h, 0.0, top)
+        }
+    };
 
-    crate::edge::set_hit_rect("preview", Some((win_x, win_y + top * u, card_w * u, card_h * u)));
+    crate::edge::set_hit_rect(
+        "preview",
+        Some((win_x + left * u, win_y + top * u, card_w * u, card_h * u)),
+    );
 
     // Only move or resize the window when it actually changed.
     let rect = [
@@ -150,20 +189,21 @@ fn position(app: &AppHandle, n: usize, anchor_y: f64) -> Option<CardGeom> {
         let _ = app.run_on_main_thread(move || crate::place_panel(&a, "preview"));
     }
 
-    Some(CardGeom { top, width: card_w, height: card_h })
+    Some(CardGeom { left, top, width: card_w, height: card_h })
 }
 
 /// Grants asset access to the thumbnails, positions the card, and sends the payload to the UI.
-fn emit_items(app: &AppHandle, items: Vec<PreviewItem>, anchor_y: f64) -> Option<()> {
+fn emit_items(app: &AppHandle, items: Vec<PreviewItem>, anchor_x: f64, anchor_y: f64) -> Option<()> {
     let scope = app.asset_protocol_scope();
     for it in &items {
         if let Some(t) = &it.thumb {
             let _ = scope.allow_file(t);
         }
     }
-    let geom = position(app, items.len(), anchor_y)?;
+    let geom = position(app, items.len(), anchor_x, anchor_y)?;
     let payload = PreviewPayload {
         items,
+        left: geom.left,
         top: geom.top,
         width: geom.width,
         height: geom.height,
@@ -199,8 +239,10 @@ fn close_now(app: &AppHandle) {
 pub async fn preview_open(
     items: Vec<PreviewReq>,
     anchor_y: f64,
+    anchor_x: Option<f64>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let anchor_x = anchor_x.unwrap_or(0.0);
     // Cancels a pending preview_close_soon.
     GEN.fetch_add(1, Ordering::SeqCst);
     let open_seq = OPEN_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
@@ -224,7 +266,7 @@ pub async fn preview_open(
 
     // 1. Show now, using only what is already on disk.
     let first = cached_items(&dir, &reqs);
-    if emit_items(&app, first.clone(), anchor_y).is_none() {
+    if emit_items(&app, first.clone(), anchor_x, anchor_y).is_none() {
         return Ok(());
     }
     app.state::<Panels>().set_transient("preview");
@@ -244,7 +286,7 @@ pub async fn preview_open(
         .zip(&first)
         .any(|(a, b)| a.thumb != b.thumb || a.minimized != b.minimized);
     if changed {
-        let _ = emit_items(&app, built, anchor_y);
+        let _ = emit_items(&app, built, anchor_x, anchor_y);
     }
     Ok(())
 }

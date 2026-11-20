@@ -4,6 +4,24 @@ import { listen } from "@tauri-apps/api/event";
 
 export type Hotkeys = { bar: string; notch: string; launcher: string };
 
+export type PanelEdge = "left" | "right" | "top" | "bottom";
+
+export type PanelPref = {
+  enabled: boolean;
+  edge: PanelEdge;
+  hotedge: boolean;
+};
+
+export type PanelsConfig = {
+  bar: PanelPref;
+  notch: PanelPref;
+  launcher: PanelPref;
+  overlay: PanelPref;
+  overview: boolean;
+  switcher: boolean;
+  activities: boolean;
+};
+
 /** mode "auto" = from the wallpaper; "custom" = uses `value`. */
 export type ColorSlot = { mode: "auto" | "custom"; value: string };
 
@@ -35,6 +53,8 @@ export type Config = {
   notifications_enabled: boolean;
   notifications_popup: boolean;
   notifications_suppress_native: boolean;
+  win_key_action: "activities" | "launcher";
+  panels: PanelsConfig;
   hotkeys: Hotkeys;
 };
 

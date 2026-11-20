@@ -60,6 +60,9 @@ fn current_mode() -> String {
 }
 
 fn show(app: &AppHandle, mode: &str, manual: bool) {
+    if !crate::edge::is_panel_enabled("overlay") {
+        return;
+    }
     if let Ok(mut m) = CURRENT_MODE.lock() {
         *m = mode.to_string();
     }
@@ -71,14 +74,20 @@ fn show(app: &AppHandle, mode: &str, manual: bool) {
 /// Automatic popup (keyboard key). Does not interfere with a manually opened overlay,
 /// but may replace another automatic popup (volume -> brightness).
 pub fn show_popup(app: &AppHandle, mode: &str) {
+    if !crate::edge::is_panel_enabled("overlay") {
+        return;
+    }
     let open = app.state::<Panels>().is_open("overlay");
     if !open || AUTO_POPUP.load(Ordering::Relaxed) {
         show(app, mode, false);
     }
 }
 
-/// Cursor dwelled at the right screen edge: show volume + brightness; hides when the cursor leaves.
+/// Cursor dwelled at the screen edge: show volume + brightness; hides when the cursor leaves.
 pub fn hover_open(app: &AppHandle) {
+    if !crate::edge::is_panel_enabled("overlay") {
+        return;
+    }
     if let Ok(mut m) = CURRENT_MODE.lock() {
         *m = "mixer".to_string();
     }

@@ -13,7 +13,7 @@ import {
   sanitizeDegreesInt,
   TonalPalette,
 } from "@material/material-color-utilities";
-import type { ColorSlot, Config } from "./useConfig";
+import type { ColorSlot, Config, PanelEdge, PanelsConfig } from "./useConfig";
 
 /** Base colors when the wallpaper cannot be read (plain, grayscale, or missing). */
 const FALLBACK_SEED = argbFromRgb(128, 128, 128);
@@ -147,6 +147,38 @@ function applyMicaEnabled(enabled: boolean) {
   document.documentElement.dataset.mica = enabled ? "on" : "off";
 }
 
+let currentPanelEdge: PanelEdge = "left";
+const edgeListeners = new Set<(e: PanelEdge) => void>();
+
+function resolvePanelEdge(label: string, panels?: PanelsConfig): PanelEdge {
+  if (label === "bar" || label === "preview") return panels?.bar?.edge ?? "left";
+  if (label === "notch") return panels?.notch?.edge ?? "top";
+  if (label === "launcher") return panels?.launcher?.edge ?? "bottom";
+  if (label === "overlay") return panels?.overlay?.edge ?? "right";
+  if (label === "overview") return "left";
+  return "bottom";
+}
+
+function applyPanelEdge(label: string, panels?: PanelsConfig) {
+  const edge = resolvePanelEdge(label, panels);
+  currentPanelEdge = edge;
+  document.documentElement.dataset.edge = edge;
+  for (const fn of edgeListeners) fn(edge);
+}
+
+/** Reactive screen edge for the current window, synced from config.panels by useTheme. */
+export function usePanelEdge(): PanelEdge {
+  const [edge, setEdge] = useState<PanelEdge>(currentPanelEdge);
+  useEffect(() => {
+    setEdge(currentPanelEdge);
+    edgeListeners.add(setEdge);
+    return () => {
+      edgeListeners.delete(setEdge);
+    };
+  }, []);
+  return edge;
+}
+
 /** Reactive UI style ("material" | "fluent") kept in sync across all windows by useTheme. */
 export function useUiStyle(): UiStyle {
   const [style, setStyle] = useState<UiStyle>(currentUiStyle);
@@ -278,23 +310,23 @@ function extractSeedFromBytes(imageBytes: Uint8ClampedArray): number {
   return best ? best.argb : candidates[0].argb;
 }
 
-async function seedFromWallpaper(): Promise<number> {
+async function seedFromWallpaper(): Promise<number | null> {
   try {
     const px = await invoke<{ width: number; height: number; data: string } | null>(
       "wallpaper_pixels",
     );
-    if (!px) return FALLBACK_SEED;
+    if (!px) return null;
     const bin = atob(px.data);
     const bytes = new Uint8ClampedArray(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return extractSeedFromBytes(bytes);
   } catch {
-    return FALLBACK_SEED;
+    return null;
   }
 }
 
 /**
- * All windows follow the theme calculated by a single source window (the notch).
+ * All windows follow the theme calculated by a single source window (the launcher).
  * The wallpaper is checked when a panel opens (inexpensive: only its stamp is compared),
  * not periodically. Wallpaper colors are cached by stamp, so moving a slider or
  * changing a custom color does not reread the image.
@@ -307,10 +339,49 @@ export function useTheme(isSource: boolean) {
     let cfgSig = "";
     let lastCheck = 0;
     let currentScale = 0.8;
+    let hasTheme = false;
+    let hasMica = false;
+    let retryTimer: number | null = null;
     let seedCache: { stamp: string | null; seed: number } | null = null;
-    const unlistens: Promise<() => void>[] = [];
+    const unlistenFns: (() => void)[] = [];
     const win = getCurrentWindow();
     const label = win.label;
+
+    const addListener = async (p: Promise<() => void>): Promise<void> => {
+      try {
+        const fn = await p;
+        if (cancelled) {
+          fn();
+        } else {
+          unlistenFns.push(fn);
+        }
+      } catch {
+        /* ignore listener registration failure */
+      }
+    };
+
+    const syncCachedTheme = () => {
+      if (!hasTheme) {
+        invoke<string | null>("get_theme")
+          .then((json) => {
+            if (json && !cancelled) {
+              hasTheme = true;
+              applyTokens(JSON.parse(json));
+            }
+          })
+          .catch(() => {});
+      }
+      if (currentMica && !hasMica) {
+        invoke<string | null>("get_mica")
+          .then((path) => {
+            if (path && !cancelled) {
+              hasMica = true;
+              applyMicaImage(path);
+            }
+          })
+          .catch(() => {});
+      }
+    };
 
     const ro = new ResizeObserver(() => syncMicaOffsets());
     const mo = new MutationObserver(() => {
@@ -325,75 +396,6 @@ export function useTheme(isSource: boolean) {
       for (const el of document.querySelectorAll<HTMLElement>(MICA_SUBPANELS)) {
         ro.observe(el);
       }
-    }
-
-    // All windows: use the existing theme, UI style, and Mica backdrop, then follow updates.
-    invoke<string | null>("get_theme")
-      .then((json) => {
-        if (json && !cancelled) applyTokens(JSON.parse(json));
-      })
-      .catch(() => {});
-    invoke<string | null>("get_mica")
-      .then((path) => {
-        if (!cancelled) applyMicaImage(path);
-      })
-      .catch(() => {});
-    invoke<Config>("get_config")
-      .then((cfg) => {
-        if (cancelled) return;
-        currentScale = cfg.ui_scale || 0.8;
-        const nextMica = cfg.mica !== false;
-        applyUiStyle(normalizeUiStyle(cfg.ui_style));
-        applyMicaEnabled(nextMica);
-        if (nextMica) {
-          void syncWindowMica(currentScale);
-          if (isSource) {
-            invoke<string | null>("mica_backdrop")
-              .then((p) => {
-                if (!cancelled) applyMicaImage(p);
-              })
-              .catch(() => {});
-          }
-        }
-      })
-      .catch(() => {});
-
-    unlistens.push(listen<string>("theme-changed", (e) => applyTokens(JSON.parse(e.payload))));
-    unlistens.push(listen<string | null>("mica-changed", (e) => applyMicaImage(e.payload)));
-    unlistens.push(
-      listen<Config>("config-changed", (e) => {
-        currentScale = e.payload.ui_scale || 0.8;
-        const nextStyle = normalizeUiStyle(e.payload.ui_style);
-        const nextMica = e.payload.mica !== false;
-        applyUiStyle(nextStyle);
-        applyMicaEnabled(nextMica);
-        if (nextMica) {
-          void syncWindowMica(currentScale);
-          if (isSource) {
-            invoke<string | null>("mica_backdrop")
-              .then((p) => {
-                if (!cancelled) applyMicaImage(p);
-              })
-              .catch(() => {});
-          }
-        } else {
-          lastMicaStamp = undefined;
-        }
-      }),
-    );
-    unlistens.push(win.onMoved(() => void syncWindowMica(currentScale)));
-    unlistens.push(win.onResized(() => void syncWindowMica(currentScale)));
-    unlistens.push(
-      listen<boolean>(`edge-visible:${label}`, (e) => {
-        if (e.payload && currentMica) void syncWindowMica(currentScale);
-      }),
-    );
-    if (label === "activities") {
-      unlistens.push(
-        listen("activities-open", () => {
-          if (currentMica) void syncWindowMica(currentScale);
-        }),
-      );
     }
 
     /** force: recalculate even if nothing changed. rewall: reread the wallpaper image. */
@@ -414,27 +416,45 @@ export function useTheme(isSource: boolean) {
           lastMicaStamp = stamp;
           invoke<string | null>("mica_backdrop")
             .then((p) => {
-              if (!cancelled) applyMicaImage(p);
+              if (!cancelled) {
+                hasMica = Boolean(p);
+                applyMicaImage(p);
+              }
             })
             .catch(() => {});
         }
 
         const sig = `${cfgSig}|${stamp}`;
         if (!force && sig === lastSig) return;
-        lastSig = sig;
 
         let seed = FALLBACK_SEED;
-        if (needsWallpaper) {
+        let readFailed = false;
+        if (needsWallpaper && stamp !== null) {
           if (!rewall && seedCache && seedCache.stamp === stamp) {
             seed = seedCache.seed;
           } else {
-            seed = await seedFromWallpaper();
-            seedCache = { stamp, seed };
+            const extracted = await seedFromWallpaper();
+            if (extracted === null) {
+              readFailed = true;
+            } else {
+              seed = extracted;
+              seedCache = { stamp, seed };
+            }
           }
         }
 
         const tokens = buildTokens(cfg, seed);
         if (cancelled) return;
+        if (!readFailed) {
+          lastSig = sig;
+        } else if (retryTimer === null) {
+          // Wallpaper file may still be settling right after boot; retry once shortly.
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            if (!cancelled) void check(true, true);
+          }, 2000);
+        }
+        hasTheme = true;
         applyTokens(tokens);
         await invoke("set_theme", { json: JSON.stringify(tokens) });
       } catch {
@@ -442,28 +462,148 @@ export function useTheme(isSource: boolean) {
       }
     };
 
-    if (isSource) {
-      check(true);
-      for (const label of ["bar", "notch", "launcher", "overlay"]) {
-        unlistens.push(
-          listen<boolean>(`edge-visible:${label}`, (e) => {
-            if (e.payload) check(false);
-          }),
-        );
-      }
-      unlistens.push(listen("theme-refresh", () => check(true, true)));
-      unlistens.push(
-        listen<Config>("config-changed", (e) => {
-          if (JSON.stringify([e.payload.colors, e.payload.bg_tint]) !== cfgSig) check(true);
+    // Register all event listeners BEFORE fetching initial cached state so no startup
+    // broadcast from the source window can be missed between get_theme() and listen().
+    const listenerPromises: Promise<void>[] = [
+      addListener(
+        listen<string>("theme-changed", (e) => {
+          if (cancelled) return;
+          hasTheme = true;
+          applyTokens(JSON.parse(e.payload));
         }),
+      ),
+      addListener(
+        listen<string | null>("mica-changed", (e) => {
+          if (cancelled) return;
+          hasMica = Boolean(e.payload);
+          applyMicaImage(e.payload);
+        }),
+      ),
+      addListener(
+        listen<Config>("config-changed", (e) => {
+          if (cancelled) return;
+          currentScale = e.payload.ui_scale || 0.8;
+          const nextStyle = normalizeUiStyle(e.payload.ui_style);
+          const nextMica = e.payload.mica !== false;
+          applyUiStyle(nextStyle);
+          applyMicaEnabled(nextMica);
+          applyPanelEdge(label, e.payload.panels);
+          if (nextMica) {
+            void syncWindowMica(currentScale);
+            if (isSource) {
+              invoke<string | null>("mica_backdrop")
+                .then((p) => {
+                  if (!cancelled) {
+                    hasMica = Boolean(p);
+                    applyMicaImage(p);
+                  }
+                })
+                .catch(() => {});
+            } else if (!hasMica) {
+              syncCachedTheme();
+            }
+          } else {
+            hasMica = false;
+            lastMicaStamp = undefined;
+          }
+          if (isSource && JSON.stringify([e.payload.colors, e.payload.bg_tint]) !== cfgSig) {
+            void check(true);
+          }
+        }),
+      ),
+      addListener(win.onMoved(() => void syncWindowMica(currentScale))),
+      addListener(win.onResized(() => void syncWindowMica(currentScale))),
+      addListener(
+        listen<boolean>(`edge-visible:${label}`, (e) => {
+          if (!e.payload || cancelled) return;
+          if (currentMica) void syncWindowMica(currentScale);
+          syncCachedTheme();
+        }),
+      ),
+    ];
+
+    if (label === "activities") {
+      listenerPromises.push(
+        addListener(
+          listen("activities-open", () => {
+            if (cancelled) return;
+            if (currentMica) void syncWindowMica(currentScale);
+            syncCachedTheme();
+          }),
+        ),
       );
     }
 
+    if (isSource) {
+      for (const panel of ["bar", "notch", "launcher", "overlay"]) {
+        listenerPromises.push(
+          addListener(
+            listen<boolean>(`edge-visible:${panel}`, (e) => {
+              if (e.payload && !cancelled) void check(false);
+            }),
+          ),
+        );
+      }
+      listenerPromises.push(
+        addListener(
+          listen("theme-refresh", () => {
+            if (!cancelled) void check(true, true);
+          }),
+        ),
+      );
+    }
+
+    void Promise.all(listenerPromises).then(() => {
+      if (cancelled) return;
+
+      // Listeners are now active: pull any theme/mica already broadcast before we mounted.
+      invoke<string | null>("get_theme")
+        .then((json) => {
+          if (json && !cancelled) {
+            hasTheme = true;
+            applyTokens(JSON.parse(json));
+          }
+        })
+        .catch(() => {});
+      invoke<string | null>("get_mica")
+        .then((path) => {
+          if (path && !cancelled) {
+            hasMica = true;
+            applyMicaImage(path);
+          }
+        })
+        .catch(() => {});
+      invoke<Config>("get_config")
+        .then((cfg) => {
+          if (cancelled) return;
+          currentScale = cfg.ui_scale || 0.8;
+          const nextMica = cfg.mica !== false;
+          applyUiStyle(normalizeUiStyle(cfg.ui_style));
+          applyMicaEnabled(nextMica);
+          applyPanelEdge(label, cfg.panels);
+          if (nextMica) {
+            void syncWindowMica(currentScale);
+            if (!isSource && !hasMica) {
+              syncCachedTheme();
+            }
+          }
+        })
+        .catch(() => {});
+
+      if (isSource) {
+        void check(true);
+      }
+    });
+
     return () => {
       cancelled = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       ro.disconnect();
       mo.disconnect();
-      unlistens.forEach((u) => u.then((fn) => fn()));
+      for (const fn of unlistenFns) fn();
     };
   }, [isSource]);
 }
