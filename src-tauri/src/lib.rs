@@ -106,6 +106,10 @@ pub fn apply_layout(app: &AppHandle) {
             let _ = window.set_zoom(edge::ui_scale());
         }
     }
+    edge::sync_border_window(
+        app,
+        edge::is_screen_border() && !winlist::is_foreground_fullscreen(),
+    );
 }
 
 /// Reposition one panel (e.g. after its size changes).
@@ -247,6 +251,7 @@ pub fn run() {
         .setup(|app| {
             let cfg = config::current(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
+            edge::set_screen_border(cfg.screen_border, cfg.screen_border_size);
             edge::set_panel_prefs(cfg.panels.clone());
             capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
@@ -272,6 +277,11 @@ pub fn run() {
                 watched.push((window, spec, pinned));
             }
             edge::start_all(app.handle().clone(), watched);
+            if let Some(border) = app.get_webview_window("border") {
+                edge::set_activatable(&border, false);
+                let _ = border.set_ignore_cursor_events(true);
+                let _ = border.set_zoom(edge::ui_scale());
+            }
 
             overlay::start_volume_watcher(app.handle().clone());
             brightness::start_watcher(app.handle().clone());

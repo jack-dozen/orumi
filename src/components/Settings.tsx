@@ -119,6 +119,7 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
 export default function AppSettings() {
   const cfg = useConfig();
   const [scale, setScale] = useState(80);
+  const [borderSize, setBorderSize] = useState(10);
   const [city, setCity] = useState("");
   const [searchPlaceholder, setSearchPlaceholder] = useState("");
   const [note, setNote] = useState("");
@@ -131,6 +132,7 @@ export default function AppSettings() {
   useEffect(() => {
     if (!cfg) return;
     setScale(Math.round(cfg.ui_scale * 100));
+    setBorderSize(cfg.screen_border_size ?? 10);
     setCity(cfg.weather_city);
     setSearchPlaceholder(cfg.search_placeholder ?? "");
   }, [cfg]);
@@ -346,6 +348,36 @@ export default function AppSettings() {
             </button>
           </div>
         </Row>
+        <Row label="Screen border">
+          <div className="segmented segmented--small">
+            <button
+              className={cfg.screen_border ? "segmented__on" : ""}
+              onClick={() => save({ screen_border: true })}
+            >
+              On
+            </button>
+            <button
+              className={!cfg.screen_border ? "segmented__on" : ""}
+              onClick={() => save({ screen_border: false })}
+            >
+              Off
+            </button>
+          </div>
+        </Row>
+        {cfg.screen_border && (
+          <Row label={`Border thickness ${borderSize}px`}>
+            <input
+              type="range"
+              min={6}
+              max={16}
+              step={1}
+              value={borderSize}
+              onChange={(e) => setBorderSize(Number(e.target.value))}
+              onPointerUp={() => save({ screen_border_size: borderSize })}
+              onKeyUp={() => save({ screen_border_size: borderSize })}
+            />
+          </Row>
+        )}
         <Row label="Windows theme">
           <div className="segmented segmented--small">
             <button

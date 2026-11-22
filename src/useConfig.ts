@@ -46,6 +46,8 @@ export type Config = {
   bar_app_style: "icons" | "dots";
   ui_style: "material" | "fluent";
   mica: boolean;
+  screen_border: boolean;
+  screen_border_size: number;
   search_placeholder: string;
   windows_theme_mode: "manual" | "auto";
   autostart: boolean;

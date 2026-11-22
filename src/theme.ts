@@ -147,6 +147,13 @@ function applyMicaEnabled(enabled: boolean) {
   document.documentElement.dataset.mica = enabled ? "on" : "off";
 }
 
+function applyScreenBorder(enabled: boolean, size: number) {
+  const clamped = Math.max(6, Math.min(16, Math.round(size || 10)));
+  document.documentElement.dataset.border = enabled ? "on" : "off";
+  document.documentElement.style.setProperty("--border-size", `${clamped}px`);
+  document.documentElement.style.setProperty("--border-radius", "24px");
+}
+
 let currentPanelEdge: PanelEdge = "left";
 const edgeListeners = new Set<(e: PanelEdge) => void>();
 
@@ -487,6 +494,7 @@ export function useTheme(isSource: boolean) {
           const nextMica = e.payload.mica !== false;
           applyUiStyle(nextStyle);
           applyMicaEnabled(nextMica);
+          applyScreenBorder(Boolean(e.payload.screen_border), e.payload.screen_border_size ?? 10);
           applyPanelEdge(label, e.payload.panels);
           if (nextMica) {
             void syncWindowMica(currentScale);
@@ -527,6 +535,18 @@ export function useTheme(isSource: boolean) {
         addListener(
           listen("activities-open", () => {
             if (cancelled) return;
+            if (currentMica) void syncWindowMica(currentScale);
+            syncCachedTheme();
+          }),
+        ),
+      );
+    }
+
+    if (label === "border") {
+      listenerPromises.push(
+        addListener(
+          listen<boolean>("border-visible", (e) => {
+            if (!e.payload || cancelled) return;
             if (currentMica) void syncWindowMica(currentScale);
             syncCachedTheme();
           }),
@@ -580,6 +600,7 @@ export function useTheme(isSource: boolean) {
           const nextMica = cfg.mica !== false;
           applyUiStyle(normalizeUiStyle(cfg.ui_style));
           applyMicaEnabled(nextMica);
+          applyScreenBorder(Boolean(cfg.screen_border), cfg.screen_border_size ?? 10);
           applyPanelEdge(label, cfg.panels);
           if (nextMica) {
             void syncWindowMica(currentScale);

@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     ffi::c_void,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
         Arc, Mutex, OnceLock,
     },
     thread,
@@ -75,6 +75,149 @@ const NEAR_EDGE_DIP: f64 = 96.0;
 const METRICS_REFRESH: Duration = Duration::from_secs(5);
 /// Bar distance from the top and bottom screen edges (design units, before UI scaling).
 const BAR_INSET_DIP: f64 = 16.0;
+/// Inner corner radius of the Caelestia screen border and full-span bar fillets (design units).
+pub const BORDER_RADIUS_DIP: f64 = 24.0;
+/// Off-screen bleed on each side of the `"border"` window (design units) so any Windows 11 DWM
+/// outer-corner rounding sits completely outside the visible monitor area.
+const BORDER_BLEED_DIP: f64 = 16.0;
+
+// ---------- Screen border (can be changed at runtime) ----------
+
+static SCREEN_BORDER: AtomicBool = AtomicBool::new(false);
+static SCREEN_BORDER_SIZE: AtomicU8 = AtomicU8::new(10);
+
+pub fn is_screen_border() -> bool {
+    SCREEN_BORDER.load(Ordering::Relaxed)
+}
+
+pub fn screen_border_dip() -> f64 {
+    if is_screen_border() {
+        SCREEN_BORDER_SIZE.load(Ordering::Relaxed).clamp(6, 16) as f64
+    } else {
+        0.0
+    }
+}
+
+pub fn set_screen_border(enabled: bool, size: u8) {
+    SCREEN_BORDER.store(enabled, Ordering::Relaxed);
+    SCREEN_BORDER_SIZE.store(size.clamp(6, 16), Ordering::Relaxed);
+    wake();
+}
+
+/// Show/position or hide the click-through fullscreen `"border"` window on the main thread,
+/// keeping every ORUMI panel strictly above it in the topmost Z-order band.
+pub fn sync_border_window(app: &AppHandle, show: bool) {
+    use std::mem::size_of;
+    use windows::Win32::{
+        Foundation::HWND,
+        Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWCP_DONOTROUND, DWMWA_BORDER_COLOR,
+            DWMWA_WINDOW_CORNER_PREFERENCE, DWM_WINDOW_CORNER_PREFERENCE,
+        },
+        UI::WindowsAndMessaging::{
+            GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_STYLE, HWND_TOPMOST, SWP_FRAMECHANGED,
+            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, WS_BORDER, WS_CAPTION,
+            WS_DLGFRAME, WS_POPUP, WS_THICKFRAME,
+        },
+    };
+
+    let app_handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(border) = app_handle.get_webview_window("border") else {
+            return;
+        };
+        set_activatable(&border, false);
+        let _ = border.set_ignore_cursor_events(true);
+        if show {
+            let _ = border.set_zoom(ui_scale());
+            let border_hwnd = border.hwnd().ok().map(|raw| HWND(raw.0 as isize as *mut c_void));
+            let metrics = monitor_metrics(&border);
+            if let (Some((mx, my, mw, mh, scale)), Some(hwnd)) = (metrics, border_hwnd) {
+                let bleed = (BORDER_BLEED_DIP * scale * ui_scale()).round();
+                let x = (mx - bleed).round() as i32;
+                let y = (my - bleed).round() as i32;
+                let w = (mw + 2.0 * bleed).round() as i32;
+                let h = (mh + 2.0 * bleed).round() as i32;
+                unsafe {
+                    let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+                    let clean = (style
+                        & !(WS_CAPTION.0 | WS_THICKFRAME.0 | WS_BORDER.0 | WS_DLGFRAME.0))
+                        | WS_POPUP.0;
+                    if clean != style {
+                        SetWindowLongW(hwnd, GWL_STYLE, clean as i32);
+                    }
+                    let pref = DWMWCP_DONOTROUND;
+                    let _ = DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &pref as *const DWM_WINDOW_CORNER_PREFERENCE as *const c_void,
+                        size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+                    );
+                    let no_border: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE
+                    let _ = DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_BORDER_COLOR,
+                        &no_border as *const u32 as *const c_void,
+                        size_of::<u32>() as u32,
+                    );
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOPMOST),
+                        x,
+                        y,
+                        w,
+                        h,
+                        SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                    );
+                }
+            }
+            let _ = border.show();
+            if let Some(hwnd) = border_hwnd {
+                unsafe {
+                    let pref = DWMWCP_DONOTROUND;
+                    let _ = DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &pref as *const DWM_WINDOW_CORNER_PREFERENCE as *const c_void,
+                        size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+                    );
+                }
+            }
+            // Keep all ORUMI panels above the border in Z-order so sliding panels & bar fillets cover border corners.
+            for label in [
+                "bar",
+                "overview",
+                "notch",
+                "launcher",
+                "overlay",
+                "switcher",
+                "preview",
+                "activities",
+            ] {
+                if let Some(w) = app_handle.get_webview_window(label) {
+                    if let Ok(raw) = w.hwnd() {
+                        let hwnd = HWND(raw.0 as isize as *mut c_void);
+                        unsafe {
+                            let _ = SetWindowPos(
+                                hwnd,
+                                Some(HWND_TOPMOST),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
+                            );
+                        }
+                    }
+                }
+            }
+            let _ = border.emit("border-visible", true);
+        } else {
+            let _ = border.emit("border-visible", false);
+            let _ = border.hide();
+        }
+    });
+}
 
 // ---------- UI scale (can be changed at runtime) ----------
 
@@ -588,18 +731,33 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
     let size = size_override(spec.label).unwrap_or(spec.size);
     let edge = effective_edge(spec.label, spec.edge);
     let full_span = matches!(spec.label, "bar" | "overview");
+    let b_dip = screen_border_dip();
+    // Floor to whole physical pixels so panels overlap the border by <=1px and never leave a subpixel gap.
+    let b = if b_dip > 0.0 { (b_dip * u).floor() } else { 0.0 };
+    // In screen-border mode, full-span panels (bar & overview) start at the true screen edge so
+    // their total thickness stays identical to non-border mode, and include extra inner depth for
+    // their 24px concave corner fillets.
+    let span_extra = if full_span && b > 0.0 {
+        BORDER_RADIUS_DIP * u
+    } else {
+        0.0
+    };
 
     match edge {
         Edge::Left => {
             if full_span {
-                // Span full monitor height so top/bottom 16 DIP margin hosts concave edge ears.
-                let win = Rect { x: mx, y: my, w: size.0 * u, h: mh };
+                let win = Rect {
+                    x: mx,
+                    y: my + b,
+                    w: size.0 * u + span_extra,
+                    h: (mh - 2.0 * b).max(1.0),
+                };
                 let trig = Rect { x: mx, y: my, w: EDGE_TRIGGER_DIP * scale, h: mh };
                 (win, trig)
             } else {
                 let w = size.0 * u;
-                let h = size.1 * u;
-                let win = Rect { x: mx, y: my + (mh - h) / 2.0, w, h };
+                let h = (size.1 * u).min((mh - 2.0 * b).max(1.0));
+                let win = Rect { x: mx + b, y: my + (mh - h) / 2.0, w, h };
                 let trig = Rect {
                     x: mx,
                     y: win.y,
@@ -611,14 +769,19 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
         }
         Edge::Top => {
             if full_span {
-                let h = size.0 * u;
-                let win = Rect { x: mx, y: my, w: mw, h };
+                let h = size.0 * u + span_extra;
+                let win = Rect {
+                    x: mx + b,
+                    y: my,
+                    w: (mw - 2.0 * b).max(1.0),
+                    h,
+                };
                 let trig = Rect { x: mx, y: my, w: mw, h: EDGE_TRIGGER_DIP * scale };
                 (win, trig)
             } else {
-                let w = (size.0 * u).min(mw);
-                let h = (size.1 * u).min(mh);
-                let win = Rect { x: mx + (mw - w) / 2.0, y: my, w, h };
+                let w = (size.0 * u).min((mw - 2.0 * b).max(1.0));
+                let h = (size.1 * u).min((mh - 2.0 * b).max(1.0));
+                let win = Rect { x: mx + (mw - w) / 2.0, y: my + b, w, h };
                 let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
                 let trig = Rect {
                     x: mx + (mw - tw) / 2.0,
@@ -631,8 +794,13 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
         }
         Edge::Bottom => {
             if full_span {
-                let h = size.0 * u;
-                let win = Rect { x: mx, y: my + mh - h, w: mw, h };
+                let h = size.0 * u + span_extra;
+                let win = Rect {
+                    x: mx + b,
+                    y: my + mh - h,
+                    w: (mw - 2.0 * b).max(1.0),
+                    h,
+                };
                 let trig = Rect {
                     x: mx,
                     y: my + mh - EDGE_TRIGGER_DIP * scale,
@@ -641,9 +809,9 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
                 };
                 (win, trig)
             } else {
-                let w = (size.0 * u).min(mw);
-                let h = (size.1 * u).min(mh);
-                let win = Rect { x: mx + (mw - w) / 2.0, y: my + mh - h, w, h };
+                let w = (size.0 * u).min((mw - 2.0 * b).max(1.0));
+                let h = (size.1 * u).min((mh - 2.0 * b).max(1.0));
+                let win = Rect { x: mx + (mw - w) / 2.0, y: my + mh - b - h, w, h };
                 let tw = spec.trigger_len.map(|l| l * u).unwrap_or(w);
                 let trig = Rect {
                     x: mx + (mw - tw) / 2.0,
@@ -656,8 +824,13 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
         }
         Edge::Right => {
             if full_span {
-                let w = size.0 * u;
-                let win = Rect { x: mx + mw - w, y: my, w, h: mh };
+                let w = size.0 * u + span_extra;
+                let win = Rect {
+                    x: mx + mw - w,
+                    y: my + b,
+                    w,
+                    h: (mh - 2.0 * b).max(1.0),
+                };
                 let trig = Rect {
                     x: mx + mw - EDGE_TRIGGER_DIP * scale,
                     y: my,
@@ -667,8 +840,8 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
                 (win, trig)
             } else {
                 let w = size.0 * u;
-                let h = size.1 * u;
-                let win = Rect { x: mx + mw - w, y: my + (mh - h) / 2.0, w, h };
+                let h = (size.1 * u).min((mh - 2.0 * b).max(1.0));
+                let win = Rect { x: mx + mw - b - w, y: my + (mh - h) / 2.0, w, h };
                 let trig = Rect {
                     x: mx + mw - EDGE_TRIGGER_DIP * scale,
                     y: win.y,
@@ -868,8 +1041,44 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
     if let Some((x, y, w, h)) = hit_rect(label) {
         return Rect { x, y, w, h };
     }
+    let u = scale * ui_scale();
+    let b_dip = screen_border_dip();
+    let b = if b_dip > 0.0 { (b_dip * u).floor() } else { 0.0 };
+
+    if matches!(label, "bar" | "overview") && b > 0.0 {
+        // Full-span bar & overview in border mode: window already starts at the true screen edge;
+        // exclude the inner concave fillet overhang and extend perpendicular ends across the border.
+        let fillet = BORDER_RADIUS_DIP * u;
+        match effective_edge(label, Edge::Left) {
+            Edge::Left => {
+                win.w = (win.w - fillet).max(0.0);
+                win.y -= b;
+                win.h += 2.0 * b;
+            }
+            Edge::Right => {
+                win.x += fillet;
+                win.w = (win.w - fillet).max(0.0);
+                win.y -= b;
+                win.h += 2.0 * b;
+            }
+            Edge::Top => {
+                win.x -= b;
+                win.w += 2.0 * b;
+                win.h = (win.h - fillet).max(0.0);
+            }
+            Edge::Bottom => {
+                win.x -= b;
+                win.w += 2.0 * b;
+                win.y += fillet;
+                win.h = (win.h - fillet).max(0.0);
+            }
+            Edge::Free => {}
+        }
+        return win;
+    }
+
     if matches!(label, "bar" | "overview") {
-        let inset = BAR_INSET_DIP * scale * ui_scale();
+        let inset = BAR_INSET_DIP * u;
         if matches!(effective_edge(label, Edge::Left), Edge::Top | Edge::Bottom) {
             win.x += inset;
             win.w = (win.w - 2.0 * inset).max(0.0);
@@ -881,7 +1090,6 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
     if label == "launcher" {
         if let Ok(ls) = LAUNCHER_SIZE.lock() {
             if let Some((cw, ch)) = *ls {
-                let u = scale * ui_scale();
                 let actual_w = (cw * u).min(win.w);
                 let actual_h = (ch * u).min(win.h);
                 win.x += (win.w - actual_w) / 2.0;
@@ -896,7 +1104,6 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
     if label == "notch" {
         if let Ok(ns) = NOTCH_SIZE.lock() {
             if let Some((cw, ch)) = *ns {
-                let u = scale * ui_scale();
                 if let Some(w) = cw {
                     let actual_w = (w * u).min(win.w);
                     win.x += (win.w - actual_w) / 2.0;
@@ -912,6 +1119,27 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
             }
         }
     }
+    if b > 0.0 {
+        // Extend the hit rect across the border strip on the panel's anchored edge so resting
+        // the cursor on the screen edge while the panel is open does not trigger auto-hide.
+        match effective_edge(label, default_edge_for(label)) {
+            Edge::Left => {
+                win.x -= b;
+                win.w += b;
+            }
+            Edge::Right => {
+                win.w += b;
+            }
+            Edge::Top => {
+                win.y -= b;
+                win.h += b;
+            }
+            Edge::Bottom => {
+                win.h += b;
+            }
+            Edge::Free => {}
+        }
+    }
     win
 }
 
@@ -922,13 +1150,15 @@ fn toast_hit_rect(m: Metrics) -> Option<Rect> {
     let (w_dip, h_dip) = TOAST_RECT.lock().ok().and_then(|r| *r)?;
     let (mx, my, mw, mh, scale) = m;
     let u = scale * ui_scale();
+    let b_dip = screen_border_dip();
+    let b = if b_dip > 0.0 { (b_dip * u).floor() } else { 0.0 };
     let w = w_dip * u;
     let trig_h = EDGE_TRIGGER_DIP * scale;
     let h = (h_dip * u - trig_h).max(0.0);
     let y = if effective_edge("notch", Edge::Top) == Edge::Bottom {
-        my + mh - trig_h - h
+        my + mh - b - trig_h - h
     } else {
-        my + trig_h
+        my + b + trig_h
     };
     Some(Rect {
         x: mx + (mw - w) / 2.0,
@@ -1000,6 +1230,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
         let mut last_refresh = Instant::now();
         let mut last_fs_check = Instant::now() - Duration::from_secs(1);
         let mut fullscreen = false;
+        let mut border_shown = false;
         let mut interval = POLL_FAST;
 
         loop {
@@ -1012,6 +1243,11 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             if last_fs_check.elapsed() >= Duration::from_millis(200) {
                 fullscreen = crate::winlist::is_foreground_fullscreen();
                 last_fs_check = Instant::now();
+            }
+            let want_border = is_screen_border() && !fullscreen;
+            if want_border != border_shown {
+                border_shown = want_border;
+                sync_border_window(&app, want_border);
             }
             let Some(m) = metrics else { continue };
             let Ok(cursor) = probe.cursor_position() else { continue };

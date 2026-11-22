@@ -136,6 +136,10 @@ pub struct Config {
     pub ui_style: String,
     /// Enable blurred wallpaper Mica backdrop behind ORUMI panels (works with both UI styles).
     pub mica: bool,
+    /// Enable Caelestia-style screen border frame around all 4 edges (default off).
+    pub screen_border: bool,
+    /// Screen border thickness in design units (6-16 px, default 10).
+    pub screen_border_size: u8,
     /// Custom search bar placeholder for Launcher & Activities. Empty = built-in default.
     pub search_placeholder: String,
     /// "manual" or "auto" (follows wallpaper luminance for Windows dark/light mode).
@@ -173,6 +177,8 @@ impl Default for Config {
             bar_app_style: "icons".into(),
             ui_style: "material".into(),
             mica: true,
+            screen_border: false,
+            screen_border_size: 10,
             search_placeholder: String::new(),
             windows_theme_mode: "manual".into(),
             autostart: false,
@@ -277,6 +283,7 @@ fn sanitize(mut c: Config) -> Config {
     if c.ui_style != "fluent" {
         c.ui_style = "material".into();
     }
+    c.screen_border_size = c.screen_border_size.clamp(6, 16);
     c.search_placeholder = c.search_placeholder.trim().to_string();
     if c.windows_theme_mode != "auto" {
         c.windows_theme_mode = "manual".into();
@@ -611,9 +618,14 @@ pub fn set_config(
         crate::wallpaper::warm(app.clone());
     }
 
-    if (new.ui_scale - old.ui_scale).abs() > f64::EPSILON {
+    if (new.ui_scale - old.ui_scale).abs() > f64::EPSILON
+        || new.screen_border != old.screen_border
+        || new.screen_border_size != old.screen_border_size
+    {
         crate::edge::set_ui_scale(new.ui_scale);
+        crate::edge::set_screen_border(new.screen_border, new.screen_border_size);
         crate::apply_layout(&app);
+        crate::wm_ipc::sync_outer_inset(&app);
     }
 
     if new.windows_theme_mode == "auto" && new.windows_theme_mode != old.windows_theme_mode {
