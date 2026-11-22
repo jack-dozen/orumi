@@ -732,8 +732,13 @@ fn layout(spec: &PanelSpec, m: Metrics) -> (Rect, Rect) {
     let edge = effective_edge(spec.label, spec.edge);
     let full_span = matches!(spec.label, "bar" | "overview");
     let b_dip = screen_border_dip();
-    // Floor to whole physical pixels so panels overlap the border by <=1px and never leave a subpixel gap.
-    let b = if b_dip > 0.0 { (b_dip * u).floor() } else { 0.0 };
+    // Tuck panels 2 physical pixels inside the border so subpixel/rounding differences at
+    // fractional DPI or UI scale never leave a 1-2px hairline gap along any edge.
+    let b = if b_dip > 0.0 {
+        (b_dip * u - 2.0).max(0.0).floor()
+    } else {
+        0.0
+    };
     // In screen-border mode, full-span panels (bar & overview) start at the true screen edge so
     // their total thickness stays identical to non-border mode, and include extra inner depth for
     // their 24px concave corner fillets.
@@ -1043,7 +1048,11 @@ fn panel_hit_rect(label: &str, mut win: Rect, scale: f64) -> Rect {
     }
     let u = scale * ui_scale();
     let b_dip = screen_border_dip();
-    let b = if b_dip > 0.0 { (b_dip * u).floor() } else { 0.0 };
+    let b = if b_dip > 0.0 {
+        (b_dip * u - 2.0).max(0.0).floor()
+    } else {
+        0.0
+    };
 
     if matches!(label, "bar" | "overview") && b > 0.0 {
         // Full-span bar & overview in border mode: window already starts at the true screen edge;
@@ -1151,7 +1160,11 @@ fn toast_hit_rect(m: Metrics) -> Option<Rect> {
     let (mx, my, mw, mh, scale) = m;
     let u = scale * ui_scale();
     let b_dip = screen_border_dip();
-    let b = if b_dip > 0.0 { (b_dip * u).floor() } else { 0.0 };
+    let b = if b_dip > 0.0 {
+        (b_dip * u - 2.0).max(0.0).floor()
+    } else {
+        0.0
+    };
     let w = w_dip * u;
     let trig_h = EDGE_TRIGGER_DIP * scale;
     let h = (h_dip * u - trig_h).max(0.0);
