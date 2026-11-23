@@ -1,7 +1,7 @@
 //! Helper Win32: posisi dan ukuran window, judul, dan filter "layak ditata".
 
 use std::ffi::c_void;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::OnceLock;
 
 use layout::{Rect, WindowId};
@@ -91,6 +91,12 @@ pub(crate) unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL
     BOOL(1)
 }
 
+static OUTER_INSET: AtomicI32 = AtomicI32::new(0);
+
+pub(crate) fn set_outer_inset(px: i32) {
+    OUTER_INSET.store(px.clamp(0, 64), Ordering::Relaxed);
+}
+
 pub(crate) unsafe fn work_area() -> Rect {
     let mut r = RECT::default();
     let _ = SystemParametersInfoW(
@@ -99,11 +105,16 @@ pub(crate) unsafe fn work_area() -> Rect {
         Some(&mut r as *mut RECT as *mut c_void),
         SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
     );
+    let inset = OUTER_INSET.load(Ordering::Relaxed).max(0);
+    let w = r.right - r.left;
+    let h = r.bottom - r.top;
+    let ix = inset.min((w / 4).max(0));
+    let iy = inset.min((h / 4).max(0));
     Rect {
-        x: r.left,
-        y: r.top,
-        w: r.right - r.left,
-        h: r.bottom - r.top,
+        x: r.left + ix,
+        y: r.top + iy,
+        w: (w - ix * 2).max(1),
+        h: (h - iy * 2).max(1),
     }
 }
 

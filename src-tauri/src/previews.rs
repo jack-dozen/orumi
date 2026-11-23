@@ -122,12 +122,17 @@ fn position(app: &AppHandle, n: usize, anchor_x: f64, anchor_y: f64) -> Option<C
 
     let (card_w, card_h) = card_size(n);
     let (max_w, max_h) = card_size(MAX_ITEMS);
+    let bar_fillet = if crate::edge::is_screen_border() {
+        crate::edge::BORDER_RADIUS_DIP * u
+    } else {
+        0.0
+    };
 
     let (win_x, win_y, win_w, win_h, left, top) = match bar_edge {
         crate::edge::Edge::Right => {
             let win_w = max_w * u;
             let win_h = size.height as f64;
-            let win_x = pos.x as f64 - win_w;
+            let win_x = pos.x as f64 + bar_fillet - win_w;
             let win_y = pos.y as f64;
             let win_h_css = win_h / u;
             let top = (anchor_y - card_h / 2.0).clamp(58.0, (win_h_css - card_h - 58.0).max(58.0));
@@ -138,7 +143,7 @@ fn position(app: &AppHandle, n: usize, anchor_x: f64, anchor_y: f64) -> Option<C
             let win_w = size.width as f64;
             let win_h = max_h * u;
             let win_x = pos.x as f64;
-            let win_y = pos.y as f64 + size.height as f64;
+            let win_y = pos.y as f64 + size.height as f64 - bar_fillet;
             let win_w_css = win_w / u;
             let left = (anchor_x - card_w / 2.0).clamp(58.0, (win_w_css - card_w - 58.0).max(58.0));
             (win_x, win_y, win_w, win_h, left, 0.0)
@@ -147,7 +152,7 @@ fn position(app: &AppHandle, n: usize, anchor_x: f64, anchor_y: f64) -> Option<C
             let win_w = size.width as f64;
             let win_h = max_h * u;
             let win_x = pos.x as f64;
-            let win_y = pos.y as f64 - win_h;
+            let win_y = pos.y as f64 + bar_fillet - win_h;
             let win_w_css = win_w / u;
             let left = (anchor_x - card_w / 2.0).clamp(58.0, (win_w_css - card_w - 58.0).max(58.0));
             (win_x, win_y, win_w, win_h, left, 0.0)
@@ -155,7 +160,7 @@ fn position(app: &AppHandle, n: usize, anchor_x: f64, anchor_y: f64) -> Option<C
         _ => {
             let win_w = max_w * u;
             let win_h = size.height as f64;
-            let win_x = pos.x as f64 + size.width as f64;
+            let win_x = pos.x as f64 + size.width as f64 - bar_fillet;
             let win_y = pos.y as f64;
             let win_h_css = win_h / u;
             let top = (anchor_y - card_h / 2.0).clamp(58.0, (win_h_css - card_h - 58.0).max(58.0));

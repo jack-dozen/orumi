@@ -118,6 +118,10 @@ pub enum Cmd {
         winkey: bool,
         reply: SyncSender<String>,
     },
+    SetOuterInset {
+        px: i32,
+        reply: SyncSender<String>,
+    },
     Quit {
         reply: SyncSender<String>,
     },
@@ -405,6 +409,13 @@ fn parse_cmd(line: &str, reply: SyncSender<String>) -> Result<Cmd, String> {
             let alt_tab = parts.next().is_some_and(|s| s == "1" || s == "true" || s == "on");
             let winkey = parts.next().is_some_and(|s| s == "1" || s == "true" || s == "on");
             Ok(Cmd::ShellRelay { alt_tab, winkey, reply })
+        }
+        "outer_inset" => {
+            let px: i32 = parts
+                .next()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| "missing inset px".to_string())?;
+            Ok(Cmd::SetOuterInset { px, reply })
         }
         "quit" => Ok(Cmd::Quit { reply }),
         other => Err(format!("unknown command '{other}'")),
@@ -805,6 +816,13 @@ pub(crate) unsafe fn handle(app: &mut App, cmd: Cmd) -> bool {
         }
         Cmd::ShellRelay { alt_tab, winkey, reply } => {
             crate::hook::set_shell_relay(alt_tab, winkey);
+            let _ = reply.send("ok".to_string());
+        }
+        Cmd::SetOuterInset { px, reply } => {
+            crate::winutil::set_outer_inset(px);
+            if !tray::PAUSED.load(Ordering::Relaxed) {
+                app.apply();
+            }
             let _ = reply.send("ok".to_string());
         }
         Cmd::Quit { reply } => {

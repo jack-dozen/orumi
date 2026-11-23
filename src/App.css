@@ -5465,3 +5465,419 @@ button.vb__icon:hover {
 [data-style="fluent"] .pset__hot {
   border-radius: 6px;
 }
+
+/* =========================================================
+   Caelestia Screen Border Mode (`data-border="on"`)
+   ========================================================= */
+
+.sborder {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 220ms var(--morph-ease);
+}
+
+.sborder--visible {
+  opacity: 1;
+}
+
+.sborder__defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.sborder__frame {
+  position: fixed;
+  inset: 0;
+  background: var(--surface);
+  -webkit-mask: url(#orumi-sborder-mask);
+  mask: url(#orumi-sborder-mask);
+  pointer-events: none;
+}
+
+[data-mica="on"] .sborder__frame {
+  background-color: var(--mica-surface);
+  background-image:
+    linear-gradient(var(--mica-tint), var(--mica-tint)),
+    var(--mica-image, none);
+  background-size:
+    100% 100%,
+    var(--mica-screen-w, 100vw) var(--mica-screen-h, 100vh);
+  background-position:
+    0 0,
+    calc(-1 * var(--mica-win-x, 0px)) calc(-1 * var(--mica-win-y, 0px));
+  background-repeat: no-repeat;
+}
+
+/* Full-span auto-hide bar seamlessly merged with the screen border (all 4 edges) */
+[data-border="on"] .bar {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  width: 64px;
+  height: auto;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  transform: translateX(calc(-100% - var(--border-radius, 24px)));
+}
+
+[data-border="on"] .bar--visible {
+  transform: translateX(0);
+}
+
+[data-border="on"] .bar::before,
+[data-border="on"] .bar::after {
+  display: block;
+  width: var(--border-radius, 24px);
+  height: var(--border-radius, 24px);
+  left: 100%;
+  right: auto;
+  background: var(--surface);
+}
+
+[data-border="on"] .bar::before {
+  top: 0;
+  bottom: auto;
+  -webkit-mask-image: radial-gradient(
+    circle at 100% 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 100% 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+[data-border="on"] .bar::after {
+  top: auto;
+  bottom: 0;
+  -webkit-mask-image: radial-gradient(
+    circle at 100% 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 100% 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+/* Bar on right edge in border mode */
+[data-border="on"][data-edge="right"] .bar {
+  left: auto;
+  right: 0;
+  border-radius: 0;
+  transform: translateX(calc(100% + var(--border-radius, 24px)));
+}
+
+[data-border="on"][data-edge="right"] .bar--visible {
+  transform: translateX(0);
+}
+
+[data-border="on"][data-edge="right"] .bar::before,
+[data-border="on"][data-edge="right"] .bar::after {
+  left: auto;
+  right: 100%;
+}
+
+[data-border="on"][data-edge="right"] .bar::before {
+  top: 0;
+  bottom: auto;
+  -webkit-mask-image: radial-gradient(
+    circle at 0 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 0 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+[data-border="on"][data-edge="right"] .bar::after {
+  top: auto;
+  bottom: 0;
+  -webkit-mask-image: radial-gradient(
+    circle at 0 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 0 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+/* Bar on top edge in border mode */
+[data-border="on"][data-edge="top"] .bar {
+  top: 0;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 64px;
+  border-radius: 0;
+  transform: translateY(calc(-100% - var(--border-radius, 24px)));
+}
+
+[data-border="on"][data-edge="top"] .bar--visible {
+  transform: translateY(0);
+}
+
+[data-border="on"][data-edge="top"] .bar::before,
+[data-border="on"][data-edge="top"] .bar::after {
+  top: 100%;
+  bottom: auto;
+}
+
+[data-border="on"][data-edge="top"] .bar::before {
+  left: 0;
+  right: auto;
+  -webkit-mask-image: radial-gradient(
+    circle at 100% 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 100% 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+[data-border="on"][data-edge="top"] .bar::after {
+  left: auto;
+  right: 0;
+  -webkit-mask-image: radial-gradient(
+    circle at 0 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 0 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+/* Bar on bottom edge in border mode */
+[data-border="on"][data-edge="bottom"] .bar {
+  top: auto;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 64px;
+  border-radius: 0;
+  transform: translateY(calc(100% + var(--border-radius, 24px)));
+}
+
+[data-border="on"][data-edge="bottom"] .bar--visible {
+  transform: translateY(0);
+}
+
+[data-border="on"][data-edge="bottom"] .bar::before,
+[data-border="on"][data-edge="bottom"] .bar::after {
+  top: auto;
+  bottom: 100%;
+}
+
+[data-border="on"][data-edge="bottom"] .bar::before {
+  left: 0;
+  right: auto;
+  -webkit-mask-image: radial-gradient(
+    circle at 100% 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 100% 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+[data-border="on"][data-edge="bottom"] .bar::after {
+  left: auto;
+  right: 0;
+  -webkit-mask-image: radial-gradient(
+    circle at 0 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 0 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+/* Pixel-aligned Mica for full-span bar corner fillets across all 4 edges (both Material & Fluent) */
+[data-mica="on"][data-border="on"] .bar::before,
+[data-mica="on"][data-border="on"] .bar::after {
+  background-color: var(--mica-surface);
+  background-image:
+    linear-gradient(var(--mica-tint), var(--mica-tint)),
+    var(--mica-image, none);
+  background-size:
+    100% 100%,
+    var(--mica-screen-w, 100vw) var(--mica-screen-h, 100vh);
+  background-repeat: no-repeat;
+}
+
+[data-mica="on"][data-border="on"] .bar::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px)));
+}
+
+[data-mica="on"][data-border="on"] .bar::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px) - var(--border-radius, 24px)));
+}
+
+[data-mica="on"][data-border="on"][data-edge="right"] .bar::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) - var(--border-radius, 24px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px)));
+}
+
+[data-mica="on"][data-border="on"][data-edge="right"] .bar::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) - var(--border-radius, 24px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px) - var(--border-radius, 24px)));
+}
+
+[data-mica="on"][data-border="on"][data-edge="top"] .bar::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px)));
+}
+
+[data-mica="on"][data-border="on"][data-edge="top"] .bar::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px) - var(--border-radius, 24px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px)));
+}
+
+[data-mica="on"][data-border="on"][data-edge="bottom"] .bar::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) - var(--border-radius, 24px)));
+}
+
+[data-mica="on"][data-border="on"][data-edge="bottom"] .bar::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px) - var(--border-radius, 24px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) - var(--border-radius, 24px)));
+}
+
+/* Full-span Workspace Overview drawer seamlessly merged with the screen border */
+[data-border="on"] .wmov {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: var(--border-radius, 24px);
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  transform: translateX(calc(-100% - var(--border-radius, 24px)));
+}
+
+[data-border="on"] .wmov--from-bar {
+  transform: translateX(0);
+  clip-path: inset(0 calc(100% - 64px) 0 0);
+}
+
+[data-border="on"] .wmov--visible {
+  transform: translateX(0);
+}
+
+[data-border="on"] .wmov--from-bar.wmov--visible {
+  clip-path: inset(0 calc(-1 * var(--border-radius, 24px)) 0 0);
+}
+
+[data-border="on"] .wmov::before,
+[data-border="on"] .wmov::after {
+  display: block;
+  width: var(--border-radius, 24px);
+  height: var(--border-radius, 24px);
+  left: 100%;
+  right: auto;
+  background: var(--surface);
+}
+
+[data-border="on"] .wmov::before {
+  top: 0;
+  bottom: auto;
+  -webkit-mask-image: radial-gradient(
+    circle at 100% 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 100% 100%,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+[data-border="on"] .wmov::after {
+  top: auto;
+  bottom: 0;
+  -webkit-mask-image: radial-gradient(
+    circle at 100% 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+  mask-image: radial-gradient(
+    circle at 100% 0,
+    transparent calc(var(--border-radius, 24px) - 0.8px),
+    #000 var(--border-radius, 24px)
+  );
+}
+
+[data-mica="on"][data-border="on"] .wmov::before,
+[data-mica="on"][data-border="on"] .wmov::after {
+  background-color: var(--mica-surface);
+  background-image:
+    linear-gradient(var(--mica-tint), var(--mica-tint)),
+    var(--mica-image, none);
+  background-size:
+    100% 100%,
+    var(--mica-screen-w, 100vw) var(--mica-screen-h, 100vh);
+  background-repeat: no-repeat;
+}
+
+[data-mica="on"][data-border="on"] .wmov::before {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px)));
+}
+
+[data-mica="on"][data-border="on"] .wmov::after {
+  background-position:
+    0 0,
+    calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px)))
+      calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px) - var(--border-radius, 24px)));
+}

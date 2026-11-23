@@ -360,6 +360,28 @@ pub fn sync_shell_relay_current() {
     }
 }
 
+/// Sync the screen border's physical pixel thickness as outer padding in `vscroll-wm`.
+pub fn sync_outer_inset(app: &AppHandle) {
+    let cfg = crate::config::current(app);
+    let px = if cfg.screen_border {
+        let scale = app
+            .get_webview_window("border")
+            .or_else(|| app.get_webview_window("bar"))
+            .and_then(|w| w.primary_monitor().ok().flatten())
+            .map(|m| m.scale_factor())
+            .unwrap_or(1.0);
+        ((cfg.screen_border_size as f64) * scale * cfg.ui_scale).ceil() as i32
+    } else {
+        0
+    };
+    let cmd = format!("outer_inset {px}");
+    thread::spawn(move || {
+        if let Err(e) = send_cmd(&cmd) {
+            eprintln!("[wm-ipc] {cmd} failed: {e}");
+        }
+    });
+}
+
 fn handle_event_line(app: &AppHandle, line: &str) {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -399,6 +421,7 @@ pub fn start(app: AppHandle) {
                         let _ = send_cmd("cheatsheet_ui off");
                         let _ = send_cmd("overview_ui off");
                         sync_shell_relay(&app);
+                        sync_outer_inset(&app);
                         let sync_app = app.clone();
                         thread::spawn(move || sync_theme_colors(&sync_app));
                         let reader = BufReader::new(file);
@@ -426,6 +449,7 @@ pub fn shutdown() {
     if SPAWNED_BY_ORUMI.load(Ordering::Relaxed) {
         let _ = send_cmd("quit");
     } else {
+        let _ = send_cmd("outer_inset 0");
         let _ = send_cmd("shell_relay 0 0");
         let _ = send_cmd("osd on");
         let _ = send_cmd("cheatsheet_ui on");
