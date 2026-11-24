@@ -162,7 +162,9 @@ fn apply_snapshot(app: Option<&AppHandle>, next: WmSnapshot) {
         let _ = app.emit("windows-changed", ());
         let _ = app.emit("workspaces-changed", ());
         if let Some(payload) = osd_payload {
-            let _ = app.emit_to("notch", "workspace-osd", payload);
+            crate::edge::notify_notch_popup_with(app, Duration::from_millis(1600), move |a| {
+                let _ = a.emit_to("notch", "workspace-osd", payload);
+            });
         }
         if cheatsheet_toggled {
             toggle_cheatsheet_ui(app);

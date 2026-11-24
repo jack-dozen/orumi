@@ -64,45 +64,6 @@ function compareApps(a: AppEntry, b: AppEntry) {
   return byName.compare(a.name, b.name);
 }
 
-/**
- * Request new app icons from Rust as their tiles approach the visible area, so a long list
- * does not trigger hundreds of icon requests at once. Once loaded, the AppIcon cache is used.
- */
-function LazyAppIcon({
-  target,
-  fallback,
-  size,
-}: {
-  target: string;
-  fallback: string;
-  size: number;
-}) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [seen, setSeen] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || seen) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setSeen(true);
-          io.disconnect();
-        }
-      },
-      { root: el.closest(".act__viewport"), rootMargin: "300px 0px" },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [seen]);
-
-  return (
-    <span ref={ref} className="act-app__icon">
-      <AppIcon target={seen ? target : null} fallback={fallback} size={size} />
-    </span>
-  );
-}
-
 export default function Activities() {
   const { visible, openCount, wins, workspaces, apps, refreshWorkspaces } = useActivities();
   const cfg = useConfig();
@@ -115,11 +76,28 @@ export default function Activities() {
   const [cols, setCols] = useState(() => colsFor(window.innerWidth));
   const [activeLetter, setActiveLetter] = useState("#");
   const [splash, setSplash] = useState(false);
+  const [contentMounted, setContentMounted] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const openedAt = useRef(0);
   const wheel = useRef({ x: 0, y: 0, last: 0, lock: 0, fresh: true });
+
+  // Mount heavy grids/thumbnails when opening and release them after the close transition finishes.
+  useEffect(() => {
+    if (visible || openCount > 0) {
+      setContentMounted(true);
+    }
+  }, [visible, openCount]);
+
+  useEffect(() => {
+    if (visible) {
+      setContentMounted(true);
+      return;
+    }
+    const id = window.setTimeout(() => setContentMounted(false), 350);
+    return () => window.clearTimeout(id);
+  }, [visible]);
 
   // Reset the display each time it opens.
   useEffect(() => {
@@ -463,7 +441,7 @@ export default function Activities() {
 
       <div className="act__stage" data-bg>
         <section className="act__wins" data-bg inert={view !== "ws"}>
-          {shownWins.length === 0 ? (
+          {!contentMounted ? null : shownWins.length === 0 ? (
             <p className="act__empty">No open windows in this workspace</p>
           ) : (
             <div className="act__cards" data-bg>
@@ -522,31 +500,35 @@ export default function Activities() {
           />
 
           <div className="act__viewport" data-bg ref={viewportRef} onScroll={onListScroll}>
-            <div
-              className="act__grid"
-              data-bg
-              style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
-            >
-              {list.map((a, idx) => {
-                const g = groupOf(a.name);
-                // Start each letter group on a new row so the rail can jump to it precisely.
-                const first = !searching && (idx === 0 || groupOf(list[idx - 1].name) !== g);
-                return (
-                  <button
-                    key={a.id}
-                    data-idx={idx}
-                    data-first={first ? g : undefined}
-                    className={`act-app ${idx === sel && searching ? "act-app--sel" : ""}`}
-                    style={first ? { gridColumnStart: 1 } : undefined}
-                    onMouseMove={() => idx !== sel && setSel(idx)}
-                    onClick={() => launch(a)}
-                  >
-                    <LazyAppIcon target={`aumid:${a.id}`} fallback={letter(a.name)} size={64} />
-                    <span className="act-app__name">{a.name}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {contentMounted && (
+              <div
+                className="act__grid"
+                data-bg
+                style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
+              >
+                {list.map((a, idx) => {
+                  const g = groupOf(a.name);
+                  // Start each letter group on a new row so the rail can jump to it precisely.
+                  const first = !searching && (idx === 0 || groupOf(list[idx - 1].name) !== g);
+                  return (
+                    <button
+                      key={a.id}
+                      data-idx={idx}
+                      data-first={first ? g : undefined}
+                      className={`act-app ${idx === sel && searching ? "act-app--sel" : ""}`}
+                      style={first ? { gridColumnStart: 1 } : undefined}
+                      onMouseMove={() => idx !== sel && setSel(idx)}
+                      onClick={() => launch(a)}
+                    >
+                      <span className="act-app__icon">
+                        <AppIcon target={`aumid:${a.id}`} fallback={letter(a.name)} size={64} lazy />
+                      </span>
+                      <span className="act-app__name">{a.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {list.length === 0 && (

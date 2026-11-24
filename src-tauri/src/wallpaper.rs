@@ -16,7 +16,7 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-use rayon::{prelude::*, ThreadPoolBuilder};
+use rayon::prelude::*;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -143,18 +143,35 @@ fn ensure_thumb(path: &Path, target: &Path) -> bool {
     fs::write(&tmp, &buf).is_ok() && fs::rename(&tmp, target).is_ok()
 }
 
-/// Create all missing thumbnails in parallel with a limited number of threads
-/// so the computer remains responsive.
-fn make_thumbs(files: &[PathBuf], cache_dir: &Path, threads: usize) -> Vec<Option<PathBuf>> {
+/// Create all missing thumbnails in parallel using the capped global Rayon pool
+/// without decoding already-cached files or allocating extra thread pools.
+fn make_thumbs(files: &[PathBuf], cache_dir: &Path, _threads: usize) -> Vec<Option<PathBuf>> {
     let _ = fs::create_dir_all(cache_dir);
-    let work = |p: &PathBuf| {
-        let target = thumb_target(cache_dir, p)?;
-        ensure_thumb(p, &target).then_some(target)
-    };
-    match ThreadPoolBuilder::new().num_threads(threads.max(1)).build() {
-        Ok(pool) => pool.install(|| files.par_iter().map(&work).collect()),
-        Err(_) => files.iter().map(&work).collect(),
+    let mut results: Vec<Option<PathBuf>> = vec![None; files.len()];
+    let mut missing: Vec<(usize, &PathBuf, PathBuf)> = Vec::new();
+
+    for (i, p) in files.iter().enumerate() {
+        let Some(target) = thumb_target(cache_dir, p) else {
+            continue;
+        };
+        if fs::metadata(&target).map(|m| m.len() > 0).unwrap_or(false) {
+            results[i] = Some(target);
+        } else {
+            missing.push((i, p, target));
+        }
     }
+
+    if !missing.is_empty() {
+        let built: Vec<(usize, Option<PathBuf>)> = missing
+            .into_par_iter()
+            .map(|(i, p, target)| (i, ensure_thumb(p, &target).then_some(target)))
+            .collect();
+        for (i, t) in built {
+            results[i] = t;
+        }
+        crate::trim_working_set();
+    }
+    results
 }
 
 /// Prepare thumbnails in the background a few seconds after the app starts (and after the folder

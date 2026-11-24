@@ -216,10 +216,12 @@ function applyMicaImage(path: string | null) {
 
 const MICA_SUBPANELS = ".bar, .wmov, .notch, .lpanel, .swpanel, .overlay, .pvcard";
 
-function syncMicaOffsets() {
+let micaOffsetRaf = 0;
+
+function syncMicaOffsetsNow() {
   if (!currentMica) return;
   for (const el of document.querySelectorAll<HTMLElement>(MICA_SUBPANELS)) {
-    let x = el.offsetLeft;
+    const x = el.offsetLeft;
     let y = el.offsetTop;
     if (el.classList.contains("overlay")) {
       y -= el.offsetHeight / 2;
@@ -231,19 +233,57 @@ function syncMicaOffsets() {
   }
 }
 
-async function syncWindowMica(uiScale: number) {
+function scheduleMicaOffsets() {
+  if (!currentMica || micaOffsetRaf !== 0) return;
+  micaOffsetRaf = window.requestAnimationFrame(() => {
+    micaOffsetRaf = 0;
+    syncMicaOffsetsNow();
+  });
+}
+
+type CachedMetrics = {
+  monX: number;
+  monY: number;
+  monW: number;
+  monH: number;
+  scaleFactor: number;
+  winX: number;
+  winY: number;
+};
+
+let cachedMetrics: CachedMetrics | null = null;
+
+function applyWindowMicaFromCache(uiScale: number) {
+  if (!currentMica || !cachedMetrics) return;
+  const factor = (cachedMetrics.scaleFactor || 1) * (uiScale || 1);
+  const root = document.documentElement.style;
+  root.setProperty("--mica-screen-w", `${cachedMetrics.monW / factor}px`);
+  root.setProperty("--mica-screen-h", `${cachedMetrics.monH / factor}px`);
+  root.setProperty("--mica-win-x", `${(cachedMetrics.winX - cachedMetrics.monX) / factor}px`);
+  root.setProperty("--mica-win-y", `${(cachedMetrics.winY - cachedMetrics.monY) / factor}px`);
+  scheduleMicaOffsets();
+}
+
+async function syncWindowMica(uiScale: number, forceQuery = true) {
   if (!currentMica) return;
+  if (!forceQuery && cachedMetrics) {
+    applyWindowMicaFromCache(uiScale);
+    return;
+  }
   try {
     const win = getCurrentWindow();
     const [mon, pos] = await Promise.all([primaryMonitor(), win.outerPosition()]);
     if (!mon) return;
-    const factor = (mon.scaleFactor || 1) * (uiScale || 1);
-    const root = document.documentElement.style;
-    root.setProperty("--mica-screen-w", `${mon.size.width / factor}px`);
-    root.setProperty("--mica-screen-h", `${mon.size.height / factor}px`);
-    root.setProperty("--mica-win-x", `${(pos.x - mon.position.x) / factor}px`);
-    root.setProperty("--mica-win-y", `${(pos.y - mon.position.y) / factor}px`);
-    syncMicaOffsets();
+    cachedMetrics = {
+      monX: mon.position.x,
+      monY: mon.position.y,
+      monW: mon.size.width,
+      monH: mon.size.height,
+      scaleFactor: mon.scaleFactor || 1,
+      winX: pos.x,
+      winY: pos.y,
+    };
+    applyWindowMicaFromCache(uiScale);
   } catch {
     /* ignore transient window metric errors */
   }
@@ -349,6 +389,8 @@ export function useTheme(isSource: boolean) {
     let hasTheme = false;
     let hasMica = false;
     let retryTimer: number | null = null;
+    let checkTimer: number | null = null;
+    let windowMoveRaf = 0;
     let seedCache: { stamp: string | null; seed: number } | null = null;
     const unlistenFns: (() => void)[] = [];
     const win = getCurrentWindow();
@@ -390,20 +432,15 @@ export function useTheme(isSource: boolean) {
       }
     };
 
-    const ro = new ResizeObserver(() => syncMicaOffsets());
-    const mo = new MutationObserver(() => {
-      if (!currentMica) return;
+    const ro = new ResizeObserver(() => scheduleMicaOffsets());
+    const syncMicaObservers = (enabled: boolean) => {
+      ro.disconnect();
+      if (!enabled) return;
       for (const el of document.querySelectorAll<HTMLElement>(MICA_SUBPANELS)) {
         ro.observe(el);
       }
-      syncMicaOffsets();
-    });
-    if (document.body) {
-      mo.observe(document.body, { childList: true, subtree: true });
-      for (const el of document.querySelectorAll<HTMLElement>(MICA_SUBPANELS)) {
-        ro.observe(el);
-      }
-    }
+      scheduleMicaOffsets();
+    };
 
     /** force: recalculate even if nothing changed. rewall: reread the wallpaper image. */
     const check = async (force: boolean, rewall = false) => {
@@ -494,6 +531,7 @@ export function useTheme(isSource: boolean) {
           const nextMica = e.payload.mica !== false;
           applyUiStyle(nextStyle);
           applyMicaEnabled(nextMica);
+          syncMicaObservers(nextMica);
           applyScreenBorder(Boolean(e.payload.screen_border), e.payload.screen_border_size ?? 10);
           applyPanelEdge(label, e.payload.panels);
           if (nextMica) {
@@ -519,23 +557,61 @@ export function useTheme(isSource: boolean) {
           }
         }),
       ),
-      addListener(win.onMoved(() => void syncWindowMica(currentScale))),
-      addListener(win.onResized(() => void syncWindowMica(currentScale))),
+      addListener(
+        win.onMoved(() => {
+          if (!currentMica || windowMoveRaf !== 0) return;
+          windowMoveRaf = window.requestAnimationFrame(() => {
+            windowMoveRaf = 0;
+            void syncWindowMica(currentScale);
+          });
+        }),
+      ),
+      addListener(
+        win.onResized(() => {
+          if (!currentMica || windowMoveRaf !== 0) return;
+          windowMoveRaf = window.requestAnimationFrame(() => {
+            windowMoveRaf = 0;
+            void syncWindowMica(currentScale);
+          });
+        }),
+      ),
       addListener(
         listen<boolean>(`edge-visible:${label}`, (e) => {
           if (!e.payload || cancelled) return;
-          if (currentMica) void syncWindowMica(currentScale);
+          if (currentMica) {
+            if (cachedMetrics) {
+              applyWindowMicaFromCache(currentScale);
+            } else {
+              void syncWindowMica(currentScale);
+            }
+          }
           syncCachedTheme();
         }),
       ),
     ];
+
+    if (label === "preview") {
+      listenerPromises.push(
+        addListener(
+          listen("preview-data", () => {
+            if (!cancelled && currentMica) scheduleMicaOffsets();
+          }),
+        ),
+      );
+    }
 
     if (label === "activities") {
       listenerPromises.push(
         addListener(
           listen("activities-open", () => {
             if (cancelled) return;
-            if (currentMica) void syncWindowMica(currentScale);
+            if (currentMica) {
+              if (cachedMetrics) {
+                applyWindowMicaFromCache(currentScale);
+              } else {
+                void syncWindowMica(currentScale);
+              }
+            }
             syncCachedTheme();
           }),
         ),
@@ -559,7 +635,12 @@ export function useTheme(isSource: boolean) {
         listenerPromises.push(
           addListener(
             listen<boolean>(`edge-visible:${panel}`, (e) => {
-              if (e.payload && !cancelled) void check(false);
+              if (!e.payload || cancelled) return;
+              if (checkTimer !== null) window.clearTimeout(checkTimer);
+              checkTimer = window.setTimeout(() => {
+                checkTimer = null;
+                if (!cancelled) void check(false);
+              }, 500);
             }),
           ),
         );
@@ -600,6 +681,7 @@ export function useTheme(isSource: boolean) {
           const nextMica = cfg.mica !== false;
           applyUiStyle(normalizeUiStyle(cfg.ui_style));
           applyMicaEnabled(nextMica);
+          syncMicaObservers(nextMica);
           applyScreenBorder(Boolean(cfg.screen_border), cfg.screen_border_size ?? 10);
           applyPanelEdge(label, cfg.panels);
           if (nextMica) {
@@ -622,8 +704,19 @@ export function useTheme(isSource: boolean) {
         window.clearTimeout(retryTimer);
         retryTimer = null;
       }
+      if (checkTimer !== null) {
+        window.clearTimeout(checkTimer);
+        checkTimer = null;
+      }
+      if (windowMoveRaf !== 0) {
+        window.cancelAnimationFrame(windowMoveRaf);
+        windowMoveRaf = 0;
+      }
+      if (micaOffsetRaf !== 0) {
+        window.cancelAnimationFrame(micaOffsetRaf);
+        micaOffsetRaf = 0;
+      }
       ro.disconnect();
-      mo.disconnect();
       for (const fn of unlistenFns) fn();
     };
   }, [isSource]);

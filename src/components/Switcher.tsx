@@ -27,7 +27,7 @@ const SWITCHER_ANIM: "slide" | "fade" | "none" = "slide";
 
 // Dev aid: logs frame timing for 600 ms after the panel appears (the terminal shows "[ui] ...").
 // Set to false when no longer needed.
-const FRAME_PROBE = true;
+const FRAME_PROBE = false;
 
 /**
  * Alt+Tab display: a grid of window previews (several rows when there are many windows).
@@ -69,6 +69,15 @@ export default function Switcher() {
       c.then((fn) => fn());
     };
   }, []);
+
+  useEffect(() => {
+    if (visible) return;
+    const id = window.setTimeout(() => {
+      setItems([]);
+      setThumbs({});
+    }, 300);
+    return () => window.clearTimeout(id);
+  }, [visible]);
 
   useEffect(() => {
     if (!FRAME_PROBE || !visible) return;

@@ -390,7 +390,11 @@ export default function WmOverview() {
       setDropSlot(null);
       setDotHover(null);
       window.clearTimeout(dotDwellTimer.current);
-      return;
+      const id = window.setTimeout(() => {
+        setData(null);
+        setThumbs({});
+      }, 360);
+      return () => window.clearTimeout(id);
     }
     openedAt.current = Date.now();
     loadState(true);

@@ -15,15 +15,24 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use windows::{
     core::{GUID, HRESULT, Interface, IUnknown, PCWSTR},
     Win32::{
-        Foundation::PROPERTYKEY,
+        Foundation::{CloseHandle, HANDLE, PROPERTYKEY},
         Media::Audio::{
-            eConsole, eRender, Endpoints::IAudioEndpointVolume, IMMDevice, IMMDeviceEnumerator,
-            MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+            eConsole, eRender,
+            Endpoints::{
+                IAudioEndpointVolume, IAudioEndpointVolumeCallback,
+                IAudioEndpointVolumeCallback_Vtbl,
+            },
+            EDataFlow, ERole, IMMDevice, IMMDeviceEnumerator, IMMNotificationClient,
+            IMMNotificationClient_Vtbl, MMDeviceEnumerator, AUDIO_VOLUME_NOTIFICATION_DATA,
+            DEVICE_STATE, DEVICE_STATE_ACTIVE,
         },
-        System::Com::{
-            CoCreateInstance, CoInitializeEx, CoTaskMemFree,
-            StructuredStorage::{PropVariantClear, PropVariantToStringAlloc},
-            CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
+        System::{
+            Com::{
+                CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+                StructuredStorage::{PropVariantClear, PropVariantToStringAlloc},
+                CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
+            },
+            Threading::{CreateEventW, SetEvent, WaitForSingleObject},
         },
         UI::Shell::PropertiesSystem::IPropertyStore,
     },
@@ -169,39 +178,216 @@ pub async fn set_volume(percent: f32) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-/// Watch for volume/mute changes (including keyboard keys) and show the volume popup.
+const S_OK: HRESULT = HRESULT(0);
+const E_NOINTERFACE: HRESULT = HRESULT(0x8000_4002u32 as i32);
+
+#[repr(C)]
+struct VolumeCallbackObj {
+    vtbl: &'static IAudioEndpointVolumeCallback_Vtbl,
+    event: isize,
+}
+
+unsafe extern "system" fn com_add_ref(_this: *mut std::ffi::c_void) -> u32 {
+    1
+}
+
+unsafe extern "system" fn com_release(_this: *mut std::ffi::c_void) -> u32 {
+    1
+}
+
+unsafe extern "system" fn vol_query_interface(
+    this: *mut std::ffi::c_void,
+    iid: *const GUID,
+    ppv: *mut *mut std::ffi::c_void,
+) -> HRESULT {
+    if iid.is_null() || ppv.is_null() {
+        return E_NOINTERFACE;
+    }
+    let id = &*iid;
+    if *id == IUnknown::IID || *id == IAudioEndpointVolumeCallback::IID {
+        *ppv = this;
+        S_OK
+    } else {
+        *ppv = std::ptr::null_mut();
+        E_NOINTERFACE
+    }
+}
+
+unsafe extern "system" fn vol_on_notify(
+    this: *mut std::ffi::c_void,
+    _pnotify: *mut AUDIO_VOLUME_NOTIFICATION_DATA,
+) -> HRESULT {
+    let obj = &*(this as *const VolumeCallbackObj);
+    let _ = SetEvent(HANDLE(obj.event as *mut std::ffi::c_void));
+    S_OK
+}
+
+static VOL_CB_VTBL: IAudioEndpointVolumeCallback_Vtbl = IAudioEndpointVolumeCallback_Vtbl {
+    base__: windows::core::IUnknown_Vtbl {
+        QueryInterface: vol_query_interface,
+        AddRef: com_add_ref,
+        Release: com_release,
+    },
+    OnNotify: vol_on_notify,
+};
+
+#[repr(C)]
+struct DeviceCallbackObj {
+    vtbl: &'static IMMNotificationClient_Vtbl,
+    event: isize,
+    device_changed: *const AtomicBool,
+}
+
+unsafe extern "system" fn dev_query_interface(
+    this: *mut std::ffi::c_void,
+    iid: *const GUID,
+    ppv: *mut *mut std::ffi::c_void,
+) -> HRESULT {
+    if iid.is_null() || ppv.is_null() {
+        return E_NOINTERFACE;
+    }
+    let id = &*iid;
+    if *id == IUnknown::IID || *id == IMMNotificationClient::IID {
+        *ppv = this;
+        S_OK
+    } else {
+        *ppv = std::ptr::null_mut();
+        E_NOINTERFACE
+    }
+}
+
+unsafe extern "system" fn dev_on_state_changed(
+    _: *mut std::ffi::c_void,
+    _: PCWSTR,
+    _: DEVICE_STATE,
+) -> HRESULT {
+    S_OK
+}
+
+unsafe extern "system" fn dev_on_added(_: *mut std::ffi::c_void, _: PCWSTR) -> HRESULT {
+    S_OK
+}
+
+unsafe extern "system" fn dev_on_removed(_: *mut std::ffi::c_void, _: PCWSTR) -> HRESULT {
+    S_OK
+}
+
+unsafe extern "system" fn dev_on_default_changed(
+    this: *mut std::ffi::c_void,
+    flow: EDataFlow,
+    role: ERole,
+    _: PCWSTR,
+) -> HRESULT {
+    if flow == eRender && role == eConsole {
+        let obj = &*(this as *const DeviceCallbackObj);
+        (*obj.device_changed).store(true, Ordering::SeqCst);
+        let _ = SetEvent(HANDLE(obj.event as *mut std::ffi::c_void));
+    }
+    S_OK
+}
+
+unsafe extern "system" fn dev_on_prop_changed(
+    _: *mut std::ffi::c_void,
+    _: PCWSTR,
+    _: PROPERTYKEY,
+) -> HRESULT {
+    S_OK
+}
+
+static DEV_CB_VTBL: IMMNotificationClient_Vtbl = IMMNotificationClient_Vtbl {
+    base__: windows::core::IUnknown_Vtbl {
+        QueryInterface: dev_query_interface,
+        AddRef: com_add_ref,
+        Release: com_release,
+    },
+    OnDeviceStateChanged: dev_on_state_changed,
+    OnDeviceAdded: dev_on_added,
+    OnDeviceRemoved: dev_on_removed,
+    OnDefaultDeviceChanged: dev_on_default_changed,
+    OnPropertyValueChanged: dev_on_prop_changed,
+};
+
+unsafe fn endpoint_from(enumerator: &IMMDeviceEnumerator) -> Option<IAudioEndpointVolume> {
+    let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
+    device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None).ok()
+}
+
+/// Watch for volume/mute and default-device changes via Core Audio COM callbacks (0% idle CPU).
 pub fn start_volume_watcher(app: AppHandle) {
     thread::spawn(move || unsafe {
-        let mut ep = endpoint();
-        let mut acquired = Instant::now();
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let Ok(wake_ev) = CreateEventW(None, false, false, None) else {
+            return;
+        };
+        let event_raw = wake_ev.0 as isize;
+        let device_changed: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+
+        let enumerator: Option<IMMDeviceEnumerator> =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok();
+        let dev_obj = Box::leak(Box::new(DeviceCallbackObj {
+            vtbl: &DEV_CB_VTBL,
+            event: event_raw,
+            device_changed: device_changed as *const AtomicBool,
+        }));
+        let dev_cb = IMMNotificationClient::from_raw((dev_obj as *mut DeviceCallbackObj).cast());
+        if let Some(ref en) = enumerator {
+            let _ = en.RegisterEndpointNotificationCallback(&dev_cb);
+        }
+
+        let vol_obj = Box::leak(Box::new(VolumeCallbackObj {
+            vtbl: &VOL_CB_VTBL,
+            event: event_raw,
+        }));
+        let vol_cb =
+            IAudioEndpointVolumeCallback::from_raw((vol_obj as *mut VolumeCallbackObj).cast());
+        let mut ep: Option<IAudioEndpointVolume> = None;
         let mut last: Option<(i32, bool)> = None;
 
         loop {
-            thread::sleep(Duration::from_millis(250));
-
-            // The default audio device can change (headphones plugged in): refresh periodically.
-            if ep.is_none() || acquired.elapsed() > Duration::from_secs(5) {
-                ep = endpoint();
-                acquired = Instant::now();
-            }
-            let Some(e) = ep.as_ref() else { continue };
-            let Some(state) = read_volume(e) else {
-                ep = None;
-                continue;
-            };
-
-            let cur = (state.volume.round() as i32, state.muted);
-            if last != Some(cur) {
-                let first_read = last.is_none();
-                last = Some(cur);
-                if !first_read {
-                    let _ = app.emit("volume-changed", state.clone());
-                    // Suppress the automatic OSD popup right after our own UI slider/mute change.
-                    if now_ms().saturating_sub(LAST_OWN_CHANGE_MS.load(Ordering::Relaxed)) >= 1500 {
-                        show_popup(&app, "volume");
-                    }
+            if ep.is_none() || device_changed.swap(false, Ordering::SeqCst) {
+                if let Some(prev) = ep.take() {
+                    let _ = prev.UnregisterControlChangeNotify(&vol_cb);
+                }
+                ep = enumerator.as_ref().and_then(|en| endpoint_from(en)).or_else(|| endpoint());
+                if let Some(ref next) = ep {
+                    let _ = next.RegisterControlChangeNotify(&vol_cb);
                 }
             }
+
+            if let Some(ref e) = ep {
+                if let Some(state) = read_volume(e) {
+                    let cur = (state.volume.round() as i32, state.muted);
+                    if last != Some(cur) {
+                        let first_read = last.is_none();
+                        last = Some(cur);
+                        if !first_read {
+                            let _ = app.emit("volume-changed", state.clone());
+                            // Suppress the automatic OSD popup right after our own UI slider/mute change.
+                            if now_ms().saturating_sub(LAST_OWN_CHANGE_MS.load(Ordering::Relaxed))
+                                >= 1500
+                            {
+                                show_popup(&app, "volume");
+                            }
+                        }
+                    }
+                } else {
+                    let _ = e.UnregisterControlChangeNotify(&vol_cb);
+                    ep = None;
+                    let _ = WaitForSingleObject(wake_ev, 1000);
+                    continue;
+                }
+            } else {
+                let _ = WaitForSingleObject(wake_ev, 2000);
+                continue;
+            }
+
+            // Sleep indefinitely until volume/mute or default audio output changes (30s safety wakeup).
+            let _ = WaitForSingleObject(wake_ev, 30_000);
+        }
+
+        #[allow(unreachable_code)]
+        {
+            let _ = CloseHandle(wake_ev);
         }
     });
 }

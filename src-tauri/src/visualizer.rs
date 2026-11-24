@@ -447,7 +447,7 @@ fn run_worker(app: AppHandle) {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
 
-    let mut analyzer = Analyzer::new();
+    let mut analyzer: Option<Box<Analyzer>> = None;
     let mut session: Option<CaptureSession> = None;
     let mut last_device_check = Instant::now();
     let mut last_active = Instant::now();
@@ -457,7 +457,7 @@ fn run_worker(app: AppHandle) {
         if !ACTIVE.load(Ordering::SeqCst) {
             if session.is_some() && last_active.elapsed() >= Duration::from_millis(STOP_GRACE_MS) {
                 session = None;
-                analyzer.reset();
+                analyzer = None;
                 if !sent_zero {
                     let _ = app.emit_to(
                         "notch",
@@ -472,6 +472,7 @@ fn run_worker(app: AppHandle) {
             }
 
             if session.is_none() {
+                analyzer = None;
                 let (lock, cvar) = wakeup();
                 if let Ok(mut guard) = lock.lock() {
                     while !*guard && !ACTIVE.load(Ordering::SeqCst) {
@@ -495,7 +496,9 @@ fn run_worker(app: AppHandle) {
                     if let Some(cur_id) = default_device_id(&enumerator) {
                         if session.as_ref().map(|s| s.device_id != cur_id).unwrap_or(false) {
                             session = None;
-                            analyzer.reset();
+                            if let Some(az) = analyzer.as_mut() {
+                                az.reset();
+                            }
                         }
                     }
                 }
@@ -511,6 +514,7 @@ fn run_worker(app: AppHandle) {
             }
         }
 
+        let az = analyzer.get_or_insert_with(|| Box::new(Analyzer::new()));
         let mut invalidate = false;
         let mut got_frames = 0usize;
         let sample_rate = session.as_ref().unwrap().mix.sample_rate;
@@ -540,14 +544,14 @@ fn run_worker(app: AppHandle) {
                     got_frames += frames;
 
                     if (flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)) != 0 || data_ptr.is_null() {
-                        analyzer.push_silence(frames);
+                        az.push_silence(frames);
                     } else {
                         for f in 0..frames {
                             let sample = decode_mono_sample(
                                 data_ptr.add(f * sess.mix.block_align),
                                 &sess.mix,
                             );
-                            analyzer.push_sample(sample);
+                            az.push_sample(sample);
                         }
                     }
 
@@ -561,7 +565,7 @@ fn run_worker(app: AppHandle) {
 
         if invalidate {
             session = None;
-            analyzer.reset();
+            az.reset();
             thread::sleep(Duration::from_millis(80));
             continue;
         }
@@ -569,10 +573,10 @@ fn run_worker(app: AppHandle) {
         // When Windows is silent, WASAPI loopback produces 0 packets; push silence so the FFT decays cleanly.
         if got_frames == 0 {
             let silent_samples = ((sample_rate as f32) * (TICK_MS as f32 / 1000.0)) as usize;
-            analyzer.push_silence(silent_samples);
+            az.push_silence(silent_samples);
         }
 
-        let (bands, beat) = analyzer.process(sample_rate);
+        let (bands, beat) = az.process(sample_rate);
         let is_zero = beat == 0.0 && bands.iter().all(|&v| v == 0.0);
 
         if !is_zero || !sent_zero {

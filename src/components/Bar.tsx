@@ -63,7 +63,7 @@ function batteryIcon(b: BatteryStatus): string {
 
 export default function Bar() {
   const visible = useEdgeVisible("bar");
-  const now = useNow();
+  const now = useNow(visible);
   const cfg = useConfig();
   const wifi = useWifi(visible);
   const battery = useBattery(visible);
@@ -95,9 +95,12 @@ export default function Bar() {
 
   useEffect(() => {
     if (!visible) return;
-    invoke<QuickState>("quick_get")
-      .then((s) => setPowerMode(s.power_mode))
-      .catch(() => {});
+    const id = window.setTimeout(() => {
+      invoke<QuickState>("quick_get")
+        .then((s) => setPowerMode(s.power_mode))
+        .catch(() => {});
+    }, 240);
+    return () => window.clearTimeout(id);
   }, [visible]);
 
   const cyclePower = () => {

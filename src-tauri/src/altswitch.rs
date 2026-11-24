@@ -80,7 +80,8 @@ const SLOW_LIST_MS: u128 = 40;
 /// Minimum interval between hook reinstalls by the watchdog.
 const REINSTALL_COOLDOWN_MS: u64 = 200;
 const PROACTIVE_REINSTALL_DEBOUNCE_MS: u64 = 40;
-const WATCHDOG_POLL: Duration = Duration::from_millis(4);
+const WATCHDOG_POLL_ACTIVE: Duration = Duration::from_millis(4);
+const WATCHDOG_POLL_IDLE: Duration = Duration::from_millis(28);
 const MISSED_TAB_GRACE_MS: u64 = 0;
 const RECENT_TAB_SEEN_MS: u64 = 80;
 /// Let the panel settle before thumbnail capture can compete for CPU time.
@@ -854,7 +855,12 @@ fn watchdog() {
     let mut combo: Option<(u64, u64, bool)> = None;
     let mut was_alt_down = false;
     loop {
-        thread::sleep(WATCHDOG_POLL);
+        let poll = if was_alt_down || ACTIVE.load(Ordering::Relaxed) {
+            WATCHDOG_POLL_ACTIVE
+        } else {
+            WATCHDOG_POLL_IDLE
+        };
+        thread::sleep(poll);
         if DIAG.swap(0, Ordering::Relaxed) & 1 != 0 {
             eprintln!("[alt+tab] Alt+Tab handed to Windows: Ctrl or Win was held down");
         }

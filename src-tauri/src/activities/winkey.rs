@@ -64,8 +64,9 @@ const VK_RWIN: u32 = 0x5C;
 const VK_NEUTRAL: u32 = 0xE8;
 /// Matches `VSCROLL_COMBO_TAG` in `vscroll-wm`: signals that a WM shortcut swallowed a Win combo.
 const VSCROLL_COMBO_TAG: usize = 0x5653_4352;
-/// Polling interval.
-const POLL_MS: u64 = 8;
+/// Polling intervals: slower while idle (supplement hook catches instant presses), fast while Win is held.
+const POLL_IDLE_MS: u64 = 18;
+const POLL_ACTIVE_MS: u64 = 6;
 /// Coalesce masking from the hook and poller for the same Win-down.
 const MASK_DEDUPE_MS: u32 = 60;
 
@@ -236,7 +237,8 @@ fn poller() {
     let mut base = [false; 256];
 
     loop {
-        thread::sleep(Duration::from_millis(POLL_MS));
+        let poll_ms = if was { POLL_ACTIVE_MS } else { POLL_IDLE_MS };
+        thread::sleep(Duration::from_millis(poll_ms));
         if !ENABLED.load(Ordering::Relaxed) {
             was = false;
             if let Some(ev) = combo_ev {

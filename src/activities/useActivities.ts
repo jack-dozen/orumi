@@ -62,20 +62,27 @@ export function useActivities() {
   }, []);
 
   useEffect(() => {
+    let clearTimer: number | undefined;
     const offs = [
       listen<SnapWindow[]>("activities-open", (e) => {
+        window.clearTimeout(clearTimer);
         setWins(e.payload ?? []);
         setOpenCount((n) => n + 1);
         refreshWorkspaces();
         // Two frames ensure the opening transition is actually visible.
         requestAnimationFrame(() => requestAnimationFrame(() => setVisible(true)));
       }),
-      listen("activities-close", () => setVisible(false)),
+      listen("activities-close", () => {
+        setVisible(false);
+        window.clearTimeout(clearTimer);
+        clearTimer = window.setTimeout(() => setWins([]), 350);
+      }),
       listen("workspaces-changed", () => {
         refreshWorkspaces();
       }),
     ];
     return () => {
+      window.clearTimeout(clearTimer);
       offs.forEach((p) => p.then((off) => off()));
     };
   }, [refreshWorkspaces]);

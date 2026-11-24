@@ -252,6 +252,7 @@ pub fn activities_startup_end(app: AppHandle) {
         }
         if let Some(window) = a.get_webview_window(LABEL) {
             let _ = window.hide();
+            place_panel(&window);
             let _ = window.set_ignore_cursor_events(false);
             crate::edge::set_activatable(&window, true);
         }

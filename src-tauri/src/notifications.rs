@@ -1142,8 +1142,12 @@ fn sync_once(app: &AppHandle, emit_popups: bool) {
     if let Some(items) = changed_items {
         let _ = app.emit_to("notch", "notif-changed", &items);
     }
-    for toast in new_toasts {
-        let _ = app.emit_to("notch", "notif-toast", &toast);
+    if !new_toasts.is_empty() {
+        crate::edge::notify_notch_popup_with(app, Duration::from_millis(5800), move |a| {
+            for toast in new_toasts {
+                let _ = a.emit_to("notch", "notif-toast", &toast);
+            }
+        });
     }
 }
 

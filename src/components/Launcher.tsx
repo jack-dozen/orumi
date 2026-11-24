@@ -78,6 +78,8 @@ export default function Launcher() {
   const [index, setIndex] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
   const [view, setView] = useState<"list" | "wallpaper" | "settings" | "cheatsheet">("list");
+  const [listMounted, setListMounted] = useState(false);
+  const [renderLimit, setRenderLimit] = useState(36);
   /** A view requested from outside (tray menu / hotkey) before the launcher finished opening. */
   const pendingView = useRef<"settings" | "cheatsheet" | null>(null);
   const [csFromLauncher, setCsFromLauncher] = useState(false);
@@ -138,6 +140,8 @@ export default function Launcher() {
     const unlisten = listen<boolean>("edge-visible:launcher", (e) => {
       openRef.current = e.payload;
       if (!e.payload) return;
+      setListMounted(true);
+      setRenderLimit(36);
       openedAt.current = Date.now();
       setQuery("");
       setMode("apps");
@@ -224,12 +228,14 @@ export default function Launcher() {
   useEffect(() => {
     if (!visible) {
       const id = window.setTimeout(() => {
+        setListMounted(false);
         setView("list");
         setPickerWidth(null);
         setSettingsWidth(null);
-      }, 320);
+      }, 360);
       return () => window.clearTimeout(id);
     }
+    setListMounted(true);
     if (!focusOnOpen.current) {
       inputRef.current?.blur();
       return;
@@ -389,11 +395,29 @@ export default function Launcher() {
   const showList = !compact || mode === "actions" || query.trim().length > 0;
   // Browsing all apps shows A-Z top-to-bottom; searching & actions keep best match closest to the search box.
   const reversed = mode === "actions" || query.trim().length > 0;
+  const effectiveLimit = Math.max(renderLimit, index + 12);
+  const shownResults = useMemo(
+    () => (listMounted ? results.slice(0, effectiveLimit) : []),
+    [listMounted, results, effectiveLimit],
+  );
 
-  // Reset scroll position when opening or switching query/mode.
+  // Reset scroll position and render window when opening or switching query/mode.
   useEffect(() => {
+    setRenderLimit(36);
     if (listRef.current) listRef.current.scrollTop = 0;
   }, [visible, query, mode]);
+
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (!el || effectiveLimit >= results.length) return;
+    // In column-reverse, scrollTop becomes negative as the user scrolls toward older items at the top.
+    const nearEnd = reversed
+      ? Math.abs(el.scrollTop) + el.clientHeight >= el.scrollHeight - 220
+      : el.scrollTop + el.clientHeight >= el.scrollHeight - 220;
+    if (nearEnd) {
+      setRenderLimit((n) => Math.max(n, effectiveLimit) + 40);
+    }
+  };
 
   // Keep keyboard-selected item visible inside the scrollable list.
   useEffect(() => {
@@ -466,7 +490,7 @@ export default function Launcher() {
         style={{ width, height: height ?? undefined }}
       >
         <div className="lpanel__clip">
-          <div className="lpanel__inner" ref={innerRef}>
+          <div className="lpanel__inner" ref={innerRef} style={{ width }}>
             <div key={view} className="lpanel__stage">
               {view === "settings" ? (
             <LauncherSettings onBack={() => setView("list")} onWidth={setSettingsWidth} />
@@ -485,17 +509,20 @@ export default function Launcher() {
             />
           ) : (
             <>
-              {showList && (
+              {showList && listMounted && (
                 <div
                   ref={listRef}
                   className={`launcher__list ${reversed ? "launcher__list--reverse" : ""}`}
+                  onScroll={onListScroll}
                 >
                   {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
-                  {results.map((item, i) => (
+                  {shownResults.map((item, i) => (
                     <div
                       key={item.key}
                       className={`litem ${i === index ? "litem--active" : ""}`}
-                      onMouseMove={() => setIndex(i)}
+                      onMouseMove={() => {
+                        if (i !== index) setIndex(i);
+                      }}
                       onClick={() => activate(item)}
                     >
                       {item.icon ? (

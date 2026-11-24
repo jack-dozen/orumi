@@ -114,7 +114,7 @@ function Dashboard({
   weather: Weather | null;
   visible: boolean;
 }) {
-  const now = useNow();
+  const now = useNow(visible);
   const today = now.getDate();
   const [monthOffset, setMonthOffset] = useState(0);
   const ramPct = stats ? (stats.mem_used / stats.mem_total) * 100 : null;
@@ -992,7 +992,7 @@ function CompactNotch({
   onExpand: (targetTab?: TabId) => void;
   onOpenLyrics: () => void;
 }) {
-  const now = useNow();
+  const now = useNow(active);
   const playing = Boolean(media.info?.playing);
   const { barRefs } = useVisualizerBars(active && playing, COMPACT_VIZ_BARS, {
     minScale: 0.18,
@@ -1189,8 +1189,28 @@ export default function Notch() {
     invoke("notch_set_lyrics_pin", { pinned: next }).catch(() => {});
   };
 
-  // Fetch data only while the notch is visible and its tab uses it.
-  const stats = useStats(visible && !compact && (tab === "dashboard" || tab === "system"));
+  // Defer heavy stats/GPU/process/Wi-Fi polling until after the open slide finishes (~200ms).
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!visible || compact) {
+      setSettled(false);
+      return;
+    }
+    const id = window.setTimeout(() => setSettled(true), 200);
+    return () => window.clearTimeout(id);
+  }, [visible, compact]);
+
+  // Drop cached Rust process tables shortly after Notch finishes closing.
+  useEffect(() => {
+    if (visible) return;
+    const id = window.setTimeout(() => {
+      invoke("release_stats_cache").catch(() => {});
+    }, 420);
+    return () => window.clearTimeout(id);
+  }, [visible]);
+
+  // Fetch data only while the notch is settled and its tab uses it.
+  const stats = useStats(settled && (tab === "dashboard" || tab === "system"));
   const media = useMedia((opening || visible) && (compact || tab === "dashboard" || tab === "media"));
   const compactMediaPlaying = compact && Boolean(media.info?.playing);
   useVisualizerSource(
@@ -1198,9 +1218,9 @@ export default function Notch() {
       ((compactMediaPlaying && !compactLyrics) ||
         (!compact && (tab === "dashboard" || tab === "media") && Boolean(media.info))),
   );
-  const procs = useProcesses(visible && !compact && tab === "system");
-  const gpu = useGpu(visible && !compact && (tab === "dashboard" || tab === "system"));
-  const wifi = useWifi(visible && !compact && tab === "settings");
+  const procs = useProcesses(settled && tab === "system");
+  const gpu = useGpu(settled && (tab === "dashboard" || tab === "system"));
+  const wifi = useWifi(settled && tab === "settings");
   const cfg = useConfig();
   const weather = useWeather(cfg?.weather_city ?? "Bandung");
   const notifsEnabled = cfg?.notifications_enabled ?? true;
@@ -1378,13 +1398,23 @@ export default function Notch() {
 
   // Top-notch workspace OSD when switching workspaces while the full notch is closed.
   useEffect(() => {
+    let raf1 = 0;
+    let raf2 = 0;
     const unlisten = listen<WsOsd>("workspace-osd", (e) => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
       setWsOsd(e.payload);
-      setOsdOpen(true);
+      raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => {
+          setOsdOpen(true);
+        });
+      });
       window.clearTimeout(osdTimer.current);
-      osdTimer.current = window.setTimeout(() => setOsdOpen(false), 1100);
+      osdTimer.current = window.setTimeout(() => setOsdOpen(false), 1150);
     });
     return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
       unlisten.then((fn) => fn());
       window.clearTimeout(osdTimer.current);
     };
@@ -1413,7 +1443,7 @@ export default function Notch() {
       style={{ width, height: height ?? undefined }}
     >
       <div className="notch__clip">
-        <div className="notch__inner" ref={innerRef}>
+        <div className="notch__inner" ref={innerRef} style={{ width }}>
           {activeMode === "ws" && wsOsd ? (
             <div key="ws" className="notch__stage">
               <div className="wsosd" aria-hidden="true">
