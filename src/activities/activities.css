@@ -981,6 +981,127 @@
   }
 }
 
+/* When Screen Border is active, droplets flatten into edge puddles and hand off to the spreading border. */
+.act-splash--border .act-splash__edge {
+  display: none;
+}
+
+.act-splash--border .act-splash__drop--top {
+  animation-name: splash-fly-top-border;
+}
+
+.act-splash--border .act-splash__drop--bottom {
+  animation-name: splash-fly-bottom-border;
+}
+
+.act-splash--border .act-splash__drop--left {
+  animation-name: splash-fly-left-border;
+}
+
+.act-splash--border .act-splash__drop--right {
+  animation-name: splash-fly-right-border;
+}
+
+@keyframes splash-fly-top-border {
+  0%,
+  58% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(50vh - 104px), 0) scale(0.85, 1.05);
+  }
+  60% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(50vh - 104px), 0) scale(0.85, 1.12);
+  }
+  79% {
+    opacity: 1;
+    transform: translate3d(-50%, 2px, 0) scale(0.76, 1.38);
+  }
+  83% {
+    opacity: 0.95;
+    transform: translate3d(-50%, -4px, 0) scale(2.4, 0.42);
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, -6px, 0) scale(3.2, 0.25);
+  }
+}
+
+@keyframes splash-fly-bottom-border {
+  0%,
+  58% {
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50vh + 104px), 0) scale(0.85, 1.05);
+  }
+  60% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-50vh + 104px), 0) scale(0.85, 1.12);
+  }
+  79% {
+    opacity: 1;
+    transform: translate3d(-50%, -2px, 0) scale(0.76, 1.38);
+  }
+  83% {
+    opacity: 0.95;
+    transform: translate3d(-50%, 4px, 0) scale(2.4, 0.42);
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translate3d(-50%, 6px, 0) scale(3.2, 0.25);
+  }
+}
+
+@keyframes splash-fly-left-border {
+  0%,
+  58% {
+    opacity: 0;
+    transform: translate3d(calc(50vw - 104px), -50%, 0) scale(1.05, 0.85);
+  }
+  60% {
+    opacity: 1;
+    transform: translate3d(calc(50vw - 104px), -50%, 0) scale(1.12, 0.85);
+  }
+  79% {
+    opacity: 1;
+    transform: translate3d(2px, -50%, 0) scale(1.38, 0.76);
+  }
+  83% {
+    opacity: 0.95;
+    transform: translate3d(-4px, -50%, 0) scale(0.42, 2.4);
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translate3d(-6px, -50%, 0) scale(0.25, 3.2);
+  }
+}
+
+@keyframes splash-fly-right-border {
+  0%,
+  58% {
+    opacity: 0;
+    transform: translate3d(calc(-50vw + 104px), -50%, 0) scale(1.05, 0.85);
+  }
+  60% {
+    opacity: 1;
+    transform: translate3d(calc(-50vw + 104px), -50%, 0) scale(1.12, 0.85);
+  }
+  79% {
+    opacity: 1;
+    transform: translate3d(-2px, -50%, 0) scale(1.38, 0.76);
+  }
+  83% {
+    opacity: 0.95;
+    transform: translate3d(4px, -50%, 0) scale(0.42, 2.4);
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translate3d(6px, -50%, 0) scale(0.25, 3.2);
+  }
+}
+
 /* Pixel-aligned Mica wallpaper backdrop (works in Material You & Windows 11 Fluent) */
 [data-mica="on"] .act {
   --mica-tint: color-mix(in srgb, var(--surface) 74%, transparent);

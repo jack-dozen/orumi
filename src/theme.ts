@@ -627,6 +627,13 @@ export function useTheme(isSource: boolean) {
             syncCachedTheme();
           }),
         ),
+        addListener(
+          listen("border-spread", () => {
+            if (cancelled) return;
+            if (currentMica) void syncWindowMica(currentScale);
+            syncCachedTheme();
+          }),
+        ),
       );
     }
 

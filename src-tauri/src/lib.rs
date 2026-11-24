@@ -184,11 +184,13 @@ pub fn run() {
             edge::notch_set_height,
             edge::notch_set_toast_rect,
             edge::notch_set_lyrics_pin,
+            edge::border_mode,
             notifications::notif_list,
             notifications::notif_mark_read,
             notifications::notif_clear_all,
             notifications::notif_open,
             activities::activities_startup_begin,
+            activities::activities_startup_border_impact,
             activities::activities_startup_end,
             activities::activities_toggle,
             activities::activities_close,
@@ -275,6 +277,9 @@ pub fn run() {
             let cfg = config::current(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
             edge::set_screen_border(cfg.screen_border, cfg.screen_border_size);
+            if cfg.startup_animation && cfg.screen_border {
+                edge::set_border_startup_hold(true);
+            }
             edge::set_panel_prefs(cfg.panels.clone());
             capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());

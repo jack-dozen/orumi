@@ -1,6 +1,8 @@
 import { useEffect, useMemo } from "react";
 
 const SPLASH_DURATION_MS = 2400;
+/** Fires right as the four droplets reach the screen edges (at ~78-80% of SPLASH_DURATION_MS). */
+const IMPACT_MS = 1860;
 
 function greetingFor(hour: number): string {
   if (hour >= 5 && hour < 12) return "Good morning";
@@ -12,18 +14,31 @@ function greetingFor(hour: number): string {
 /**
  * Fullscreen click-through startup splash:
  * forms a liquid pill at the screen center with a dynamic greeting + "Welcome",
- * then splits into four droplets that fall and absorb into the four screen edges.
+ * then splits into four droplets that fall and absorb into the four screen edges
+ * (or spread out into the screen border when `borderActive` is enabled).
  */
-export default function StartupSplash({ onDone }: { onDone: () => void }) {
+export default function StartupSplash({
+  borderActive,
+  onBorderImpact,
+  onDone,
+}: {
+  borderActive: boolean;
+  onBorderImpact: () => void;
+  onDone: () => void;
+}) {
   const greeting = useMemo(() => greetingFor(new Date().getHours()), []);
 
   useEffect(() => {
-    const timer = window.setTimeout(onDone, SPLASH_DURATION_MS);
-    return () => window.clearTimeout(timer);
-  }, [onDone]);
+    const impactTimer = borderActive ? window.setTimeout(onBorderImpact, IMPACT_MS) : null;
+    const doneTimer = window.setTimeout(onDone, SPLASH_DURATION_MS);
+    return () => {
+      if (impactTimer !== null) window.clearTimeout(impactTimer);
+      window.clearTimeout(doneTimer);
+    };
+  }, [borderActive, onBorderImpact, onDone]);
 
   return (
-    <div className="act-splash" aria-hidden="true">
+    <div className={`act-splash ${borderActive ? "act-splash--border" : ""}`} aria-hidden="true">
       {/* Compact SVG filter kept strictly around the center 380x380 stage for low GPU cost. */}
       <svg className="act-splash__defs" width="0" height="0" aria-hidden="true">
         <defs>

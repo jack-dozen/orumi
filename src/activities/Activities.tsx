@@ -76,6 +76,7 @@ export default function Activities() {
   const [cols, setCols] = useState(() => colsFor(window.innerWidth));
   const [activeLetter, setActiveLetter] = useState("#");
   const [splash, setSplash] = useState(false);
+  const [splashBorder, setSplashBorder] = useState(false);
   const [contentMounted, setContentMounted] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -125,11 +126,15 @@ export default function Activities() {
       );
     };
 
-    const unGo = listen("activities-startup-go", () => {
+    const unGo = listen<boolean>("activities-startup-go", (e) => {
       if (cancelled) return;
+      const withBorder = Boolean(e.payload);
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
-          if (!cancelled) setSplash(true);
+          if (!cancelled) {
+            setSplashBorder(withBorder);
+            setSplash(true);
+          }
         }),
       );
     });
@@ -150,6 +155,10 @@ export default function Activities() {
       unAbort.then((fn) => fn());
       unTheme.then((fn) => fn());
     };
+  }, []);
+
+  const triggerBorderSpread = useCallback(() => {
+    invoke("activities_startup_border_impact").catch(() => {});
   }, []);
 
   const finishSplash = useCallback(() => {
@@ -382,7 +391,13 @@ export default function Activities() {
   // ---------- View ----------
 
   if (splash && !visible) {
-    return <StartupSplash onDone={finishSplash} />;
+    return (
+      <StartupSplash
+        borderActive={splashBorder}
+        onBorderImpact={triggerBorderSpread}
+        onDone={finishSplash}
+      />
+    );
   }
 
   return (

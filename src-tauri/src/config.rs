@@ -622,6 +622,9 @@ pub fn set_config(
         || new.screen_border != old.screen_border
         || new.screen_border_size != old.screen_border_size
     {
+        if new.screen_border != old.screen_border {
+            crate::edge::set_border_startup_hold(false);
+        }
         crate::edge::set_ui_scale(new.ui_scale);
         crate::edge::set_screen_border(new.screen_border, new.screen_border_size);
         crate::apply_layout(&app);

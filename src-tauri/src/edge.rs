@@ -235,6 +235,71 @@ pub fn set_screen_border(enabled: bool, size: u8) {
 
 static BORDER_WANT_SHOW: AtomicBool = AtomicBool::new(false);
 static BORDER_TX: OnceLock<mpsc::Sender<AppHandle>> = OnceLock::new();
+/// Keep the border window pre-warmed but visually hidden until startup droplets hit the edges.
+static BORDER_STARTUP_HOLD: AtomicBool = AtomicBool::new(false);
+const BORDER_MODE_HIDDEN: u8 = 0;
+const BORDER_MODE_VISIBLE: u8 = 1;
+const BORDER_MODE_SPREAD: u8 = 2;
+static BORDER_MODE: AtomicU8 = AtomicU8::new(BORDER_MODE_HIDDEN);
+
+pub fn set_border_startup_hold(hold: bool) {
+    BORDER_STARTUP_HOLD.store(hold, Ordering::Relaxed);
+    if hold {
+        BORDER_MODE.store(BORDER_MODE_HIDDEN, Ordering::Relaxed);
+    }
+    wake();
+}
+
+pub fn is_border_startup_hold() -> bool {
+    BORDER_STARTUP_HOLD.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+pub fn border_mode() -> &'static str {
+    match BORDER_MODE.load(Ordering::Relaxed) {
+        BORDER_MODE_VISIBLE => "visible",
+        BORDER_MODE_SPREAD => "spread",
+        _ => "hidden",
+    }
+}
+
+/// Release the startup hold and play the liquid edge-spread reveal on the `"border"` window.
+pub fn trigger_border_startup_spread(app: &AppHandle) {
+    if !BORDER_STARTUP_HOLD.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    if !is_screen_border() || crate::winlist::is_foreground_fullscreen() {
+        BORDER_MODE.store(BORDER_MODE_HIDDEN, Ordering::Relaxed);
+        return;
+    }
+    BORDER_MODE.store(BORDER_MODE_SPREAD, Ordering::Relaxed);
+    thread::spawn(|| {
+        thread::sleep(Duration::from_millis(900));
+        let _ = BORDER_MODE.compare_exchange(
+            BORDER_MODE_SPREAD,
+            BORDER_MODE_VISIBLE,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    });
+    if let Some(border) = app.get_webview_window("border") {
+        // Pre-warmed fast path: emit directly for minimal latency sync with droplet impact.
+        let _ = border.emit("border-spread", ());
+    } else {
+        sync_border_window(app, true);
+    }
+}
+
+/// Release the startup hold without spread animation (fallback when splash is skipped/aborted).
+pub fn release_border_startup_hold(app: &AppHandle) {
+    if !BORDER_STARTUP_HOLD.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    if is_screen_border() && !crate::winlist::is_foreground_fullscreen() {
+        BORDER_MODE.store(BORDER_MODE_VISIBLE, Ordering::Relaxed);
+        sync_border_window(app, true);
+    }
+}
 
 fn configure_and_show_border_on_main(app_handle: &AppHandle) {
     use std::mem::size_of;
@@ -339,7 +404,15 @@ fn configure_and_show_border_on_main(app_handle: &AppHandle) {
             }
         }
     }
-    let _ = border.emit("border-visible", true);
+    if is_border_startup_hold() {
+        BORDER_MODE.store(BORDER_MODE_HIDDEN, Ordering::Relaxed);
+        let _ = border.emit("border-visible", false);
+    } else if BORDER_MODE.load(Ordering::Relaxed) == BORDER_MODE_SPREAD {
+        let _ = border.emit("border-spread", ());
+    } else {
+        BORDER_MODE.store(BORDER_MODE_VISIBLE, Ordering::Relaxed);
+        let _ = border.emit("border-visible", true);
+    }
 }
 
 /// Show/position or destroy the click-through fullscreen `"border"` window via a serialized
@@ -358,6 +431,7 @@ pub fn sync_border_window(app: &AppHandle, show: bool) {
                 while rx.try_recv().is_ok() {}
                 let show = BORDER_WANT_SHOW.load(Ordering::Relaxed);
                 if !show {
+                    BORDER_MODE.store(BORDER_MODE_HIDDEN, Ordering::Relaxed);
                     if app.get_webview_window("border").is_some() {
                         let (done_tx, done_rx) = mpsc::sync_channel::<()>(1);
                         let app_main = app.clone();
@@ -1482,6 +1556,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
         let mut border_shown = false;
         let mut was_notch_overlay = notch_has_overlay();
         let mut interval = POLL_FAST;
+        let started_at = Instant::now();
 
         for p in &panels {
             if !p.visible && !p.pinned.load(Ordering::Relaxed) {
@@ -1499,6 +1574,9 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             if last_fs_check.elapsed() >= Duration::from_millis(200) {
                 fullscreen = crate::winlist::is_foreground_fullscreen();
                 last_fs_check = Instant::now();
+            }
+            if is_border_startup_hold() && started_at.elapsed() >= Duration::from_secs(4) {
+                release_border_startup_hold(&app);
             }
             let want_border = is_screen_border() && !fullscreen;
             if want_border != border_shown {
