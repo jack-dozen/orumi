@@ -135,44 +135,45 @@ export default function Switcher() {
   return (
     <div className="swroot">
       <div
-        ref={panelRef}
         className={`swpanel swpanel--${SWITCHER_ANIM} ${visible ? "swpanel--visible" : ""}`}
       >
-        <div className="swgrid" style={gridStyle}>
-          {items.map((it, i) => {
-            const name = it.exe || it.title;
-            const thumb = thumbs[it.hwnd];
-            return (
-              <div
-                key={it.hwnd}
-                ref={i === index ? activeRef : undefined}
-                className={`swcard ${i === index ? "swcard--active" : ""} ${
-                  it.minimized ? "swcard--min" : ""
-                }`}
-                onClick={() => invoke("switcher_pick", { index: i })}
-              >
-                <div className="swthumb">
-                  {thumb ? (
-                    <Thumb src={convertFileSrc(thumb)} />
-                  ) : (
+        <div ref={panelRef} className="swpanel__clip">
+          <div className="swgrid" style={gridStyle}>
+            {items.map((it, i) => {
+              const name = it.exe || it.title;
+              const thumb = thumbs[it.hwnd];
+              return (
+                <div
+                  key={it.hwnd}
+                  ref={i === index ? activeRef : undefined}
+                  className={`swcard ${i === index ? "swcard--active" : ""} ${
+                    it.minimized ? "swcard--min" : ""
+                  }`}
+                  onClick={() => invoke("switcher_pick", { index: i })}
+                >
+                  <div className="swthumb">
+                    {thumb ? (
+                      <Thumb src={convertFileSrc(thumb)} />
+                    ) : (
+                      <AppIcon
+                        target={windowIconTarget(it)}
+                        fallback={name.charAt(0).toUpperCase()}
+                        size={48}
+                      />
+                    )}
+                  </div>
+                  <div className="swlabel">
                     <AppIcon
                       target={windowIconTarget(it)}
                       fallback={name.charAt(0).toUpperCase()}
-                      size={48}
+                      size={16}
                     />
-                  )}
+                    <span>{it.title}</span>
+                  </div>
                 </div>
-                <div className="swlabel">
-                  <AppIcon
-                    target={windowIconTarget(it)}
-                    fallback={name.charAt(0).toUpperCase()}
-                    size={16}
-                  />
-                  <span>{it.title}</span>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

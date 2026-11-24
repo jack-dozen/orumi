@@ -98,6 +98,8 @@ const CARD_W: f64 = 200.0;
 const CARD_H: f64 = 158.0;
 const GRID_GAP: f64 = 10.0;
 const GRID_PAD: f64 = 16.0;
+/// Horizontal room on each side of the panel for the 15px concave edge ears (matching notch/launcher's 40px total margin).
+const EAR_MARGIN: f64 = 20.0;
 /// The panel is at most this wide, and at most this fraction of the screen width.
 const MAX_PANEL_W: f64 = 1800.0;
 const MAX_W_FRACTION: f64 = 0.92;
@@ -479,7 +481,8 @@ struct GridLayout {
 /// window size for that screen so the native WebView2 window never resizes when `n` changes.
 fn grid_layout(n: usize, screen: (f64, f64)) -> (GridLayout, (f64, f64)) {
     let n = n.max(1);
-    let max_w = (screen.0 * MAX_W_FRACTION).min(MAX_PANEL_W);
+    let max_w = ((screen.0 * MAX_W_FRACTION).min(MAX_PANEL_W) - 2.0 * EAR_MARGIN)
+        .max(CARD_W + 2.0 * GRID_PAD);
     let cols_max = (((max_w - 2.0 * GRID_PAD + GRID_GAP) / (CARD_W + GRID_GAP)).floor() as usize).max(1);
     let rows_all = n.div_ceil(cols_max);
     // Balance the rows instead of filling the first one and leaving a single card below.
@@ -488,7 +491,7 @@ fn grid_layout(n: usize, screen: (f64, f64)) -> (GridLayout, (f64, f64)) {
         (((screen.1 * MAX_H_FRACTION - 2.0 * GRID_PAD + GRID_GAP) / (CARD_H + GRID_GAP)).floor() as usize)
             .max(1);
 
-    let win_w = cols_max as f64 * (CARD_W + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
+    let win_w = cols_max as f64 * (CARD_W + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD + 2.0 * EAR_MARGIN;
     let win_h = rows_max as f64 * (CARD_H + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
     let layout = GridLayout {
         cols,

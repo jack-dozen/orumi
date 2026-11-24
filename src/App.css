@@ -2544,31 +2544,73 @@ button {
 }
 
 .swpanel {
+  position: relative;
   box-sizing: border-box;
-  max-width: 100%;
+  max-width: calc(100% - 36px);
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  scrollbar-width: none;
+  overflow: visible;
+  visibility: hidden;
   background: var(--surface);
   border-radius: 28px 28px 0 0;
   pointer-events: none;
 
   /* Pure slide (no fade): the panel starts fully below the window edge, which clips it. */
   transform: translateY(100%);
-  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 200ms;
   /* Own compositor layer: the slide-in runs without main-thread work. */
   will-change: transform;
 }
 
-.swpanel::-webkit-scrollbar {
-  display: none;
-}
-
 .swpanel--visible {
+  visibility: visible;
   transform: translateY(0);
   pointer-events: auto;
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 0s;
+}
+
+/* Bottom-edge meniscus ears connecting the switcher smoothly into the screen bottom */
+.swpanel::before,
+.swpanel::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 15px;
+  height: 15px;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.swpanel::before {
+  right: 100%;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 0 0, transparent 14.2px, #000 14.8px);
+}
+
+.swpanel::after {
+  left: 100%;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 14.2px, #000 14.8px);
+}
+
+.swpanel__clip {
+  position: relative;
+  width: 100%;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  border-radius: inherit;
+}
+
+.swpanel__clip::-webkit-scrollbar {
+  display: none;
 }
 
 /* Animation variants (see SWITCHER_ANIM in Switcher.tsx). */
@@ -2577,12 +2619,17 @@ button {
   transform: translateY(10px);
   transition:
     transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 110ms linear;
+    opacity 110ms linear,
+    visibility 0s linear 140ms;
 }
 
 .swpanel--fade.swpanel--visible {
   opacity: 1;
   transform: none;
+  transition:
+    transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 110ms linear,
+    visibility 0s linear 0s;
 }
 
 .swpanel--none {
@@ -4599,6 +4646,8 @@ button.vb__icon:hover {
 [data-mica="on"]:not([data-style="fluent"]) .notch::after,
 [data-mica="on"]:not([data-style="fluent"]) .lpanel::before,
 [data-mica="on"]:not([data-style="fluent"]) .lpanel::after,
+[data-mica="on"]:not([data-style="fluent"]) .swpanel::before,
+[data-mica="on"]:not([data-style="fluent"]) .swpanel::after,
 [data-mica="on"]:not([data-style="fluent"]) .bar::before,
 [data-mica="on"]:not([data-style="fluent"]) .bar::after,
 [data-mica="on"]:not([data-style="fluent"]) .wmov::before,
@@ -4631,14 +4680,16 @@ button.vb__icon:hover {
       calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px)));
 }
 
-[data-mica="on"]:not([data-style="fluent"]) .lpanel::before {
+[data-mica="on"]:not([data-style="fluent"]) .lpanel::before,
+[data-mica="on"]:not([data-style="fluent"]) .swpanel::before {
   background-position:
     0 0,
     calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) - 15px))
       calc(-1 * (var(--mica-win-y, 0px) + var(--mica-el-y, 0px) + var(--mica-el-h, 0px) - 15px));
 }
 
-[data-mica="on"]:not([data-style="fluent"]) .lpanel::after {
+[data-mica="on"]:not([data-style="fluent"]) .lpanel::after,
+[data-mica="on"]:not([data-style="fluent"]) .swpanel::after {
   background-position:
     0 0,
     calc(-1 * (var(--mica-win-x, 0px) + var(--mica-el-x, 0px) + var(--mica-el-w, 0px)))
@@ -4696,6 +4747,8 @@ button.vb__icon:hover {
 [data-style="fluent"] .notch::after,
 [data-style="fluent"] .lpanel::before,
 [data-style="fluent"] .lpanel::after,
+[data-style="fluent"] .swpanel::before,
+[data-style="fluent"] .swpanel::after,
 [data-style="fluent"] .bar::before,
 [data-style="fluent"] .bar::after,
 [data-style="fluent"] .wmov::before,
