@@ -99,6 +99,7 @@ pub fn show(app: &AppHandle) {
     }
     if STARTUP_ACTIVE.swap(false, Ordering::SeqCst) {
         let _ = app.emit_to(LABEL, "activities-startup-abort", ());
+        crate::edge::release_border_startup_hold(app);
     }
     let app = app.clone();
     thread::spawn(move || {
@@ -211,22 +212,28 @@ fn place_fullscreen(window: &WebviewWindow) {
 
 #[tauri::command]
 pub fn activities_startup_begin(app: AppHandle) -> bool {
-    if !crate::config::current(&app).startup_animation {
+    let cfg = crate::config::current(&app);
+    if !cfg.startup_animation {
         STARTUP_DONE.store(true, Ordering::SeqCst);
+        crate::edge::release_border_startup_hold(&app);
         return false;
     }
     if OPEN.load(Ordering::SeqCst) || STARTUP_DONE.swap(true, Ordering::SeqCst) {
+        crate::edge::release_border_startup_hold(&app);
         return false;
     }
     STARTUP_ACTIVE.store(true, Ordering::SeqCst);
+    let border_active = cfg.screen_border;
     let a = app.clone();
     let _ = app.run_on_main_thread(move || {
         if OPEN.load(Ordering::SeqCst) || !STARTUP_ACTIVE.load(Ordering::SeqCst) {
             STARTUP_ACTIVE.store(false, Ordering::SeqCst);
+            crate::edge::release_border_startup_hold(&a);
             return;
         }
         let Some(window) = a.get_webview_window(LABEL) else {
             STARTUP_ACTIVE.store(false, Ordering::SeqCst);
+            crate::edge::release_border_startup_hold(&a);
             return;
         };
         place_fullscreen(&window);
@@ -234,13 +241,19 @@ pub fn activities_startup_begin(app: AppHandle) -> bool {
         let _ = window.set_ignore_cursor_events(true);
         let _ = window.set_always_on_top(true);
         let _ = window.show();
-        let _ = a.emit_to(LABEL, "activities-startup-go", ());
+        let _ = a.emit_to(LABEL, "activities-startup-go", border_active);
     });
     true
 }
 
 #[tauri::command]
+pub fn activities_startup_border_impact(app: AppHandle) {
+    crate::edge::trigger_border_startup_spread(&app);
+}
+
+#[tauri::command]
 pub fn activities_startup_end(app: AppHandle) {
+    crate::edge::release_border_startup_hold(&app);
     if !STARTUP_ACTIVE.swap(false, Ordering::SeqCst) {
         return;
     }
@@ -252,6 +265,7 @@ pub fn activities_startup_end(app: AppHandle) {
         }
         if let Some(window) = a.get_webview_window(LABEL) {
             let _ = window.hide();
+            place_panel(&window);
             let _ = window.set_ignore_cursor_events(false);
             crate::edge::set_activatable(&window, true);
         }

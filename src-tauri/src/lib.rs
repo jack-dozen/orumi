@@ -98,6 +98,22 @@ const PANELS: [PanelSpec; 7] = [
     },
 ];
 
+/// Ask Windows to trim unused pages from this process's working set after startup/heavy allocations.
+pub fn trim_working_set() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn SetProcessWorkingSetSize(
+            hprocess: isize,
+            dwminimumworkingsetsize: usize,
+            dwmaximumworkingsetsize: usize,
+        ) -> i32;
+    }
+    unsafe {
+        let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+    }
+}
+
 /// Apply size, position, and zoom to all panels. Called at startup and when the scale changes.
 pub fn apply_layout(app: &AppHandle) {
     for spec in PANELS {
@@ -129,6 +145,12 @@ pub fn run() {
         taskbar::run_guard(&args);
         return;
     }
+
+    // Cap the global Rayon pool so thumbnail capture never spawns a dozen permanent worker threads.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .thread_name(|i| format!("orumi-rayon-{i}"))
+        .build_global();
 
     tauri::Builder::default()
         // Must be the first plugin. A second instance exits immediately; the first stays idle.
@@ -162,11 +184,13 @@ pub fn run() {
             edge::notch_set_height,
             edge::notch_set_toast_rect,
             edge::notch_set_lyrics_pin,
+            edge::border_mode,
             notifications::notif_list,
             notifications::notif_mark_read,
             notifications::notif_clear_all,
             notifications::notif_open,
             activities::activities_startup_begin,
+            activities::activities_startup_border_impact,
             activities::activities_startup_end,
             activities::activities_toggle,
             activities::activities_close,
@@ -188,6 +212,7 @@ pub fn run() {
             config::set_config,
             stats::get_stats,
             stats::get_top_processes,
+            stats::release_stats_cache,
             gpu::get_gpu,
             wifi::get_wifi,
             wifi::wifi_list,
@@ -252,6 +277,9 @@ pub fn run() {
             let cfg = config::current(app.handle());
             edge::set_ui_scale(cfg.ui_scale);
             edge::set_screen_border(cfg.screen_border, cfg.screen_border_size);
+            if cfg.startup_animation && cfg.screen_border {
+                edge::set_border_startup_hold(true);
+            }
             edge::set_panel_prefs(cfg.panels.clone());
             capture::clear_cache(app.handle());
             taskbar::spawn_guard(app.handle());
@@ -290,8 +318,11 @@ pub fn run() {
             visualizer::start(app.handle().clone());
             wifi::start_notifications(app.handle().clone());
             winlist::start_events(app.handle().clone());
-            wallpaper::warm(app.handle().clone());
             wm_ipc::start(app.handle().clone());
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(4));
+                trim_working_set();
+            });
             activities::init(app.handle())?;
             config::sync_win_key(&cfg);
             // Install the swallowing Alt+Tab hook last so it is first in the low-level hook chain.

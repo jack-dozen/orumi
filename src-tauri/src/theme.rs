@@ -21,6 +21,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 static THEME: Mutex<Option<String>> = Mutex::new(None);
 /// Cached blurred wallpaper path for the Windows 11 Mica effect.
 static MICA_PATH: Mutex<Option<String>> = Mutex::new(None);
+/// Serialize full-resolution wallpaper decoding so `wallpaper_pixels` and `mica_backdrop`
+/// never decode two 4K images in parallel.
+static DECODE_LOCK: Mutex<()> = Mutex::new(());
 
 const MICA_VERSION: u32 = 1;
 const MICA_WIDTH: u32 = 420;
@@ -105,14 +108,56 @@ pub struct SmallImage {
     data: String,
 }
 
+fn cache_dir(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_cache_dir()
+        .ok()
+        .map(|d| d.join("mica"))
+        .unwrap_or_else(|| std::env::temp_dir().join("edgeshell-mica"))
+}
+
+fn stamp_hash(stamp: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    (MICA_VERSION, stamp).hash(&mut h);
+    h.finish()
+}
+
 #[tauri::command]
-pub async fn wallpaper_pixels() -> Result<Option<SmallImage>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
+pub async fn wallpaper_pixels(app: AppHandle) -> Result<Option<SmallImage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
         let path = wallpaper_path()?;
+        let stamp = wallpaper_stamp()?;
         let meta = fs::metadata(&path).ok()?;
         if meta.len() == 0 || meta.len() > 80_000_000 {
             return None;
         }
+
+        let dir = cache_dir(&app);
+        let _ = fs::create_dir_all(&dir);
+        let px_file = dir.join(format!("px_{:016x}.png", stamp_hash(&stamp)));
+        if px_file.is_file() {
+            if let Ok(img) = image::open(&px_file) {
+                let small = img.to_rgba8();
+                return Some(SmallImage {
+                    width: small.width(),
+                    height: small.height(),
+                    data: STANDARD.encode(small.as_raw()),
+                });
+            }
+        }
+
+        let _guard = DECODE_LOCK.lock().ok()?;
+        if px_file.is_file() {
+            if let Ok(img) = image::open(&px_file) {
+                let small = img.to_rgba8();
+                return Some(SmallImage {
+                    width: small.width(),
+                    height: small.height(),
+                    data: STANDARD.encode(small.as_raw()),
+                });
+            }
+        }
+
         let img = image::ImageReader::open(&path)
             .ok()?
             .with_guessed_format()
@@ -120,6 +165,26 @@ pub async fn wallpaper_pixels() -> Result<Option<SmallImage>, String> {
             .decode()
             .ok()?;
         let small = img.thumbnail(128, 128).to_rgba8();
+        drop(img);
+
+        let tmp = px_file.with_extension("png.tmp");
+        if small.save_with_format(&tmp, ImageFormat::Png).is_ok() {
+            let _ = fs::rename(&tmp, &px_file);
+            if let Ok(entries) = fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p != px_file
+                        && p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with("px_"))
+                    {
+                        let _ = fs::remove_file(p);
+                    }
+                }
+            }
+        }
+        crate::trim_working_set();
+
         Some(SmallImage {
             width: small.width(),
             height: small.height(),
@@ -155,16 +220,16 @@ fn generate_mica_file(app: &AppHandle) -> Option<String> {
         if w > 0 && h > 0 { (w, h) } else { (1920, 1080) }
     };
 
-    let dir = app
-        .path()
-        .app_cache_dir()
-        .ok()
-        .map(|d| d.join("mica"))
-        .unwrap_or_else(|| std::env::temp_dir().join("edgeshell-mica"));
+    let dir = cache_dir(app);
     let _ = fs::create_dir_all(&dir);
     let _ = app.asset_protocol_scope().allow_directory(&dir, false);
 
     let file = dir.join(format!("{:016x}.jpg", mica_hash(&stamp, sw, sh)));
+    if file.is_file() {
+        return Some(file.to_string_lossy().into_owned());
+    }
+
+    let _guard = DECODE_LOCK.lock().ok()?;
     if file.is_file() {
         return Some(file.to_string_lossy().into_owned());
     }
@@ -194,6 +259,8 @@ fn generate_mica_file(app: &AppHandle) -> Option<String> {
     let out_w = MICA_WIDTH;
     let out_h = ((out_w as f64 / target_ar).round() as u32).max(1);
     let resized = cropped.resize_exact(out_w, out_h, FilterType::Triangle);
+    drop(cropped);
+    drop(img);
     let blurred = image::imageops::blur(&resized.to_rgba8(), MICA_BLUR_SIGMA);
     let rgb = image::DynamicImage::ImageRgba8(blurred).to_rgb8();
 
@@ -201,15 +268,21 @@ fn generate_mica_file(app: &AppHandle) -> Option<String> {
     rgb.save_with_format(&tmp, ImageFormat::Jpeg).ok()?;
     let _ = fs::rename(&tmp, &file);
 
-    // Keep cache directory tidy (only the active Mica backdrop).
+    // Keep cache directory tidy (only the active Mica backdrop and seed pixel cache).
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p != file {
+            if p != file
+                && !p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("px_"))
+            {
                 let _ = fs::remove_file(p);
             }
         }
     }
+    crate::trim_working_set();
 
     Some(file.to_string_lossy().into_owned())
 }

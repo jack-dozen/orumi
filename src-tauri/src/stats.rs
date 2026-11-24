@@ -30,22 +30,26 @@ struct Inner {
     net_at: Instant,
 }
 
-pub struct StatsState(Mutex<Inner>);
+pub struct StatsState(Mutex<Option<Inner>>);
 
 impl StatsState {
     pub fn new() -> Self {
-        let mut sys = System::new().expect("gagal menginisialisasi sysinfo");
-        // The first CPU reading is always 0, so warm it up first.
-        sys.refresh_cpu_usage();
-        sys.refresh_memory();
-        let nets = Networks::new_with_refreshed_list().ok();
-        Self(Mutex::new(Inner {
-            sys,
-            disk: (0, 0),
-            disk_at: None,
-            nets,
-            net_at: Instant::now(),
-        }))
+        Self(Mutex::new(None))
+    }
+}
+
+fn init_inner() -> Inner {
+    let mut sys = System::new().expect("gagal menginisialisasi sysinfo");
+    // The first CPU reading is always 0, so warm it up first.
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
+    let nets = Networks::new_with_refreshed_list().ok();
+    Inner {
+        sys,
+        disk: (0, 0),
+        disk_at: None,
+        nets,
+        net_at: Instant::now(),
     }
 }
 
@@ -70,7 +74,8 @@ fn read_system_disk() -> (u64, u64) {
 /// Async so it does not run on the main thread.
 #[tauri::command]
 pub async fn get_stats(state: State<'_, StatsState>) -> Result<Stats, String> {
-    let mut inner = state.0.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+    let inner = guard.get_or_insert_with(init_inner);
 
     inner.sys.refresh_cpu_usage();
     inner.sys.refresh_memory();
@@ -130,12 +135,12 @@ pub struct ProcEntry {
     count: u32,
 }
 
-/// Process-specific system, separate so dashboard statistics do not also scan processes.
-pub struct ProcState(Mutex<System>);
+/// Process-specific system, lazily allocated while the Notch System tab is active.
+pub struct ProcState(Mutex<Option<System>>);
 
 impl ProcState {
     pub fn new() -> Self {
-        Self(Mutex::new(System::new().expect("gagal menginisialisasi sysinfo")))
+        Self(Mutex::new(None))
     }
 }
 
@@ -143,7 +148,9 @@ const TOP_PROCESSES: usize = 6;
 
 #[tauri::command]
 pub async fn get_top_processes(state: State<'_, ProcState>) -> Result<Vec<ProcEntry>, String> {
-    let mut sys = state.0.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+    let sys = guard
+        .get_or_insert_with(|| System::new().expect("gagal menginisialisasi sysinfo"));
 
     // Use `let _` so this compiles whether the result is () or Result.
     let _ = sys.refresh_processes_specifics(
@@ -187,4 +194,13 @@ pub async fn get_top_processes(state: State<'_, ProcState>) -> Result<Vec<ProcEn
     });
     list.truncate(TOP_PROCESSES);
     Ok(list)
+}
+
+/// Release the cached `sysinfo` process table when the Notch closes so idle memory drops.
+#[tauri::command]
+pub fn release_stats_cache(procs: State<'_, ProcState>) {
+    if let Ok(mut guard) = procs.0.lock() {
+        *guard = None;
+    }
+    crate::trim_working_set();
 }

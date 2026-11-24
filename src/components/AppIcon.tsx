@@ -19,6 +19,39 @@ function load(target: string): Promise<string | null> {
   return p;
 }
 
+/** Shared IntersectionObserver per window so lazy icon lists don't allocate hundreds of observers. */
+const lazyCallbacks = new WeakMap<Element, () => void>();
+let sharedObserver: IntersectionObserver | null = null;
+
+function observeLazy(el: Element, onVisible: () => void): () => void {
+  if (typeof IntersectionObserver === "undefined") {
+    onVisible();
+    return () => {};
+  }
+  if (!sharedObserver) {
+    sharedObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const cb = lazyCallbacks.get(entry.target);
+          if (cb) {
+            lazyCallbacks.delete(entry.target);
+            sharedObserver?.unobserve(entry.target);
+            cb();
+          }
+        }
+      },
+      { rootMargin: "200px 0px" },
+    );
+  }
+  lazyCallbacks.set(el, onVisible);
+  sharedObserver.observe(el);
+  return () => {
+    lazyCallbacks.delete(el);
+    sharedObserver?.unobserve(el);
+  };
+}
+
 /**
  * App icon. target: "aumid:<AppID>" or "path:<.exe path>".
  * Show the `fallback` letter until the icon is available (or if fetching it fails).
@@ -48,22 +81,12 @@ export default function AppIcon({
       return;
     }
     const el = elRef.current;
-    if (!el || typeof IntersectionObserver === "undefined") {
+    if (!el) {
       setInView(true);
       return;
     }
     setInView(false);
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setInView(true);
-          io.disconnect();
-        }
-      },
-      { rootMargin: "160px 0px" },
-    );
-    io.observe(el);
-    return () => io.disconnect();
+    return observeLazy(el, () => setInView(true));
   }, [lazy, target]);
 
   useEffect(() => {
@@ -96,6 +119,7 @@ export default function AppIcon({
         className={`appimg ${className ?? ""}`}
         src={url}
         alt=""
+        decoding="async"
         draggable={false}
         style={box}
       />

@@ -3,7 +3,7 @@ use std::{
     ffi::c_void,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
-        Arc, Mutex, OnceLock,
+        mpsc, Arc, Mutex, OnceLock,
     },
     thread,
     time::{Duration, Instant},
@@ -80,6 +80,135 @@ pub const BORDER_RADIUS_DIP: f64 = 24.0;
 /// Off-screen bleed on each side of the `"border"` window (design units) so any Windows 11 DWM
 /// outer-corner rounding sits completely outside the visible monitor area.
 const BORDER_BLEED_DIP: f64 = 16.0;
+/// Shared WebView2 browser flags required by all ORUMI windows so they share one renderer/process pool.
+const BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site";
+/// Hide native panel HWNDs after close transitions finish so DWM & WebView2 release idle surfaces.
+const HIDE_CLOSED_WINDOWS: bool = true;
+const HIDE_AFTER_CLOSE: Duration = Duration::from_millis(420);
+
+static VIS_SEQ: OnceLock<Mutex<HashMap<&'static str, u64>>> = OnceLock::new();
+static NOTCH_POPUP_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn vis_seq_map() -> &'static Mutex<HashMap<&'static str, u64>> {
+    VIS_SEQ.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn bump_vis_seq(label: &'static str) -> u64 {
+    let mut map = vis_seq_map().lock().unwrap_or_else(|e| e.into_inner());
+    let next = map.get(label).copied().unwrap_or(0).wrapping_add(1);
+    map.insert(label, next);
+    next
+}
+
+fn current_vis_seq(label: &str) -> u64 {
+    vis_seq_map()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(label).copied())
+        .unwrap_or(0)
+}
+
+fn show_window_noactivate(window: &WebviewWindow) {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{IsWindowVisible, ShowWindow, SW_SHOWNOACTIVATE},
+    };
+    if let Ok(raw) = window.hwnd() {
+        let hwnd = HWND(raw.0 as isize as *mut c_void);
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            }
+        }
+    }
+}
+
+fn hide_window_native(window: &WebviewWindow) {
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{IsWindowVisible, ShowWindow, SW_HIDE},
+    };
+    if let Ok(raw) = window.hwnd() {
+        let hwnd = HWND(raw.0 as isize as *mut c_void);
+        unsafe {
+            if IsWindowVisible(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+    }
+}
+
+fn notch_has_overlay() -> bool {
+    if NOTCH_LYRICS_PIN.load(Ordering::Relaxed) {
+        return true;
+    }
+    if TOAST_RECT.lock().ok().is_some_and(|r| r.is_some()) {
+        return true;
+    }
+    NOTCH_POPUP_UNTIL
+        .lock()
+        .ok()
+        .and_then(|u| *u)
+        .is_some_and(|until| Instant::now() < until)
+}
+
+fn schedule_hide(app: AppHandle, label: &'static str, seq: u64, delay: Duration) {
+    if !HIDE_CLOSED_WINDOWS {
+        return;
+    }
+    thread::spawn(move || {
+        thread::sleep(delay);
+        if current_vis_seq(label) != seq {
+            return;
+        }
+        if label == "notch" && notch_has_overlay() {
+            return;
+        }
+        let app_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if current_vis_seq(label) != seq {
+                return;
+            }
+            if label == "notch" && notch_has_overlay() {
+                return;
+            }
+            if let Some(w) = app_main.get_webview_window(label) {
+                hide_window_native(&w);
+            }
+        });
+    });
+}
+
+/// Ensure the closed notch window is unhidden on the main thread before emitting a transient
+/// workspace OSD or notification toast payload.
+pub fn notify_notch_popup_with<F>(app: &AppHandle, duration: Duration, after_show: F)
+where
+    F: FnOnce(&AppHandle) + Send + 'static,
+{
+    let target = Instant::now() + duration;
+    if let Ok(mut u) = NOTCH_POPUP_UNTIL.lock() {
+        *u = Some(match *u {
+            Some(prev) if prev > target => prev,
+            _ => target,
+        });
+    }
+    let app_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = app_main.get_webview_window("notch") {
+            show_window_noactivate(&w);
+        }
+        after_show(&app_main);
+    });
+    wake();
+}
+
+fn cursor_position_win32() -> Option<PhysicalPosition<f64>> {
+    use windows::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
+    let mut pt = POINT::default();
+    unsafe { GetCursorPos(&mut pt).ok()? };
+    Some(PhysicalPosition::new(pt.x as f64, pt.y as f64))
+}
 
 // ---------- Screen border (can be changed at runtime) ----------
 
@@ -104,9 +233,75 @@ pub fn set_screen_border(enabled: bool, size: u8) {
     wake();
 }
 
-/// Show/position or hide the click-through fullscreen `"border"` window on the main thread,
-/// keeping every ORUMI panel strictly above it in the topmost Z-order band.
-pub fn sync_border_window(app: &AppHandle, show: bool) {
+static BORDER_WANT_SHOW: AtomicBool = AtomicBool::new(false);
+static BORDER_TX: OnceLock<mpsc::Sender<AppHandle>> = OnceLock::new();
+/// Keep the border window pre-warmed but visually hidden until startup droplets hit the edges.
+static BORDER_STARTUP_HOLD: AtomicBool = AtomicBool::new(false);
+const BORDER_MODE_HIDDEN: u8 = 0;
+const BORDER_MODE_VISIBLE: u8 = 1;
+const BORDER_MODE_SPREAD: u8 = 2;
+static BORDER_MODE: AtomicU8 = AtomicU8::new(BORDER_MODE_HIDDEN);
+
+pub fn set_border_startup_hold(hold: bool) {
+    BORDER_STARTUP_HOLD.store(hold, Ordering::Relaxed);
+    if hold {
+        BORDER_MODE.store(BORDER_MODE_HIDDEN, Ordering::Relaxed);
+    }
+    wake();
+}
+
+pub fn is_border_startup_hold() -> bool {
+    BORDER_STARTUP_HOLD.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+pub fn border_mode() -> &'static str {
+    match BORDER_MODE.load(Ordering::Relaxed) {
+        BORDER_MODE_VISIBLE => "visible",
+        BORDER_MODE_SPREAD => "spread",
+        _ => "hidden",
+    }
+}
+
+/// Release the startup hold and play the liquid edge-spread reveal on the `"border"` window.
+pub fn trigger_border_startup_spread(app: &AppHandle) {
+    if !BORDER_STARTUP_HOLD.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    if !is_screen_border() || crate::winlist::is_foreground_fullscreen() {
+        BORDER_MODE.store(BORDER_MODE_HIDDEN, Ordering::Relaxed);
+        return;
+    }
+    BORDER_MODE.store(BORDER_MODE_SPREAD, Ordering::Relaxed);
+    thread::spawn(|| {
+        thread::sleep(Duration::from_millis(900));
+        let _ = BORDER_MODE.compare_exchange(
+            BORDER_MODE_SPREAD,
+            BORDER_MODE_VISIBLE,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    });
+    if let Some(border) = app.get_webview_window("border") {
+        // Pre-warmed fast path: emit directly for minimal latency sync with droplet impact.
+        let _ = border.emit("border-spread", ());
+    } else {
+        sync_border_window(app, true);
+    }
+}
+
+/// Release the startup hold without spread animation (fallback when splash is skipped/aborted).
+pub fn release_border_startup_hold(app: &AppHandle) {
+    if !BORDER_STARTUP_HOLD.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    if is_screen_border() && !crate::winlist::is_foreground_fullscreen() {
+        BORDER_MODE.store(BORDER_MODE_VISIBLE, Ordering::Relaxed);
+        sync_border_window(app, true);
+    }
+}
+
+fn configure_and_show_border_on_main(app_handle: &AppHandle) {
     use std::mem::size_of;
     use windows::Win32::{
         Foundation::HWND,
@@ -121,102 +316,207 @@ pub fn sync_border_window(app: &AppHandle, show: bool) {
         },
     };
 
-    let app_handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let Some(border) = app_handle.get_webview_window("border") else {
-            return;
-        };
-        set_activatable(&border, false);
-        let _ = border.set_ignore_cursor_events(true);
-        if show {
-            let _ = border.set_zoom(ui_scale());
-            let border_hwnd = border.hwnd().ok().map(|raw| HWND(raw.0 as isize as *mut c_void));
-            let metrics = monitor_metrics(&border);
-            if let (Some((mx, my, mw, mh, scale)), Some(hwnd)) = (metrics, border_hwnd) {
-                let bleed = (BORDER_BLEED_DIP * scale * ui_scale()).round();
-                let x = (mx - bleed).round() as i32;
-                let y = (my - bleed).round() as i32;
-                let w = (mw + 2.0 * bleed).round() as i32;
-                let h = (mh + 2.0 * bleed).round() as i32;
+    let Some(border) = app_handle.get_webview_window("border") else {
+        return;
+    };
+
+    set_activatable(&border, false);
+    let _ = border.set_ignore_cursor_events(true);
+    let _ = border.set_zoom(ui_scale());
+    let border_hwnd = border.hwnd().ok().map(|raw| HWND(raw.0 as isize as *mut c_void));
+    let metrics = monitor_metrics(&border);
+    if let (Some((mx, my, mw, mh, scale)), Some(hwnd)) = (metrics, border_hwnd) {
+        let bleed = (BORDER_BLEED_DIP * scale * ui_scale()).round();
+        let x = (mx - bleed).round() as i32;
+        let y = (my - bleed).round() as i32;
+        let w = (mw + 2.0 * bleed).round() as i32;
+        let h = (mh + 2.0 * bleed).round() as i32;
+        unsafe {
+            let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+            let clean = (style
+                & !(WS_CAPTION.0 | WS_THICKFRAME.0 | WS_BORDER.0 | WS_DLGFRAME.0))
+                | WS_POPUP.0;
+            if clean != style {
+                SetWindowLongW(hwnd, GWL_STYLE, clean as i32);
+            }
+            let pref = DWMWCP_DONOTROUND;
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &pref as *const DWM_WINDOW_CORNER_PREFERENCE as *const c_void,
+                size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+            );
+            let no_border: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR,
+                &no_border as *const u32 as *const c_void,
+                size_of::<u32>() as u32,
+            );
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                x,
+                y,
+                w,
+                h,
+                SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+        }
+    }
+    show_window_noactivate(&border);
+    if let Some(hwnd) = border_hwnd {
+        unsafe {
+            let pref = DWMWCP_DONOTROUND;
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &pref as *const DWM_WINDOW_CORNER_PREFERENCE as *const c_void,
+                size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+            );
+        }
+    }
+    // Keep all ORUMI panels above the border in Z-order so sliding panels & bar fillets cover border corners.
+    for label in [
+        "bar",
+        "overview",
+        "notch",
+        "launcher",
+        "overlay",
+        "switcher",
+        "preview",
+        "activities",
+    ] {
+        if let Some(w) = app_handle.get_webview_window(label) {
+            if let Ok(raw) = w.hwnd() {
+                let hwnd = HWND(raw.0 as isize as *mut c_void);
                 unsafe {
-                    let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
-                    let clean = (style
-                        & !(WS_CAPTION.0 | WS_THICKFRAME.0 | WS_BORDER.0 | WS_DLGFRAME.0))
-                        | WS_POPUP.0;
-                    if clean != style {
-                        SetWindowLongW(hwnd, GWL_STYLE, clean as i32);
-                    }
-                    let pref = DWMWCP_DONOTROUND;
-                    let _ = DwmSetWindowAttribute(
-                        hwnd,
-                        DWMWA_WINDOW_CORNER_PREFERENCE,
-                        &pref as *const DWM_WINDOW_CORNER_PREFERENCE as *const c_void,
-                        size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
-                    );
-                    let no_border: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE
-                    let _ = DwmSetWindowAttribute(
-                        hwnd,
-                        DWMWA_BORDER_COLOR,
-                        &no_border as *const u32 as *const c_void,
-                        size_of::<u32>() as u32,
-                    );
                     let _ = SetWindowPos(
                         hwnd,
                         Some(HWND_TOPMOST),
-                        x,
-                        y,
-                        w,
-                        h,
-                        SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
                     );
                 }
             }
-            let _ = border.show();
-            if let Some(hwnd) = border_hwnd {
-                unsafe {
-                    let pref = DWMWCP_DONOTROUND;
-                    let _ = DwmSetWindowAttribute(
-                        hwnd,
-                        DWMWA_WINDOW_CORNER_PREFERENCE,
-                        &pref as *const DWM_WINDOW_CORNER_PREFERENCE as *const c_void,
-                        size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
-                    );
-                }
-            }
-            // Keep all ORUMI panels above the border in Z-order so sliding panels & bar fillets cover border corners.
-            for label in [
-                "bar",
-                "overview",
-                "notch",
-                "launcher",
-                "overlay",
-                "switcher",
-                "preview",
-                "activities",
-            ] {
-                if let Some(w) = app_handle.get_webview_window(label) {
-                    if let Ok(raw) = w.hwnd() {
-                        let hwnd = HWND(raw.0 as isize as *mut c_void);
-                        unsafe {
-                            let _ = SetWindowPos(
-                                hwnd,
-                                Some(HWND_TOPMOST),
-                                0,
-                                0,
-                                0,
-                                0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
-                            );
+        }
+    }
+    if is_border_startup_hold() {
+        BORDER_MODE.store(BORDER_MODE_HIDDEN, Ordering::Relaxed);
+        let _ = border.emit("border-visible", false);
+    } else if BORDER_MODE.load(Ordering::Relaxed) == BORDER_MODE_SPREAD {
+        let _ = border.emit("border-spread", ());
+    } else {
+        BORDER_MODE.store(BORDER_MODE_VISIBLE, Ordering::Relaxed);
+        let _ = border.emit("border-visible", true);
+    }
+}
+
+/// Show/position or destroy the click-through fullscreen `"border"` window via a serialized
+/// background worker thread (creating/destroying windows inside `run_on_main_thread` deadlocks
+/// Tauri v2's event loop on Windows), keeping every ORUMI panel above it in topmost Z-order.
+pub fn sync_border_window(app: &AppHandle, show: bool) {
+    BORDER_WANT_SHOW.store(show, Ordering::Relaxed);
+    if !show && app.get_webview_window("border").is_none() && BORDER_TX.get().is_none() {
+        return;
+    }
+
+    let tx = BORDER_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<AppHandle>();
+        let run_worker = move || {
+            while let Ok(app) = rx.recv() {
+                while rx.try_recv().is_ok() {}
+                let show = BORDER_WANT_SHOW.load(Ordering::Relaxed);
+                if !show {
+                    BORDER_MODE.store(BORDER_MODE_HIDDEN, Ordering::Relaxed);
+                    if app.get_webview_window("border").is_some() {
+                        let (done_tx, done_rx) = mpsc::sync_channel::<()>(1);
+                        let app_main = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            if let Some(b) = app_main.get_webview_window("border") {
+                                let _ = b.emit("border-visible", false);
+                                hide_window_native(&b);
+                            }
+                            let _ = done_tx.send(());
+                        });
+                        let _ = done_rx.recv_timeout(Duration::from_secs(2));
+
+                        if !is_screen_border() && !BORDER_WANT_SHOW.load(Ordering::Relaxed) {
+                            thread::sleep(Duration::from_millis(60));
+                            if !is_screen_border() && !BORDER_WANT_SHOW.load(Ordering::Relaxed) {
+                                if let Some(b) = app.get_webview_window("border") {
+                                    let _ = b.destroy();
+                                }
+                            }
                         }
                     }
+                    continue;
                 }
+
+                if app.get_webview_window("border").is_none() {
+                    // Build off the main thread with `visible(false)` so it never flashes at 1280x720
+                    // before fullscreen bleed positioning runs on the main thread.
+                    let built = tauri::WebviewWindowBuilder::new(
+                        &app,
+                        "border",
+                        tauri::WebviewUrl::App("index.html".into()),
+                    )
+                    .title("edgeshell-border")
+                    .inner_size(1280.0, 720.0)
+                    .position(0.0, 0.0)
+                    .visible(false)
+                    .transparent(true)
+                    .decorations(false)
+                    .shadow(false)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .resizable(false)
+                    .focused(false)
+                    .disable_drag_drop_handler()
+                    .additional_browser_args(BROWSER_ARGS)
+                    .build();
+                    if let Err(e) = built {
+                        eprintln!("[border] failed to create border window: {e}");
+                        continue;
+                    }
+                }
+
+                if !BORDER_WANT_SHOW.load(Ordering::Relaxed) {
+                    if !is_screen_border() {
+                        if let Some(b) = app.get_webview_window("border") {
+                            let _ = b.destroy();
+                        }
+                    }
+                    continue;
+                }
+
+                let (done_tx, done_rx) = mpsc::sync_channel::<()>(1);
+                let app_main = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if BORDER_WANT_SHOW.load(Ordering::Relaxed) {
+                        configure_and_show_border_on_main(&app_main);
+                    }
+                    let _ = done_tx.send(());
+                });
+                let _ = done_rx.recv_timeout(Duration::from_secs(2));
             }
-            let _ = border.emit("border-visible", true);
-        } else {
-            let _ = border.emit("border-visible", false);
-            let _ = border.hide();
+        };
+
+        if thread::Builder::new()
+            .name("border-window".into())
+            .spawn(run_worker)
+            .is_err()
+        {
+            // Should never fail on Windows unless OS threads are exhausted; `get_or_init` needs a live receiver.
+            eprintln!("[border] failed to spawn border-window thread");
         }
+        tx
     });
+
+    let _ = tx.send(app.clone());
 }
 
 // ---------- UI scale (can be changed at runtime) ----------
@@ -966,6 +1266,7 @@ fn set_visible(
     let window = window.clone();
     let event = event.to_string();
     let spec = *spec;
+    let seq = bump_vis_seq(spec.label);
     let queued = Instant::now();
     let _ = app.run_on_main_thread(move || {
         let started = Instant::now();
@@ -984,6 +1285,7 @@ fn set_visible(
 
             // The display can change (power, resolution, dock), so reset each time it appears.
             let _ = place(&window, &spec);
+            show_window_noactivate(&window);
             if !is_topmost(&window) {
                 let _ = window.set_always_on_top(true);
             }
@@ -1005,6 +1307,9 @@ fn set_visible(
             mask_alt_if_down();
         }
         let _ = window.emit(event.as_str(), show);
+        if !show {
+            schedule_hide(app_handle.clone(), spec.label, seq, HIDE_AFTER_CLOSE);
+        }
         if spec.label != "switcher" {
             if !show {
                 // If an ORUMI panel (launcher, notch, bar) still holds foreground focus when closing,
@@ -1019,7 +1324,9 @@ fn set_visible(
                     crate::winlist::restore_external_foreground_if_ours();
                 }
             }
-            crate::altswitch::ensure_hook(if show { "panel opened" } else { "panel closed" });
+            if spec.focus || matches!(spec.label, "launcher" | "overview" | "overlay") {
+                crate::altswitch::ensure_hook(if show { "panel opened" } else { "panel closed" });
+            }
             if launcher_focus {
                 crate::wm_ipc::ensure_hook();
                 if show {
@@ -1184,6 +1491,9 @@ fn toast_hit_rect(m: Metrics) -> Option<Rect> {
 fn set_toast_passthrough(app: &AppHandle, window: &WebviewWindow, ignore: bool) {
     let window = window.clone();
     let _ = app.run_on_main_thread(move || {
+        if !ignore {
+            show_window_noactivate(&window);
+        }
         let _ = window.set_ignore_cursor_events(ignore);
     });
 }
@@ -1237,14 +1547,22 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
             return;
         }
 
-        // Use one window to read cursor and monitor state.
+        // Use one window to read monitor state, and hide initially-closed windows once hydrated.
         let probe = panels[0].window.clone();
         let mut metrics = monitor_metrics(&probe);
         let mut last_refresh = Instant::now();
         let mut last_fs_check = Instant::now() - Duration::from_secs(1);
         let mut fullscreen = false;
         let mut border_shown = false;
+        let mut was_notch_overlay = notch_has_overlay();
         let mut interval = POLL_FAST;
+        let started_at = Instant::now();
+
+        for p in &panels {
+            if !p.visible && !p.pinned.load(Ordering::Relaxed) {
+                schedule_hide(app.clone(), p.spec.label, current_vis_seq(p.spec.label), Duration::from_millis(1800));
+            }
+        }
 
         loop {
             thread::park_timeout(interval);
@@ -1257,13 +1575,31 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 fullscreen = crate::winlist::is_foreground_fullscreen();
                 last_fs_check = Instant::now();
             }
+            if is_border_startup_hold() && started_at.elapsed() >= Duration::from_secs(4) {
+                release_border_startup_hold(&app);
+            }
             let want_border = is_screen_border() && !fullscreen;
             if want_border != border_shown {
                 border_shown = want_border;
                 sync_border_window(&app, want_border);
             }
+            let now_notch_overlay = notch_has_overlay();
+            if was_notch_overlay && !now_notch_overlay {
+                if let Some(notch) = panels.iter().find(|p| p.spec.label == "notch") {
+                    if !notch.visible && !notch.pinned.load(Ordering::Relaxed) {
+                        schedule_hide(
+                            app.clone(),
+                            "notch",
+                            current_vis_seq("notch"),
+                            HIDE_AFTER_CLOSE,
+                        );
+                    }
+                }
+            }
+            was_notch_overlay = now_notch_overlay;
+
             let Some(m) = metrics else { continue };
-            let Ok(cursor) = probe.cursor_position() else { continue };
+            let Some(cursor) = cursor_position_win32() else { continue };
 
 
             // Choose how often to poll on the next iteration.

@@ -80,7 +80,8 @@ const SLOW_LIST_MS: u128 = 40;
 /// Minimum interval between hook reinstalls by the watchdog.
 const REINSTALL_COOLDOWN_MS: u64 = 200;
 const PROACTIVE_REINSTALL_DEBOUNCE_MS: u64 = 40;
-const WATCHDOG_POLL: Duration = Duration::from_millis(4);
+const WATCHDOG_POLL_ACTIVE: Duration = Duration::from_millis(4);
+const WATCHDOG_POLL_IDLE: Duration = Duration::from_millis(28);
 const MISSED_TAB_GRACE_MS: u64 = 0;
 const RECENT_TAB_SEEN_MS: u64 = 80;
 /// Let the panel settle before thumbnail capture can compete for CPU time.
@@ -97,6 +98,8 @@ const CARD_W: f64 = 200.0;
 const CARD_H: f64 = 158.0;
 const GRID_GAP: f64 = 10.0;
 const GRID_PAD: f64 = 16.0;
+/// Horizontal room on each side of the panel for the 15px concave edge ears (matching notch/launcher's 40px total margin).
+const EAR_MARGIN: f64 = 20.0;
 /// The panel is at most this wide, and at most this fraction of the screen width.
 const MAX_PANEL_W: f64 = 1800.0;
 const MAX_W_FRACTION: f64 = 0.92;
@@ -478,7 +481,8 @@ struct GridLayout {
 /// window size for that screen so the native WebView2 window never resizes when `n` changes.
 fn grid_layout(n: usize, screen: (f64, f64)) -> (GridLayout, (f64, f64)) {
     let n = n.max(1);
-    let max_w = (screen.0 * MAX_W_FRACTION).min(MAX_PANEL_W);
+    let max_w = ((screen.0 * MAX_W_FRACTION).min(MAX_PANEL_W) - 2.0 * EAR_MARGIN)
+        .max(CARD_W + 2.0 * GRID_PAD);
     let cols_max = (((max_w - 2.0 * GRID_PAD + GRID_GAP) / (CARD_W + GRID_GAP)).floor() as usize).max(1);
     let rows_all = n.div_ceil(cols_max);
     // Balance the rows instead of filling the first one and leaving a single card below.
@@ -487,7 +491,7 @@ fn grid_layout(n: usize, screen: (f64, f64)) -> (GridLayout, (f64, f64)) {
         (((screen.1 * MAX_H_FRACTION - 2.0 * GRID_PAD + GRID_GAP) / (CARD_H + GRID_GAP)).floor() as usize)
             .max(1);
 
-    let win_w = cols_max as f64 * (CARD_W + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
+    let win_w = cols_max as f64 * (CARD_W + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD + 2.0 * EAR_MARGIN;
     let win_h = rows_max as f64 * (CARD_H + GRID_GAP) - GRID_GAP + 2.0 * GRID_PAD;
     let layout = GridLayout {
         cols,
@@ -854,7 +858,12 @@ fn watchdog() {
     let mut combo: Option<(u64, u64, bool)> = None;
     let mut was_alt_down = false;
     loop {
-        thread::sleep(WATCHDOG_POLL);
+        let poll = if was_alt_down || ACTIVE.load(Ordering::Relaxed) {
+            WATCHDOG_POLL_ACTIVE
+        } else {
+            WATCHDOG_POLL_IDLE
+        };
+        thread::sleep(poll);
         if DIAG.swap(0, Ordering::Relaxed) & 1 != 0 {
             eprintln!("[alt+tab] Alt+Tab handed to Windows: Ctrl or Win was held down");
         }
