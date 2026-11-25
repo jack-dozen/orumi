@@ -25,6 +25,7 @@ mod previews;
 mod capture;
 mod visualizer;
 mod wm_ipc;
+mod touchpad;
 
 use std::{
     collections::HashMap,
@@ -328,6 +329,8 @@ pub fn run() {
             // Install the swallowing Alt+Tab hook last so it is first in the low-level hook chain.
             altswitch::set_enabled(cfg.alt_tab && cfg.panels.switcher);
             altswitch::start(app.handle().clone());
+            touchpad::set_config(cfg.touchpad_gestures, &cfg.touchpad_swipe_up);
+            touchpad::start(app.handle().clone());
 
             // --- Global hotkeys (from config) ---
             config::init_hotkeys(app.handle(), &cfg.hotkeys)?;

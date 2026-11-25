@@ -278,6 +278,52 @@ export default function AppSettings() {
             </button>
           </div>
         </Row>
+        <Row label="Touchpad gestures">
+          <div className="segmented segmented--small">
+            <button
+              type="button"
+              className={(cfg.touchpad_gestures ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ touchpad_gestures: true })}
+            >
+              On
+            </button>
+            <button
+              type="button"
+              className={!(cfg.touchpad_gestures ?? true) ? "segmented__on" : ""}
+              onClick={() => save({ touchpad_gestures: false })}
+            >
+              Off
+            </button>
+          </div>
+          <button
+            type="button"
+            className="wmset__btn"
+            title="Set Windows 3- and 4-finger gestures to Nothing so only ORUMI handles them"
+            onClick={() => invoke("open_settings_page", { page: "touchpad" }).catch(() => {})}
+          >
+            Windows settings
+          </button>
+        </Row>
+        {(cfg.touchpad_gestures ?? true) && (
+          <Row label="3-finger swipe up">
+            <div className="segmented segmented--small">
+              <button
+                type="button"
+                className={(cfg.touchpad_swipe_up ?? "activities") !== "overview" ? "segmented__on" : ""}
+                onClick={() => save({ touchpad_swipe_up: "activities" })}
+              >
+                Activities
+              </button>
+              <button
+                type="button"
+                className={cfg.touchpad_swipe_up === "overview" ? "segmented__on" : ""}
+                onClick={() => save({ touchpad_swipe_up: "overview" })}
+              >
+                WM Overview
+              </button>
+            </div>
+          </Row>
+        )}
         <Row label="Windows taskbar">
           <div className="segmented segmented--small">
             <button

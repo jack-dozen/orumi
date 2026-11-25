@@ -40,7 +40,10 @@ export type Config = {
   wallpaper_dir: string;
   wallpaper_switcher: "builtin" | "external";
   wallpaper_command: string;
+  last_wallpaper?: string;
   alt_tab: boolean;
+  touchpad_gestures: boolean;
+  touchpad_swipe_up: "activities" | "overview";
   taskbar_autohide: boolean;
   taskbar_hidden: boolean;
   bar_app_style: "icons" | "dots";

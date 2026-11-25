@@ -126,6 +126,10 @@ pub struct Config {
     pub last_wallpaper: String,
     /// true = replace Alt+Tab with the custom switcher; false = use the Windows default.
     pub alt_tab: bool,
+    /// true = intercept Precision Touchpad 3/4-finger gestures via Raw Input HID.
+    pub touchpad_gestures: bool,
+    /// "activities" or "overview": what a 3-finger swipe up opens.
+    pub touchpad_swipe_up: String,
     /// true = auto-hide the Windows taskbar while edgeshell runs (restored on exit).
     pub taskbar_autohide: bool,
     /// true = hide the Windows taskbar completely (takes precedence over `taskbar_autohide`).
@@ -172,6 +176,8 @@ impl Default for Config {
             wallpaper_command: String::new(),
             last_wallpaper: String::new(),
             alt_tab: true,
+            touchpad_gestures: true,
+            touchpad_swipe_up: "activities".into(),
             taskbar_autohide: true,
             taskbar_hidden: false,
             bar_app_style: "icons".into(),
@@ -295,6 +301,9 @@ fn sanitize(mut c: Config) -> Config {
     }
     if c.win_key_action != "launcher" {
         c.win_key_action = "activities".into();
+    }
+    if c.touchpad_swipe_up != "overview" {
+        c.touchpad_swipe_up = "activities".into();
     }
     sanitize_slot(&mut c.colors.bg0, &d.colors.bg0);
     sanitize_slot(&mut c.colors.bg1, &d.colors.bg1);
@@ -577,6 +586,7 @@ pub fn set_config(
     *state.0.lock().map_err(|e| e.to_string())? = new.clone();
 
     crate::altswitch::set_enabled(new.alt_tab && new.panels.switcher);
+    crate::touchpad::set_config(new.touchpad_gestures, &new.touchpad_swipe_up);
     sync_win_key(&new);
     if new.alt_tab != old.alt_tab
         || new.panels.switcher != old.panels.switcher

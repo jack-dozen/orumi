@@ -863,6 +863,7 @@ pub fn open_settings_page(page: String) -> Result<(), String> {
         "colors" | "theme" => "ms-settings:colors",
         "display" => "ms-settings:display",
         "location" => "ms-settings:privacy-location",
+        "touchpad" => "ms-settings:devices-touchpad",
         "snip" => "ms-screenclip:",
         _ => return Err(format!("halaman tidak dikenal: {page}")),
     };

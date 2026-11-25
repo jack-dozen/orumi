@@ -158,7 +158,7 @@ fn async_down(vk: u32) -> bool {
 }
 
 enum Msg {
-    Start { reverse: bool, sticky: bool, elevated: bool },
+    Start { reverse: bool, sticky: bool, elevated: bool, gesture: bool },
     Next { reverse: bool },
     SetPreviews(bool),
     Step(i32),
@@ -390,7 +390,7 @@ unsafe fn handle(msg: usize, kb: &KBDLLHOOKSTRUCT) -> bool {
                 send(Msg::Next { reverse });
             } else {
                 ACTIVE.store(true, Ordering::Relaxed);
-                send(Msg::Start { reverse, sticky: false, elevated: false });
+                send(Msg::Start { reverse, sticky: false, elevated: false, gesture: false });
             }
             true
         }
@@ -457,6 +457,7 @@ struct Session {
     shown: bool,
     sticky: bool,
     elevated: bool,
+    gesture: bool,
     started: Instant,
     layout: GridLayout,
     /// Window size (design units) that fits the grid.
@@ -720,11 +721,11 @@ fn cancel(app: &AppHandle, session: &mut Option<Session>) {
 
 fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
     match msg {
-        Msg::Start { reverse, sticky, elevated } => {
+        Msg::Start { reverse, sticky, elevated, gesture } => {
             let started = Instant::now();
             // First, suppress the active app's menu bar while Alt is still held (elevated WM
             // already handles masking when elevated).
-            if !sticky && !elevated {
+            if !sticky && !elevated && !gesture {
                 unsafe { mask_alt_menu() };
             }
 
@@ -770,6 +771,7 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
                 shown: false,
                 sticky,
                 elevated,
+                gesture,
                 started,
                 layout,
                 window,
@@ -778,7 +780,7 @@ fn handle_msg(app: &AppHandle, session: &mut Option<Session>, msg: Msg) {
             };
             // Expensive work happens now, before the panel is revealed (see prepare).
             prepare(app, &mut s);
-            if sticky {
+            if sticky || gesture {
                 show(app, &mut s);
             }
             *session = Some(s);
@@ -837,7 +839,7 @@ fn worker(app: AppHandle, rx: Receiver<Msg>) {
 
         let Some(s) = session.as_mut() else { continue };
         let age = s.started.elapsed();
-        if !s.sticky && !s.elevated && age >= ALT_POLL_GRACE && !async_down(VK_MENU) {
+        if !s.sticky && !s.elevated && !s.gesture && age >= ALT_POLL_GRACE && !async_down(VK_MENU) {
             // Alt-up was missed (hook removed, desktop is safe, etc.): consider the session finished.
             finish(&app, &mut session);
         } else if s.elevated && !crate::wm_ipc::is_connected() {
@@ -944,7 +946,7 @@ fn watchdog() {
                 if ACTIVE.swap(true, Ordering::Relaxed) {
                     send(Msg::Next { reverse });
                 } else {
-                    send(Msg::Start { reverse, sticky: false, elevated: false });
+                    send(Msg::Start { reverse, sticky: false, elevated: false, gesture: false });
                 }
             }
         }
@@ -970,7 +972,7 @@ pub fn switcher_open() {
     STICKY.store(true, Ordering::Relaxed);
     ACTIVE.store(true, Ordering::Relaxed);
     ensure_hook("switcher_open");
-    send(Msg::Start { reverse: false, sticky: true, elevated: false });
+    send(Msg::Start { reverse: false, sticky: true, elevated: false, gesture: false });
 }
 
 /// Handle an Alt+Tab relay event forwarded by elevated `vscroll-wm` while an admin window
@@ -983,7 +985,7 @@ pub fn on_elevated_event(kind: &str, reverse: bool, delta: i32) {
             }
             ACTIVE.store(true, Ordering::Relaxed);
             STICKY.store(false, Ordering::Relaxed);
-            send(Msg::Start { reverse, sticky: false, elevated: true });
+            send(Msg::Start { reverse, sticky: false, elevated: true, gesture: false });
         }
         "alt_tab_next" => {
             if ACTIVE.load(Ordering::Relaxed) {
@@ -1011,6 +1013,38 @@ pub fn on_elevated_event(kind: &str, reverse: bool, delta: i32) {
             }
         }
         _ => {}
+    }
+}
+
+/// Begin a touchpad 3-finger Alt+Tab scrubbing session immediately.
+pub fn gesture_start(reverse: bool) {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    ACTIVE.store(true, Ordering::Relaxed);
+    STICKY.store(false, Ordering::Relaxed);
+    send(Msg::Start { reverse, sticky: false, elevated: false, gesture: true });
+}
+
+/// Step the selection by `delta` cards during a touchpad scrubbing session.
+pub fn gesture_step(delta: i32) {
+    if ACTIVE.load(Ordering::Relaxed) {
+        send(Msg::Step(delta));
+    }
+}
+
+/// Commit the active touchpad Alt+Tab scrubbing session when fingers lift.
+pub fn gesture_commit() {
+    if ACTIVE.swap(false, Ordering::Relaxed) {
+        send(Msg::Commit);
+    }
+}
+
+/// Cancel the active touchpad Alt+Tab scrubbing session without switching windows.
+#[allow(dead_code)]
+pub fn gesture_cancel() {
+    if ACTIVE.swap(false, Ordering::Relaxed) {
+        send(Msg::Cancel);
     }
 }
 

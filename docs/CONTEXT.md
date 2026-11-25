@@ -344,6 +344,7 @@ or the guard mode without a migration plan.
 - Apps running as administrator are unreachable by the Alt+Tab replacement for the same reason.
 - Windows virtual desktops are deliberately not used; real workspaces will come from vscroll-wm via IPC. Until then
   `StaticProvider` is a bridge and does not hide real windows.
+- Precision Touchpad Raw Input HID gestures (`touchpad.rs`, `0x0D / 0x05`) are read-only observers and cannot intercept or suppress Windows' built-in DWM gestures; users must set Windows' native **Three-finger** and **Four-finger** swipe gestures to **Nothing** in *Windows Settings → Bluetooth & devices → Touchpad* (also reachable via ORUMI Settings → `Windows settings`) so the native switcher/Task View does not open on top of ORUMI.
 
 ---
 
@@ -389,6 +390,7 @@ Priority is rough; "check" means suspected from reading code, not confirmed.
 - Security/stability todo (shared with vscroll-wm): re-install hooks after sleep and startup (chosen for the todo list),
   review of the Activities keyboard hook, poller thread, and key injection.
 - Past laptop symptom (Alt+Tab dead / taskbar unclickable when the shell was not running) disappeared by itself; cause never proven.
+- 4-finger horizontal workspace swipe in `touchpad.rs` currently has no effect on the owner's Precision Touchpad (3-finger Alt+Tab scrubbing and 3-finger swipe up/down for Activities work once native Windows touchpad swipes are set to Nothing).
 
 ---
 

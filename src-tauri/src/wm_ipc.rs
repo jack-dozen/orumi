@@ -659,6 +659,40 @@ pub fn switch_workspace(index: usize, focus: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Step to the adjacent `vscroll-wm` workspace (`delta`: -1 = previous, +1 = next) off-thread.
+pub fn step_workspace(delta: i32) {
+    if delta == 0 {
+        return;
+    }
+    let target = {
+        let Ok(g) = WM_SNAPSHOT.read() else { return };
+        if !g.connected || g.paused {
+            return;
+        }
+        let cur_has_windows = g
+            .workspaces
+            .get(g.active_ws)
+            .is_some_and(|w| !w.windows.is_empty());
+        let max_idx = if cur_has_windows {
+            g.workspaces.len().min(8)
+        } else {
+            g.workspaces.len().saturating_sub(1).min(8)
+        };
+        let next = if delta < 0 {
+            g.active_ws.saturating_sub(1)
+        } else {
+            (g.active_ws + 1).min(max_idx)
+        };
+        if next == g.active_ws {
+            return;
+        }
+        next
+    };
+    thread::spawn(move || {
+        let _ = switch_workspace(target, true);
+    });
+}
+
 pub fn move_window_to_workspace(hwnd: i64, index: usize) -> Result<(), String> {
     let _ = send_cmd(&format!("move {hwnd} {index}"))?;
     refresh_snapshot_sync();
