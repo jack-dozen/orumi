@@ -120,7 +120,7 @@ pub fn show(app: &AppHandle) {
             crate::edge::set_activatable(&window, true);
             place_panel(&window);
             let _ = window.show();
-            let _ = window.set_always_on_top(true);
+            crate::edge::ensure_topmost(&window);
             let _ = window.set_focus();
             let _ = a.emit_to(LABEL, "activities-open", payload);
             crate::altswitch::ensure_hook("activities opened");
@@ -239,8 +239,8 @@ pub fn activities_startup_begin(app: AppHandle) -> bool {
         place_fullscreen(&window);
         crate::edge::set_activatable(&window, false);
         let _ = window.set_ignore_cursor_events(true);
-        let _ = window.set_always_on_top(true);
         let _ = window.show();
+        crate::edge::ensure_topmost(&window);
         let _ = a.emit_to(LABEL, "activities-startup-go", border_active);
     });
     true

@@ -120,6 +120,7 @@ fn show_window_noactivate(window: &WebviewWindow) {
             if !IsWindowVisible(hwnd).as_bool() {
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             }
+            ensure_topmost_hwnd(hwnd);
         }
     }
 }
@@ -311,8 +312,8 @@ fn configure_and_show_border_on_main(app_handle: &AppHandle) {
         },
         UI::WindowsAndMessaging::{
             GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_STYLE, HWND_TOPMOST, SWP_FRAMECHANGED,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, WS_BORDER, WS_CAPTION,
-            WS_DLGFRAME, WS_POPUP, WS_THICKFRAME,
+            SWP_NOACTIVATE, SWP_NOOWNERZORDER, WS_BORDER, WS_CAPTION, WS_DLGFRAME, WS_POPUP,
+            WS_THICKFRAME,
         },
     };
 
@@ -388,20 +389,7 @@ fn configure_and_show_border_on_main(app_handle: &AppHandle) {
         "activities",
     ] {
         if let Some(w) = app_handle.get_webview_window(label) {
-            if let Ok(raw) = w.hwnd() {
-                let hwnd = HWND(raw.0 as isize as *mut c_void);
-                unsafe {
-                    let _ = SetWindowPos(
-                        hwnd,
-                        Some(HWND_TOPMOST),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE,
-                    );
-                }
-            }
+            ensure_topmost(&w);
         }
     }
     if is_border_startup_hold() {
@@ -1001,6 +989,7 @@ pub fn panel_activation(
     if let Some(window) = app.get_webview_window(&label) {
         set_activatable(&window, enable);
         if enable {
+            ensure_topmost(&window);
             let _ = window.set_focus();
         }
     }
@@ -1213,20 +1202,96 @@ pub fn place(window: &WebviewWindow, spec: &PanelSpec) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Whether the window already has the always-on-top style.
-fn is_topmost(window: &WebviewWindow) -> bool {
-    use windows::Win32::{
-        Foundation::HWND,
-        UI::WindowsAndMessaging::{GetWindowLongW, GWL_EXSTYLE, WS_EX_TOPMOST},
-    };
+/// Whether the HWND currently has `WS_EX_TOPMOST` set in its extended style.
+fn is_topmost_hwnd(hwnd: windows::Win32::Foundation::HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongW, GWL_EXSTYLE, WS_EX_TOPMOST};
+    let ex = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
+    (ex & WS_EX_TOPMOST.0) != 0
+}
 
+fn is_cloaked_hwnd(hwnd: windows::Win32::Foundation::HWND) -> bool {
+    use std::mem::size_of;
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    let mut cloaked: u32 = 0;
+    let _ = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut u32 as *mut c_void,
+            size_of::<u32>() as u32,
+        )
+    };
+    cloaked != 0
+}
+
+/// Returns true if any visible, non-cloaked, non-topmost window sits above `hwnd` in Z-order.
+/// Windows 10/11 can demote `WS_EX_TOPMOST` windows behind regular windows (e.g. after fullscreen
+/// transitions, Win+D, UAC, or shell overlays) while leaving the `WS_EX_TOPMOST` bit intact.
+fn has_non_topmost_above(hwnd: windows::Win32::Foundation::HWND) -> bool {
+    use windows::Win32::{
+        Foundation::RECT,
+        UI::WindowsAndMessaging::{
+            GetWindow, GetWindowLongW, GetWindowRect, IsWindowVisible, GWL_EXSTYLE, GW_HWNDPREV,
+            WS_EX_TOPMOST,
+        },
+    };
+    unsafe {
+        let mut prev = GetWindow(hwnd, GW_HWNDPREV).unwrap_or_default();
+        let mut steps = 0;
+        while !prev.0.is_null() && steps < 64 {
+            steps += 1;
+            if IsWindowVisible(prev).as_bool() {
+                let ex = GetWindowLongW(prev, GWL_EXSTYLE) as u32;
+                if (ex & WS_EX_TOPMOST.0) == 0 && !is_cloaked_hwnd(prev) {
+                    let mut r = RECT::default();
+                    if GetWindowRect(prev, &mut r).is_ok() && r.right > r.left && r.bottom > r.top {
+                        return true;
+                    }
+                }
+            }
+            prev = GetWindow(prev, GW_HWNDPREV).unwrap_or_default();
+        }
+    }
+    false
+}
+
+/// Returns true if a visible window has lost `WS_EX_TOPMOST` or been demoted behind a regular window.
+fn needs_topmost_recovery(window: &WebviewWindow) -> bool {
+    use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::IsWindowVisible};
     window
         .hwnd()
-        .map(|h| unsafe {
-            let ex = GetWindowLongW(HWND(h.0 as isize as *mut c_void), GWL_EXSTYLE) as u32;
-            (ex & WS_EX_TOPMOST.0) != 0
+        .map(|h| {
+            let hwnd = HWND(h.0 as isize as *mut c_void);
+            let visible = unsafe { IsWindowVisible(hwnd).as_bool() };
+            visible && (!is_topmost_hwnd(hwnd) || has_non_topmost_above(hwnd))
         })
         .unwrap_or(false)
+}
+
+/// Unconditionally raise `hwnd` to the top of the topmost Z-order band without activating it.
+/// If Windows has desynced its topmost band (lost style bit or a regular window is above it),
+/// bounce through `HWND_NOTOPMOST` first so Windows re-inserts it cleanly into the topmost band.
+fn ensure_topmost_hwnd(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOOWNERZORDER, SWP_NOSIZE,
+    };
+    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+    unsafe {
+        if !is_topmost_hwnd(hwnd) || has_non_topmost_above(hwnd) {
+            let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
+        }
+        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+    }
+}
+
+/// Raise a Tauri window to the top of the topmost Z-order band (recovering from Windows demotion).
+pub fn ensure_topmost(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    if let Ok(h) = window.hwnd() {
+        let hwnd = HWND(h.0 as isize as *mut c_void);
+        ensure_topmost_hwnd(hwnd);
+    }
 }
 
 /// activatable = false: clicking the window does not give it focus (bar and notch),
@@ -1286,9 +1351,6 @@ fn set_visible(
             // The display can change (power, resolution, dock), so reset each time it appears.
             let _ = place(&window, &spec);
             show_window_noactivate(&window);
-            if !is_topmost(&window) {
-                let _ = window.set_always_on_top(true);
-            }
         }
         let launcher_focus = if spec.label == "launcher" {
             let take = show && !LAUNCHER_HOVER.load(Ordering::Relaxed);
@@ -1552,6 +1614,7 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
         let mut metrics = monitor_metrics(&probe);
         let mut last_refresh = Instant::now();
         let mut last_fs_check = Instant::now() - Duration::from_secs(1);
+        let mut last_z_check = Instant::now();
         let mut fullscreen = false;
         let mut border_shown = false;
         let mut was_notch_overlay = notch_has_overlay();
@@ -1571,8 +1634,11 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 metrics = monitor_metrics(&probe).or(metrics);
                 last_refresh = Instant::now();
             }
+            let mut exited_fullscreen = false;
             if last_fs_check.elapsed() >= Duration::from_millis(200) {
+                let was_fs = fullscreen;
                 fullscreen = crate::winlist::is_foreground_fullscreen();
+                exited_fullscreen = was_fs && !fullscreen;
                 last_fs_check = Instant::now();
             }
             if is_border_startup_hold() && started_at.elapsed() >= Duration::from_secs(4) {
@@ -1584,6 +1650,44 @@ pub fn start_all(app: AppHandle, items: Vec<(WebviewWindow, PanelSpec, Arc<Atomi
                 sync_border_window(&app, want_border);
             }
             let now_notch_overlay = notch_has_overlay();
+            if !fullscreen && (exited_fullscreen || last_z_check.elapsed() >= Duration::from_millis(500)) {
+                last_z_check = Instant::now();
+                let border_demoted = border_shown
+                    && app
+                        .get_webview_window("border")
+                        .is_some_and(|b| needs_topmost_recovery(&b));
+                let mut demoted_panels: Vec<&'static str> = Vec::new();
+                for p in &panels {
+                    let active = p.visible || (p.spec.label == "notch" && now_notch_overlay);
+                    if active && (border_demoted || needs_topmost_recovery(&p.window)) {
+                        demoted_panels.push(p.spec.label);
+                    }
+                }
+                let activities_demoted = crate::activities::is_open()
+                    && app
+                        .get_webview_window("activities")
+                        .is_some_and(|w| border_demoted || needs_topmost_recovery(&w));
+                if border_demoted || !demoted_panels.is_empty() || activities_demoted {
+                    let app_main = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if border_demoted {
+                            if let Some(b) = app_main.get_webview_window("border") {
+                                ensure_topmost(&b);
+                            }
+                        }
+                        for label in demoted_panels {
+                            if let Some(w) = app_main.get_webview_window(label) {
+                                ensure_topmost(&w);
+                            }
+                        }
+                        if activities_demoted {
+                            if let Some(w) = app_main.get_webview_window("activities") {
+                                ensure_topmost(&w);
+                            }
+                        }
+                    });
+                }
+            }
             if was_notch_overlay && !now_notch_overlay {
                 if let Some(notch) = panels.iter().find(|p| p.spec.label == "notch") {
                     if !notch.visible && !notch.pinned.load(Ordering::Relaxed) {

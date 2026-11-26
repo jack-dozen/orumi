@@ -123,6 +123,7 @@ pub fn overlay_toggle(mode: String, app: AppHandle, panels: State<'_, Panels>) {
     }
     show(&app, &mode, true);
     if let Some(w) = app.get_webview_window("overlay") {
+        crate::edge::ensure_topmost(&w);
         let _ = w.set_focus();
     }
 }
