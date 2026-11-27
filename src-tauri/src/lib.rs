@@ -238,6 +238,7 @@ pub fn run() {
             theme::wallpaper_pixels,
             theme::set_theme,
             theme::get_theme,
+            theme::windows_colors,
             theme::mica_backdrop,
             theme::get_mica,
             wallpaper::list_wallpapers,

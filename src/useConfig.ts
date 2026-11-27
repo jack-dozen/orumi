@@ -22,8 +22,8 @@ export type PanelsConfig = {
   activities: boolean;
 };
 
-/** mode "auto" = from the wallpaper; "custom" = uses `value`. */
-export type ColorSlot = { mode: "auto" | "custom"; value: string };
+/** mode "auto" = from the wallpaper; "windows" = follow Windows theme/accent; "custom" = uses `value`. */
+export type ColorSlot = { mode: "auto" | "windows" | "custom"; value: string };
 
 export type Colors = {
   bg0: ColorSlot; // panel background

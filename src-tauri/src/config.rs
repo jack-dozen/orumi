@@ -29,7 +29,7 @@ impl Default for Hotkeys {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(default)]
 pub struct ColorSlot {
-    /// "auto" (from the wallpaper) or "custom".
+    /// "auto" (from the wallpaper), "windows" (follow Windows theme/accent), or "custom".
     pub mode: String,
     /// Color used when mode = "custom", in #rrggbb format.
     pub value: String,
@@ -224,7 +224,7 @@ fn is_hex_color(s: &str) -> bool {
 }
 
 fn sanitize_slot(s: &mut ColorSlot, default: &ColorSlot) {
-    if s.mode != "custom" {
+    if !matches!(s.mode.as_str(), "auto" | "windows" | "custom") {
         s.mode = "auto".into();
     }
     if is_hex_color(&s.value) {

@@ -20,6 +20,7 @@ const FALLBACK_SEED = argbFromRgb(128, 128, 128);
 
 type Tokens = Record<string, string>;
 type RGB = [number, number, number];
+type WindowsColors = { dark: boolean; accent: string };
 
 // ---------- Color utilities ----------
 
@@ -62,16 +63,40 @@ const pickReadable = (on: string, a: string, b: string) => (contrast(on, a) >= c
 
 // ---------- Token ----------
 
-/** Four colors (automatic from the wallpaper or custom) -> all CSS tokens. */
-function buildTokens(cfg: Pick<Config, "colors" | "bg_tint">, seed: number): Tokens {
+/** Adjust a Windows accent hex color gently for legibility on dark or light surfaces (like WinUI 3). */
+function adjustWindowsAccent(hex: string, dark: boolean): string {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return dark ? "#60cdff" : "#005fb8";
+  const [r, g, b] = toRgb(hex);
+  const hct = Hct.fromInt(argbFromRgb(r, g, b));
+  if (dark && hct.tone < 64) {
+    return hexFromArgb(Hct.from(hct.hue, Math.max(hct.chroma, 32), 68).toInt());
+  }
+  if (!dark && hct.tone > 52) {
+    return hexFromArgb(Hct.from(hct.hue, Math.max(hct.chroma, 32), 46).toInt());
+  }
+  return hex.toLowerCase();
+}
+
+/** Four colors (automatic from the wallpaper, follow Windows, or custom) -> all CSS tokens. */
+function buildTokens(
+  cfg: Pick<Config, "colors" | "bg_tint">,
+  seed: number,
+  win: WindowsColors,
+): Tokens {
   const r = redFromArgb(seed);
   const g = greenFromArgb(seed);
   const b = blueFromArgb(seed);
   const spread = Math.max(r, g, b) - Math.min(r, g, b);
   const seedHct = Hct.fromInt(seed);
 
-  const pick = (slot: ColorSlot, auto: () => string) =>
-    slot.mode === "custom" ? slot.value : auto();
+  // Windows 11 default taskbar / Fluent shell palette (Dark & Light).
+  const winBg0 = win.dark ? "#202020" : "#f3f3f3";
+  const winBg1 = win.dark ? "#2c2c2c" : "#ffffff";
+  const winFg = win.dark ? "#f3f3f3" : "#1a1a1a";
+  const winAccent = adjustWindowsAccent(win.accent, win.dark);
+
+  const pick = (slot: ColorSlot, auto: () => string, winVal: string) =>
+    slot.mode === "custom" ? slot.value : slot.mode === "windows" ? winVal : auto();
 
   let bg0: string;
   let bg1: string;
@@ -80,10 +105,10 @@ function buildTokens(cfg: Pick<Config, "colors" | "bg_tint">, seed: number): Tok
 
   if (spread < 6) {
     // Pure neutral grays so CAM16's 209.5 deg neutral hue never tints grayscale wallpapers blue.
-    bg0 = pick(cfg.colors.bg0, () => "#111111");
-    bg1 = pick(cfg.colors.bg1, () => "#282828");
-    fg = pick(cfg.colors.fg, () => "#e3e3e3");
-    accent = pick(cfg.colors.accent, () => "#d4d4d4");
+    bg0 = pick(cfg.colors.bg0, () => "#111111", winBg0);
+    bg1 = pick(cfg.colors.bg1, () => "#282828", winBg1);
+    fg = pick(cfg.colors.fg, () => "#e3e3e3", winFg);
+    accent = pick(cfg.colors.accent, () => "#d4d4d4", winAccent);
   } else {
     const hue = seedHct.hue;
     const baseChroma = Math.max(seedHct.chroma, spread * 0.6);
@@ -96,30 +121,32 @@ function buildTokens(cfg: Pick<Config, "colors" | "bg_tint">, seed: number): Tok
     const soft = TonalPalette.fromHueAndChroma(hue, Math.min(6, baseChroma * 0.5));
     const accentPalette = TonalPalette.fromHueAndChroma(hue, accentChroma);
 
-    bg0 = pick(cfg.colors.bg0, () => hexFromArgb(tinted.tone(6)));
-    bg1 = pick(cfg.colors.bg1, () => hexFromArgb(tinted.tone(17)));
-    fg = pick(cfg.colors.fg, () => hexFromArgb(soft.tone(92)));
-    accent = pick(cfg.colors.accent, () => hexFromArgb(accentPalette.tone(80)));
+    bg0 = pick(cfg.colors.bg0, () => hexFromArgb(tinted.tone(6)), winBg0);
+    bg1 = pick(cfg.colors.bg1, () => hexFromArgb(tinted.tone(17)), winBg1);
+    fg = pick(cfg.colors.fg, () => hexFromArgb(soft.tone(92)), winFg);
+    accent = pick(cfg.colors.accent, () => hexFromArgb(accentPalette.tone(80)), winAccent);
   }
 
-  // Light backgrounds need a darker error color for legibility.
+  // Light backgrounds need a darker error color and gentler accent containers for legibility.
   const light = luminance(bg0) > 0.5;
+  const primaryContainer = mix(bg1, accent, light ? 0.24 : 0.4);
+  const secondaryContainer = mix(bg1, accent, light ? 0.14 : 0.2);
 
   return {
     "--surface": bg0,
     "--surface-container": mix(bg0, bg1, 0.5),
     "--surface-container-high": bg1,
-    "--surface-container-highest": mix(bg1, fg, 0.1),
+    "--surface-container-highest": mix(bg1, fg, light ? 0.08 : 0.1),
     "--on-surface": fg,
     "--on-surface-variant": mix(fg, bg0, 0.25),
     "--outline": mix(bg0, fg, 0.5),
     "--outline-variant": mix(bg1, fg, 0.2),
     "--primary": accent,
-    "--on-primary": pickReadable(accent, bg0, fg),
-    "--primary-container": mix(bg1, accent, 0.4),
-    "--on-primary-container": fg,
-    "--secondary-container": mix(bg1, accent, 0.2),
-    "--on-secondary-container": fg,
+    "--on-primary": pickReadable(accent, "#111111", "#ffffff"),
+    "--primary-container": primaryContainer,
+    "--on-primary-container": pickReadable(primaryContainer, bg0, fg),
+    "--secondary-container": secondaryContainer,
+    "--on-secondary-container": pickReadable(secondaryContainer, bg0, fg),
     "--error": light ? "#ba1a1a" : "#ffb4ab",
     "--error-container": light ? "#ffdad6" : "#93000a",
     "--on-error-container": light ? "#410002" : "#ffdad6",
@@ -450,9 +477,14 @@ export function useTheme(isSource: boolean) {
         const cfg = await invoke<Config>("get_config");
         cfgSig = JSON.stringify([cfg.colors, cfg.bg_tint]);
         const needsWallpaper = Object.values(cfg.colors).some((s) => s.mode === "auto");
+        const needsWindows = Object.values(cfg.colors).some((s) => s.mode === "windows");
         const needsMica = cfg.mica !== false;
-        const stamp =
-          needsWallpaper || needsMica ? await invoke<string | null>("wallpaper_stamp") : null;
+        const [stamp, winColors] = await Promise.all([
+          needsWallpaper || needsMica ? invoke<string | null>("wallpaper_stamp") : Promise.resolve(null),
+          needsWindows
+            ? invoke<WindowsColors>("windows_colors").catch(() => ({ dark: true, accent: "#0078d4" }))
+            : Promise.resolve({ dark: true, accent: "#0078d4" }),
+        ]);
 
         if (!needsMica) {
           lastMicaStamp = undefined;
@@ -468,7 +500,8 @@ export function useTheme(isSource: boolean) {
             .catch(() => {});
         }
 
-        const sig = `${cfgSig}|${stamp}`;
+        const winSig = needsWindows ? `${winColors.dark ? 1 : 0}:${winColors.accent}` : "";
+        const sig = `${cfgSig}|${stamp}|${winSig}`;
         if (!force && sig === lastSig) return;
 
         let seed = FALLBACK_SEED;
@@ -487,7 +520,7 @@ export function useTheme(isSource: boolean) {
           }
         }
 
-        const tokens = buildTokens(cfg, seed);
+        const tokens = buildTokens(cfg, seed, winColors);
         if (cancelled) return;
         if (!readFailed) {
           lastSig = sig;
@@ -659,6 +692,14 @@ export function useTheme(isSource: boolean) {
           }),
         ),
       );
+      const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+      if (mq) {
+        const onSchemeChange = () => {
+          if (!cancelled) void check(true);
+        };
+        mq.addEventListener("change", onSchemeChange);
+        unlistenFns.push(() => mq.removeEventListener("change", onSchemeChange));
+      }
     }
 
     void Promise.all(listenerPromises).then(() => {

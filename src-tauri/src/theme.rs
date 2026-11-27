@@ -11,10 +11,18 @@ use std::{
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{imageops::FilterType, ImageFormat};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, SystemParametersInfoW, SM_CXSCREEN, SM_CYSCREEN, SPI_GETDESKWALLPAPER,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+use windows::{
+    core::w,
+    Win32::{
+        Foundation::ERROR_SUCCESS,
+        System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD},
+        UI::WindowsAndMessaging::{
+            GetSystemMetrics, SystemParametersInfoW, SM_CXSCREEN, SM_CYSCREEN,
+            SPI_GETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+        },
+    },
 };
 
 /// Most recent theme (JSON tokens), so newly loaded windows can use it immediately.
@@ -77,6 +85,72 @@ pub fn set_theme(json: String, app: AppHandle) {
 #[tauri::command]
 pub fn get_theme() -> Option<String> {
     THEME.lock().ok().and_then(|t| t.clone())
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct WindowsColors {
+    /// true = Windows taskbar/system is in dark mode; false = light mode.
+    pub dark: bool,
+    /// Active Windows accent color in `#rrggbb` format.
+    pub accent: String,
+}
+
+fn read_hkcu_dword(subkey: windows::core::PCWSTR, value: windows::core::PCWSTR) -> Option<u32> {
+    let mut data: u32 = 0;
+    let mut size: u32 = std::mem::size_of::<u32>() as u32;
+    let err = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey,
+            value,
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut data as *mut u32 as *mut c_void),
+            Some(&mut size),
+        )
+    };
+    (err == ERROR_SUCCESS).then_some(data)
+}
+
+fn read_windows_accent_hex() -> String {
+    // DWM\AccentColor and Explorer\Accent\AccentColorMenu store 0xAABBGGRR (ABGR).
+    if let Some(abgr) = read_hkcu_dword(w!("Software\\Microsoft\\Windows\\DWM"), w!("AccentColor"))
+        .or_else(|| {
+            read_hkcu_dword(
+                w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent"),
+                w!("AccentColorMenu"),
+            )
+        })
+    {
+        let r = abgr & 0xff;
+        let g = (abgr >> 8) & 0xff;
+        let b = (abgr >> 16) & 0xff;
+        return format!("#{r:02x}{g:02x}{b:02x}");
+    }
+    // DWM\ColorizationColor stores 0xAARRGGBB (ARGB).
+    if let Some(argb) = read_hkcu_dword(
+        w!("Software\\Microsoft\\Windows\\DWM"),
+        w!("ColorizationColor"),
+    ) {
+        let r = (argb >> 16) & 0xff;
+        let g = (argb >> 8) & 0xff;
+        let b = argb & 0xff;
+        return format!("#{r:02x}{g:02x}{b:02x}");
+    }
+    "#0078d4".to_string()
+}
+
+/// Read Windows system dark/light mode (taskbar/shell) and active accent color from the registry.
+#[tauri::command]
+pub fn windows_colors() -> WindowsColors {
+    let personalize = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    let light = read_hkcu_dword(personalize, w!("SystemUsesLightTheme"))
+        .or_else(|| read_hkcu_dword(personalize, w!("AppsUseLightTheme")))
+        .unwrap_or(0);
+    WindowsColors {
+        dark: light == 0,
+        accent: read_windows_accent_hex(),
+    }
 }
 
 /// Extract Material You surface/container/primary hex tokens (`#rrggbb`) from the latest theme map.

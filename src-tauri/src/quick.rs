@@ -423,6 +423,7 @@ pub fn sync_windows_theme_from_wallpaper(app: &AppHandle) {
     if dark_mode_enabled() != want_dark {
         set_dark_mode(want_dark);
         let _ = app.emit("quick-changed", read_state());
+        let _ = app.emit("theme-refresh", ());
     }
 }
 
@@ -542,6 +543,7 @@ pub async fn quick_set(which: String, on: bool, app: AppHandle) -> Result<QuickS
             "dark_mode" => {
                 if !auto_theme {
                     set_dark_mode(on);
+                    let _ = dnd_app.emit("theme-refresh", ());
                 }
             }
             "power_mode" => {

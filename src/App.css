@@ -2219,9 +2219,10 @@ button {
 
 .colorcard__ctl {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .swatch {
@@ -2255,6 +2256,13 @@ button {
 
 .colorfoot--off {
   opacity: 0.5;
+}
+
+.colorfoot__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .linkbtn {

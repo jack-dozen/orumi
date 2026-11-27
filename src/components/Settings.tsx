@@ -630,14 +630,14 @@ export function ColorSettings() {
     );
   };
 
-  const resetAll = () =>
+  const applyAllMode = (mode: ColorSlot["mode"]) =>
     saveConfig({
       ...cfg,
       colors: {
-        bg0: { ...cfg.colors.bg0, mode: "auto" },
-        bg1: { ...cfg.colors.bg1, mode: "auto" },
-        fg: { ...cfg.colors.fg, mode: "auto" },
-        accent: { ...cfg.colors.accent, mode: "auto" },
+        bg0: { ...cfg.colors.bg0, mode },
+        bg1: { ...cfg.colors.bg1, mode },
+        fg: { ...cfg.colors.fg, mode },
+        accent: { ...cfg.colors.accent, mode },
       },
     }).catch(() => {});
 
@@ -664,6 +664,12 @@ export function ColorSettings() {
                     onClick={() => patchSlot(s.key, { mode: "auto" })}
                   >
                     Wallpaper
+                  </button>
+                  <button
+                    className={slot.mode === "windows" ? "segmented__on" : ""}
+                    onClick={() => patchSlot(s.key, { mode: "windows" })}
+                  >
+                    Windows
                   </button>
                   <button
                     className={slot.mode === "custom" ? "segmented__on" : ""}
@@ -715,9 +721,14 @@ export function ColorSettings() {
           onPointerUp={() => saveConfig({ ...cfg, bg_tint: tint }).catch(() => {})}
           onKeyUp={() => saveConfig({ ...cfg, bg_tint: tint }).catch(() => {})}
         />
-        <button className="linkbtn" onClick={resetAll}>
-          Reset all to wallpaper
-        </button>
+        <div className="colorfoot__actions">
+          <button className="linkbtn" onClick={() => applyAllMode("windows")}>
+            Follow Windows
+          </button>
+          <button className="linkbtn" onClick={() => applyAllMode("auto")}>
+            Reset to wallpaper
+          </button>
+        </div>
       </div>
     </div>
   );
