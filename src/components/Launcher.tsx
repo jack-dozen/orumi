@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useConfig } from "../useConfig";
 import { useEdgeVisible } from "../useEdgeVisible";
+import { usePanelEdge } from "../theme";
 import Icon from "./Icon";
 import WallpaperPicker from "./WallpaperPicker";
 import LauncherSettings from "./LauncherSettings";
@@ -71,6 +72,8 @@ const close = () => invoke("set_panel", { label: "launcher", open: false });
 export default function Launcher() {
   const visible = useEdgeVisible("launcher");
   const cfg = useConfig();
+  const edge = usePanelEdge();
+  const isTop = edge === "top";
   const [apps, setApps] = useState<AppEntry[]>([]);
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"apps" | "actions">("apps");
@@ -394,7 +397,8 @@ export default function Launcher() {
 
   const showList = !compact || mode === "actions" || query.trim().length > 0;
   // Browsing all apps shows A-Z top-to-bottom; searching & actions keep best match closest to the search box.
-  const reversed = mode === "actions" || query.trim().length > 0;
+  // When anchored at the top edge, the search bar sits at the top, so normal order already keeps the best match closest.
+  const reversed = !isTop && (mode === "actions" || query.trim().length > 0);
   const effectiveLimit = Math.max(renderLimit, index + 12);
   const shownResults = useMemo(
     () => (listMounted ? results.slice(0, effectiveLimit) : []),
@@ -477,6 +481,103 @@ export default function Launcher() {
     invoke("launcher_set_size", { width, height }).catch(() => {});
   }, [width, height]);
 
+  const resultList = showList && listMounted && (
+    <div
+      ref={listRef}
+      className={`launcher__list ${reversed ? "launcher__list--reverse" : ""}`}
+      onScroll={onListScroll}
+    >
+      {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
+      {shownResults.map((item, i) => (
+        <div
+          key={item.key}
+          className={`litem ${i === index ? "litem--active" : ""}`}
+          onMouseMove={() => {
+            if (i !== index) setIndex(i);
+          }}
+          onClick={() => activate(item)}
+        >
+          {item.icon ? (
+            <AppIcon target={item.icon} fallback={item.glyph} size={36} lazy />
+          ) : (
+            <div
+              className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}
+            >
+              {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
+            </div>
+          )}
+          <div className="litem__text">
+            <span className="litem__name">{item.name}</span>
+            {(item.hint || armed === item.key) && (
+              <span
+                className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}
+              >
+                {armed === item.key ? "Press Enter again to confirm" : item.hint}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const searchBar = (
+    <div className="lsearchbar" onPointerDown={activateLauncher}>
+      <button
+        type="button"
+        className={`lsearch__mode ${mode === "actions" ? "lsearch__mode--actions" : ""}`}
+        title={mode === "actions" ? "Back to application list" : "System actions (>)"}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          setMode((m) => (m === "apps" ? "actions" : "apps"));
+          setIndex(0);
+          inputRef.current?.focus();
+        }}
+      >
+        {mode === "actions" ? (
+          <Icon name="chevron_right" size={22} />
+        ) : (
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="20" y1="20" x2="16.2" y2="16.2" />
+          </svg>
+        )}
+      </button>
+      <input
+        ref={inputRef}
+        className="lsearch"
+        placeholder={
+          mode === "actions"
+            ? "Search system actions…"
+            : cfg?.search_placeholder || "Search apps…  (> system actions)"
+        }
+        value={query}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v.startsWith(">")) {
+            setMode((m) => (m === "apps" ? "actions" : "apps"));
+            setQuery(v.slice(1));
+          } else {
+            setQuery(v);
+          }
+          setIndex(0);
+        }}
+        onKeyDown={onKeyDown}
+        spellCheck={false}
+      />
+    </div>
+  );
+
   return (
     <div
       className="lroot"
@@ -507,102 +608,15 @@ export default function Launcher() {
               onDone={close}
               onWidth={setPickerWidth}
             />
+          ) : isTop ? (
+            <>
+              {searchBar}
+              {resultList}
+            </>
           ) : (
             <>
-              {showList && listMounted && (
-                <div
-                  ref={listRef}
-                  className={`launcher__list ${reversed ? "launcher__list--reverse" : ""}`}
-                  onScroll={onListScroll}
-                >
-                  {results.length === 0 && <div className="launcher__empty">{emptyText}</div>}
-                  {shownResults.map((item, i) => (
-                    <div
-                      key={item.key}
-                      className={`litem ${i === index ? "litem--active" : ""}`}
-                      onMouseMove={() => {
-                        if (i !== index) setIndex(i);
-                      }}
-                      onClick={() => activate(item)}
-                    >
-                      {item.icon ? (
-                        <AppIcon target={item.icon} fallback={item.glyph} size={36} lazy />
-                      ) : (
-                        <div
-                          className={`litem__tile ${item.dangerous ? "litem__tile--danger" : ""}`}
-                        >
-                          {item.symbol ? <Icon name={item.glyph} size={22} /> : item.glyph}
-                        </div>
-                      )}
-                      <div className="litem__text">
-                        <span className="litem__name">{item.name}</span>
-                        {(item.hint || armed === item.key) && (
-                          <span
-                            className={`litem__hint ${armed === item.key ? "litem__hint--armed" : ""}`}
-                          >
-                            {armed === item.key ? "Press Enter again to confirm" : item.hint}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="lsearchbar" onPointerDown={activateLauncher}>
-                <button
-                  type="button"
-                  className={`lsearch__mode ${mode === "actions" ? "lsearch__mode--actions" : ""}`}
-                  title={mode === "actions" ? "Back to application list" : "System actions (>)"}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    setMode((m) => (m === "apps" ? "actions" : "apps"));
-                    setIndex(0);
-                    inputRef.current?.focus();
-                  }}
-                >
-                  {mode === "actions" ? (
-                    <Icon name="chevron_right" size={22} />
-                  ) : (
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <circle cx="11" cy="11" r="7" />
-                      <line x1="20" y1="20" x2="16.2" y2="16.2" />
-                    </svg>
-                  )}
-                </button>
-                <input
-                  ref={inputRef}
-                  className="lsearch"
-                  placeholder={
-                    mode === "actions"
-                      ? "Search system actions…"
-                      : cfg?.search_placeholder || "Search apps…  (> system actions)"
-                  }
-                  value={query}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v.startsWith(">")) {
-                      setMode((m) => (m === "apps" ? "actions" : "apps"));
-                      setQuery(v.slice(1));
-                    } else {
-                      setQuery(v);
-                    }
-                    setIndex(0);
-                  }}
-                  onKeyDown={onKeyDown}
-                  spellCheck={false}
-                />
-              </div>
+              {resultList}
+              {searchBar}
             </>
           )}
             </div>
